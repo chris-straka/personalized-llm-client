@@ -68,8 +68,8 @@ with the approval to start.
 - [ ] Cloudflare-domain hosting, mobile UI, model-version bump, code Run button
 
 ## Stages
-- [ ] S0 clean slate (+A3): git init + insurance commit, wipe, desktop-only
-  Tauri+Svelte+TS scaffold, Vitest, lint/format
+- [x] S0 clean slate (+A3): git init + insurance commit, wipe, desktop-only
+  Tauri+Svelte+TS scaffold, Vitest, lint/format — all checks green
 - [ ] S1 providers (DeepSeek + Muse Spark checkpoint), keys, settings page, shortcuts
 - [ ] S2 core chat + prompt box + fenced-code input (A2)
 - [ ] S3 messages/code rendering, paste collapse, thoughts toggle
