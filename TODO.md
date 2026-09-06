@@ -29,10 +29,10 @@ with the approval to start.
 - [ ] Whole messages fold → S3
 - [ ] Paste >100 chars → `[Pasted content X chars]`; image → `[Pasted an image]` → S3
 - [ ] Image compression before send → S3
-- [ ] Chinese detect → faint corner hint → shortcut toggles pinyin ruby (OFF default, A1) → S5
-- [ ] Japanese furigana, same behavior (OFF default, A1) → S5
-- [ ] Arabic tashkeel via keys, same behavior (OFF default, A1) → S5
-- [ ] Hover + right-click reads a single word even when aids are off → S5
+- [x] Chinese detect → faint corner hint → shortcut toggles pinyin ruby (OFF default, A1) → S5
+- [x] Japanese furigana, same behavior (OFF default, A1) → S5
+- [x] Arabic tashkeel via keys, same behavior (OFF default, A1) → S5
+- [x] Hover + right-click reads a single word even when aids are off → S5
 - [ ] Vim trapped in prompt box; hop out to J/K message scroll → S2
 - [ ] Fenced-code input box: Collapse + Copy (Run later, A2) → S2
 - [ ] Attachments (images + files) → S3 (with paste-collapse + downscale)
@@ -97,6 +97,6 @@ with the approval to start.
   sends, Cmd+T lookup feeding annotation, translate-target setting. Badge
   marks needed a synchronous read in the render effect (async-only reads
   never subscribe).
-- [ ] S5 reading aids (default OFF, A1)
+- [x] S5 reading aids (default OFF, A1)
 - [ ] S6 voice mode (+A4 bridge policy)
 - [ ] S7 desktop polish, updater, icon, cold-start checks
