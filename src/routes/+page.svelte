@@ -13,7 +13,7 @@
 		unpinMessage,
 		branchFrom,
 		dismissFailedAssistant,
-		takeBackLastReply,
+		truncateToMessage,
 		resendLast,
 		tokenTotal,
 		waypoints,
@@ -95,8 +95,8 @@
 		void resend();
 	}
 
-	function rerunLast() {
-		takeBackLastReply(chatState);
+	function rerunFrom(index: number) {
+		truncateToMessage(chatState, index);
 		void resend();
 	}
 
@@ -270,8 +270,12 @@
 						>
 							Delete
 						</button>
-						{#if msg.role === "assistant" && !msg.error && i === chat.messages.length - 1}
-							<button type="button" title="Regenerate this reply" onclick={rerunLast}>
+						{#if msg.role === "user"}
+							<button
+								type="button"
+								title="Rerun from here — deletes everything after this message"
+								onclick={() => rerunFrom(i)}
+							>
 								Rerun
 							</button>
 						{/if}

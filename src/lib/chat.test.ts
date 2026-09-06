@@ -10,6 +10,7 @@ import {
 	pinMessage,
 	unpinMessage,
 	branchFrom,
+	truncateToMessage,
 	dismissFailedAssistant,
 	takeBackLastReply,
 	resendLast,
@@ -111,6 +112,25 @@ describe("chat", () => {
 
 		takeBackLastReply(state, store);
 		await resendLast(state, flaky, "sys", store);
+		expect(activeChat(state).messages).toHaveLength(2);
+	});
+
+	it("reruns from any user message, deleting everything after it", async () => {
+		const { state, store } = stateWith(freshStore());
+		const provider = scriptedProvider(["r"]);
+		await sendMessage(state, provider, "sys", "one", {}, store);
+		await sendMessage(state, provider, "sys", "two", {}, store);
+		expect(activeChat(state).messages).toHaveLength(4);
+
+		truncateToMessage(state, 0, store);
+		expect(activeChat(state).messages.map((m) => m.content)).toEqual(["one"]);
+		await resendLast(state, provider, "sys", store);
+		expect(activeChat(state).messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+
+		// Non-user targets and out-of-range indices are no-ops.
+		truncateToMessage(state, 1, store);
+		expect(activeChat(state).messages).toHaveLength(2);
+		truncateToMessage(state, 99, store);
 		expect(activeChat(state).messages).toHaveLength(2);
 	});
 

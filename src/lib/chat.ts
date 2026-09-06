@@ -153,6 +153,18 @@ export function takeBackLastReply(state: ChatState, store?: KeyValueStore): void
 	}
 }
 
+/**
+ * Rerun from any user message: delete everything after it (unlike branch,
+ * which keeps the original), so the prompt can go again cleanly.
+ */
+export function truncateToMessage(state: ChatState, index: number, store?: KeyValueStore): void {
+	const chat = activeChat(state);
+	if (index < 0 || index >= chat.messages.length) return;
+	if (chat.messages[index].role !== "user") return;
+	chat.messages = chat.messages.slice(0, index + 1);
+	persistChats(state, store);
+}
+
 /** Resend the last user message (used after dismissing a failed reply or taking one back). */
 export async function resendLast(
 	state: ChatState,
