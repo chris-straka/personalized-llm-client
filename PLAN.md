@@ -124,7 +124,15 @@ All S0–S7 shipped. These items came from using the installed app:
 - **R2.7 Editor legibility.** Caret + vim block-cursor colors for dark mode;
   stable prompt-box min-height kills the navigation resize flash.
 
-## Stages — S0–S7 done; Round 2 in progress
+## Round 3 — layout (DeepSeek-web rhythm, pixel-verified)
+
+- Settings is a right-sidebar panel; the `/settings` route is deleted.
+- Chat sidebar collapses to an icon rail (persisted in settings).
+- Centered 46rem reading column on wide screens; composer send button.
+- Shortcut-map dark contrast fixed. Lesson: a11y snapshots carry no color —
+  visual work is verified with pixel screenshots (light + dark, 1600px).
+
+## Stages — S0–S7 done; Rounds 2–3 done
 
 - [x] **S0 clean slate** (+A3): git init + insurance commit, wipe,
   desktop-only Tauri+Svelte+TS scaffold, Vitest, lint/format.

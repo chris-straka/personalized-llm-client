@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import { SvelteSet } from "svelte/reactivity";
-	import { resolve } from "$app/paths";
 	import {
 		createChatState,
 		activeChat,
@@ -39,6 +38,7 @@
 	import { hydrateSecrets, tauriBackendAvailable } from "$lib/secrets";
 	import type { ChatProvider } from "$lib/providers/types";
 	import MessageBody from "$lib/components/MessageBody.svelte";
+	import SettingsPanel from "$lib/components/SettingsPanel.svelte";
 	import { renderMessage, htmlToText, sourcesAsked } from "$lib/render";
 	import {
 		fileToAttachment,
@@ -125,6 +125,12 @@
 	let stopDictation: (() => void) | null = null;
 	let openLangMenu: LanguageMenu["id"] | null = $state(null);
 	const activeReplyLang = $derived(replyLanguageFor(settings.replyLang));
+	let settingsOpen = $state(false);
+
+	function toggleSidebar(): void {
+		settings.sidebarCollapsed = !settings.sidebarCollapsed;
+		persistSettings();
+	}
 
 	const useMock = mockProviderEnabled();
 	const chat = $derived(activeChat(chatState));
@@ -612,6 +618,7 @@
 				selMenu = null;
 				translate = null;
 				openLangMenu = null;
+				settingsOpen = false;
 				stopVoice();
 				return;
 			}
@@ -720,9 +727,27 @@
 	data-focus-mode={focusMode}
 	data-shell={tauriBackendAvailable() ? "tauri" : "browser"}
 >
-	<aside>
-		<button type="button" class="new" onclick={() => newChat(chatState)}>+ New chat</button>
-		<ul>
+	{#if settings.sidebarCollapsed}
+		<div class="rail">
+			<button type="button" title="Expand sidebar" aria-label="Expand sidebar" onclick={toggleSidebar}>
+				»
+			</button>
+		</div>
+	{:else}
+		<aside>
+			<div class="side-head">
+				<button type="button" class="new" onclick={() => newChat(chatState)}>+ New chat</button>
+				<button
+					type="button"
+					class="fold-side"
+					title="Collapse sidebar"
+					aria-label="Collapse sidebar"
+					onclick={toggleSidebar}
+				>
+					«
+				</button>
+			</div>
+			<ul>
 			{#each chatState.chats as item (item.id)}
 				<li>
 					<button
@@ -744,7 +769,8 @@
 		<button type="button" class="danger" onclick={() => deleteAllChats(chatState)}>
 			Delete all chats
 		</button>
-	</aside>
+		</aside>
+	{/if}
 
 	<main>
 		<header data-tauri-drag-region>
@@ -770,7 +796,15 @@
 			>
 				<span class="dot" aria-hidden="true"></span>Voice
 			</button>
-			<a href={resolve("/settings")}>Settings</a>
+			<button
+				type="button"
+				class="settings-btn"
+				title="Open settings"
+				aria-expanded={settingsOpen}
+				onclick={() => (settingsOpen = !settingsOpen)}
+			>
+				Settings
+			</button>
 		</header>
 
 		{#if points.length > 3}
@@ -948,9 +982,14 @@
 			<p class="error-banner" role="alert">
 				{#if isEjected(settings.activeProviderId)}
 					Key ejected for this session — restore it in
-					<a href={resolve("/settings")}>Settings</a>.
+					<button type="button" class="link" onclick={() => (settingsOpen = true)}>
+						Settings</button
+					>.
 				{:else}
-					Set an API key first — <a href={resolve("/settings")}>open Settings</a>.
+					Set an API key first —
+					<button type="button" class="link" onclick={() => (settingsOpen = true)}>
+						open Settings</button
+					>.
 				{/if}
 			</p>
 		{/if}
@@ -977,10 +1016,10 @@
 								title="Toggle preview"
 								onclick={() => (previewId = previewId === att.id ? null : att.id)}
 							>
-								🖼
+								IMG
 							</button>
 						{:else}
-							<span aria-hidden="true">📄</span>
+							<span class="file-kind" aria-hidden="true">FILE</span>
 						{/if}
 						<span class="name" title="{att.name} · ~{att.tokens} tokens">{att.name}</span>
 						<span class="tok">~{att.tokens}</span>
@@ -1012,7 +1051,17 @@
 				const files = [...(e.dataTransfer?.files ?? [])];
 				if (files.length > 0) void addFiles(files);
 			}}
-		></div>
+		>
+			<button
+				type="button"
+				class="send-btn"
+				title="Send (Enter)"
+				aria-label="Send"
+				onclick={() => onSubmit("send")}
+			>
+				↑
+			</button>
+		</div>
 		{#if reviewOpen && annotations.length > 0}
 			<div class="review" role="dialog" aria-label="Annotations">
 				{#each annotations as ann, n (ann.id)}
@@ -1178,6 +1227,12 @@
 			</button>
 		</div>
 	{/if}
+
+	{#if settingsOpen}
+		<aside class="settings-panel" aria-label="Settings">
+			<SettingsPanel settings={settings} onClose={() => (settingsOpen = false)} />
+		</aside>
+	{/if}
 </div>
 
 <style>
@@ -1233,6 +1288,46 @@
 	}
 	aside .new {
 		border-color: #c7c7cc;
+	}
+	.side-head {
+		display: flex;
+		gap: 0.25rem;
+	}
+	.side-head .new {
+		flex: 1;
+	}
+	.fold-side,
+	.rail button {
+		flex-shrink: 0;
+		font: inherit;
+		font-size: 0.9rem;
+		color: #6e6e73;
+		border: 1px solid transparent;
+		border-radius: 8px;
+		background: transparent;
+		cursor: pointer;
+		padding: 0.4rem 0.5rem;
+	}
+	.fold-side:hover,
+	.rail button:hover {
+		color: #1c1c1e;
+		border-color: #c7c7cc;
+	}
+	.rail {
+		flex-shrink: 0;
+		border-right: 1px solid #e5e5ea;
+		padding: 0.8rem 0.35rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.6rem;
+	}
+	.settings-panel {
+		width: 22rem;
+		flex-shrink: 0;
+		border-left: 1px solid #e5e5ea;
+		padding: 1.2rem 1.2rem 2rem;
+		overflow-y: auto;
+		background: #fff;
 	}
 	aside .del {
 		color: #6e6e73;
@@ -1304,10 +1399,27 @@
 	.pill-btn.on .dot {
 		background: #30a46c;
 	}
-	header a {
+	.settings-btn {
+		font: inherit;
+		font-size: 0.82rem;
 		color: #3a3a3c;
-		text-decoration: none;
+		border: 0;
+		background: none;
+		cursor: pointer;
+		padding: 0;
 		white-space: nowrap;
+	}
+	.settings-btn:hover {
+		text-decoration: underline;
+	}
+	button.link {
+		font: inherit;
+		color: inherit;
+		text-decoration: underline;
+		border: 0;
+		background: none;
+		cursor: pointer;
+		padding: 0;
 	}
 	/* Traffic lights float over the sidebar in the Tauri shell. */
 	.app[data-shell="tauri"] aside {
@@ -1775,13 +1887,62 @@
 		color: #3a3a3c;
 	}
 	.prompt {
+		position: relative;
 		margin: 0.6rem 1.2rem 0;
 		border: 1px solid #c7c7cc;
 		border-radius: 12px;
-		padding: 0 0.8rem;
+		padding: 0 0.8rem 1.9rem;
 		background: #fff;
 		/* Fixed floor so mounting the editor never shifts layout. */
-		min-height: 3.1rem;
+		min-height: 4.6rem;
+		box-sizing: border-box;
+	}
+	.send-btn {
+		position: absolute;
+		right: 0.6rem;
+		bottom: 0.5rem;
+		width: 1.7rem;
+		height: 1.7rem;
+		border-radius: 50%;
+		border: 1px solid #1c1c1e;
+		background: #1c1c1e;
+		color: #fff;
+		font-size: 0.95rem;
+		line-height: 1;
+		cursor: pointer;
+		padding: 0 0 0.1rem;
+	}
+	.send-btn:hover {
+		opacity: 0.8;
+	}
+	.file-kind {
+		font-size: 0.68rem;
+		font-weight: 700;
+		letter-spacing: 0.05em;
+		color: #6e6e73;
+	}
+	/* Centered reading column on wide screens (DeepSeek-web rhythm). */
+	article,
+	.empty-state,
+	.sending {
+		align-self: center;
+		width: 100%;
+		max-width: 46rem;
+		box-sizing: border-box;
+	}
+	.prompt,
+	.composer-bar,
+	.pins,
+	.attachments,
+	.review,
+	.translate-panel,
+	.voice-bar,
+	.error-banner,
+	footer {
+		width: calc(100% - 2.4rem);
+		max-width: 46rem;
+		margin-left: auto;
+		margin-right: auto;
 		box-sizing: border-box;
 	}
 	.prompt:focus-within {
@@ -1809,8 +1970,20 @@
 		header {
 			border-color: #38383a;
 		}
-		header a {
+		.settings-btn {
 			color: #aeaeb2;
+		}
+		.rail {
+			border-color: #38383a;
+		}
+		.fold-side:hover,
+		.rail button:hover {
+			color: #f2f2f7;
+			border-color: #48484a;
+		}
+		.settings-panel {
+			background: #17171a;
+			border-color: #38383a;
 		}
 		nav {
 			border-color: #38383a;
@@ -1949,6 +2122,11 @@
 		}
 		footer {
 			color: #98989f;
+		}
+		.send-btn {
+			background: #f2f2f7;
+			border-color: #f2f2f7;
+			color: #1c1c1e;
 		}
 	}
 	@media (prefers-reduced-motion: reduce) {

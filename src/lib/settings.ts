@@ -45,6 +45,8 @@ export interface AppSettings {
 	voiceLang: string;
 	/** Reply-language code from the empty-state menus; null = default. */
 	replyLang: string | null;
+	/** Left chat-list sidebar collapsed. */
+	sidebarCollapsed: boolean;
 }
 
 const STORAGE_KEY = "ccez-studio-settings-v1";
@@ -88,7 +90,8 @@ export function defaultSettings(): AppSettings {
 		voice: false,
 		voiceEngine: "web",
 		voiceLang: "en-US",
-		replyLang: null
+		replyLang: null,
+		sidebarCollapsed: false
 	};
 }
 
