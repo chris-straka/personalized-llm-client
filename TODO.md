@@ -70,7 +70,9 @@ with the approval to start.
 ## Stages
 - [x] S0 clean slate (+A3): git init + insurance commit, wipe, desktop-only
   Tauri+Svelte+TS scaffold, Vitest, lint/format — all checks green
-- [ ] S1 providers (DeepSeek + Muse Spark checkpoint), keys, settings page, shortcuts
+- [x] S1 providers (DeepSeek + Muse Spark checkpoint), keys, settings page, shortcuts
+  — Muse verified live (models + chat + SSE); DeepSeek adapter pending a key.
+  Shortcuts move to S2 with the prompt box they operate.
 - [ ] S2 core chat + prompt box + fenced-code input (A2)
 - [ ] S3 messages/code rendering, paste collapse, thoughts toggle
 - [ ] S4 annotation + translate helper
