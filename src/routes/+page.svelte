@@ -18,7 +18,8 @@
 		resendLast,
 		tokenTotal,
 		waypoints,
-		sendMessage
+		sendMessage,
+		type ChatMsg
 	} from "$lib/chat";
 	import { loadSettings, saveSettings } from "$lib/settings";
 	import { PROVIDERS, createProvider, getProviderDef } from "$lib/providers/registry";
@@ -44,6 +45,14 @@
 		type Annotation
 	} from "$lib/annotations";
 	import { translateSelection } from "$lib/translate";
+	import {
+		detectScript,
+		SCRIPT_LABEL,
+		AID_LABEL,
+		extractWordAt,
+		speakWord,
+		vocalizeArabic
+	} from "$lib/reading";
 
 	let chatState = $state(createChatState());
 	let settings = $state(loadSettings());
@@ -76,6 +85,9 @@
 		error: string | null;
 		busy: boolean;
 	} | null>(null);
+	let vocalized = $state<Record<string, string>>({});
+	let vocalizing = new SvelteSet<string>();
+	let vocalizeError: string | null = $state(null);
 
 	const useMock = mockProviderEnabled();
 	const chat = $derived(activeChat(chatState));
@@ -278,6 +290,36 @@
 			.map((a) => ({ id: a.id, number: annotationNumber(annotations, a.id), quote: a.quote }));
 	}
 
+	function toggleReadingAids(): void {
+		settings.readingAids = !settings.readingAids;
+		persistSettings();
+	}
+
+	async function runVocalize(msg: ChatMsg): Promise<void> {
+		if (vocalized[msg.id] || vocalizing.has(msg.id)) return;
+		const provider = resolveProvider();
+		if (!provider) {
+			vocalizeError = "Set an API key first — open Settings.";
+			return;
+		}
+		vocalizeError = null;
+		vocalizing.add(msg.id);
+		try {
+			const text = await vocalizeArabic(provider, msg.content);
+			vocalized = { ...vocalized, [msg.id]: text };
+		} catch (error) {
+			vocalizeError = error instanceof Error ? error.message : String(error);
+		} finally {
+			vocalizing.delete(msg.id);
+		}
+	}
+
+	function unvocalize(id: string): void {
+		const next = { ...vocalized };
+		delete next[id];
+		vocalized = next;
+	}
+
 	function persistSettings() {
 		saveSettings(settings);
 	}
@@ -419,6 +461,14 @@
 				translate = null;
 				return;
 			}
+			if (event.altKey && (event.key === "r" || event.key === "R")) {
+				// Vim owns the prompt; everywhere else Alt+R flips reading aids.
+				if (!inEditor) {
+					event.preventDefault();
+					toggleReadingAids();
+					return;
+				}
+			}
 			if (event.ctrlKey && (event.key === "o" || event.key === "O")) {
 				// Thoughts toggle works from anywhere, even inside the prompt.
 				event.preventDefault();
@@ -457,19 +507,43 @@
 		const onMouseUp = (event: MouseEvent) => {
 			// Ignore clicks that start inside the prompt, popups, or buttons —
 			// only freshly selected message text summons the menu.
+			if (event.button === 2) return; // right-click reads aloud instead
 			const target = event.target as HTMLElement | null;
 			if (target?.closest(".cm-content, .sel-menu, .review, .translate-panel, button, input, textarea")) {
 				return;
 			}
 			onSelectEnd(event);
 		};
+		// Right-click a word in a message to hear it — even with aids off.
+		// Capture phase + preventDefault pre-empts the native context menu.
+		const onContextMenu = (event: MouseEvent) => {
+			const target = event.target as HTMLElement | null;
+			const body = target?.closest(".messages .rendered");
+			if (!body || target?.closest("button, input, textarea, a, summary")) return;
+			let range: Range | null = null;
+			try {
+				if (typeof document.caretRangeFromPoint === "function") {
+					range = document.caretRangeFromPoint(event.clientX, event.clientY);
+				}
+			} catch {
+				range = null;
+			}
+			const node = range?.startContainer;
+			if (!node || node.nodeType !== Node.TEXT_NODE || !body.contains(node)) return;
+			const word = extractWordAt(node.textContent ?? "", range?.startOffset ?? 0);
+			if (!word) return;
+			event.preventDefault();
+			speakWord(word);
+		};
 		window.addEventListener("keydown", onKey, true);
 		window.addEventListener("focusin", onFocusIn);
 		window.addEventListener("mouseup", onMouseUp);
+		window.addEventListener("contextmenu", onContextMenu, true);
 		return () => {
 			window.removeEventListener("keydown", onKey, true);
 			window.removeEventListener("focusin", onFocusIn);
 			window.removeEventListener("mouseup", onMouseUp);
+			window.removeEventListener("contextmenu", onContextMenu, true);
 			editor?.destroy();
 			editor = null;
 		};
@@ -533,17 +607,47 @@
 				</p>
 			{/if}
 			{#each chat.messages as msg, i (msg.id)}
+				{@const script = detectScript(msg.content)}
 				<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 				<!-- Option-click is mouse-only by design; keyboard users get the Delete button below. -->
 				<article
 					id="msg-{i}"
 					class:user={msg.role === "user"}
 					class:assistant={msg.role === "assistant"}
+					class:has-hint={script !== null}
 					class:selected={focusMode === "scroll" && selectedIdx === i}
 					onclick={(e) => {
 						if (e.altKey) deleteMessage(chatState, i);
 					}}
 				>
+					{#if script}
+						<div class="script-hint">
+							<button
+								type="button"
+								title="Toggle reading aids (Alt+R)"
+								onclick={toggleReadingAids}
+							>
+								{SCRIPT_LABEL[script]} · {AID_LABEL[script]}
+								{settings.readingAids ? "on" : "off"}
+							</button>
+							{#if script === "ar" && settings.readingAids}
+								{#if vocalized[msg.id]}
+									<button type="button" title="Show original" onclick={() => unvocalize(msg.id)}>
+										original
+									</button>
+								{:else}
+									<button
+										type="button"
+										title="Add tashkeel (uses the active model)"
+										disabled={vocalizing.has(msg.id)}
+										onclick={() => void runVocalize(msg)}
+									>
+										{vocalizing.has(msg.id) ? "…" : "تشكيل"}
+									</button>
+								{/if}
+							{/if}
+						</div>
+					{/if}
 					<MessageBody
 						message={msg}
 						streaming={chatState.sending &&
@@ -553,6 +657,8 @@
 						folded={foldedIds.has(msg.id)}
 						marks={marksFor(msg.id)}
 						onBadgeClick={openBadge}
+						readingAids={settings.readingAids}
+						textOverride={vocalized[msg.id] ?? null}
 					/>
 					{#if msg.attachments && msg.attachments.length > 0}
 						<div class="sent-files">
@@ -721,6 +827,10 @@
 			</div>
 		{/if}
 
+		{#if vocalizeError}
+			<p class="error-banner" role="alert">{vocalizeError}</p>
+		{/if}
+
 		{#if translate}
 			<div class="translate-panel" role="dialog" aria-label="Translate lookup">
 				<div class="review-head">
@@ -791,7 +901,7 @@
 			{:else}
 				<span
 					>vim inside · ctrl+g message scroll · ⌥+enter pin · ⌘+enter run+pins ·
-					ctrl+o thoughts</span
+					ctrl+o thoughts · alt+r reading aids</span
 				>
 			{/if}
 		</footer>
@@ -919,8 +1029,38 @@
 		font-size: 0.9rem;
 	}
 	article {
+		position: relative;
 		border-radius: 10px;
 		padding: 0.6rem 0.8rem;
+	}
+	article.has-hint {
+		padding-top: 1.15rem;
+	}
+	.script-hint {
+		position: absolute;
+		top: 0.35rem;
+		right: 0.6rem;
+		display: flex;
+		gap: 0.4rem;
+		opacity: 0.55;
+	}
+	.script-hint:hover {
+		opacity: 1;
+	}
+	.script-hint button {
+		font-size: 0.7rem;
+		color: #6e6e73;
+		border: 0;
+		background: none;
+		cursor: pointer;
+		padding: 0;
+	}
+	.script-hint button:hover {
+		text-decoration: underline;
+	}
+	.script-hint button:disabled {
+		cursor: default;
+		text-decoration: none;
 	}
 	article.user {
 		background: #f1f1f4;
@@ -1235,6 +1375,9 @@
 		}
 		.actions button:hover {
 			color: #f2f2f7;
+		}
+		.script-hint button {
+			color: #98989f;
 		}
 		.error-banner {
 			background: #3d1008;

@@ -1,5 +1,8 @@
 <script lang="ts">
 	import { tick } from "svelte";
+	import { detectScript } from "$lib/reading";
+	import { pinyinRuby, plainParagraphs } from "$lib/pinyin";
+	import { furiganaHtml } from "$lib/furigana";
 	import {
 		renderMessage,
 		renderMarkdown,
@@ -26,28 +29,75 @@
 		marks?: AnnotationMark[];
 		/** Badge click (opens the review panel at the annotation). */
 		onBadgeClick?: (id: string) => void;
+		/** Global reading-aids toggle (pinyin / furigana). */
+		readingAids?: boolean;
+		/** Vocalized Arabic text replacing the message body when present. */
+		textOverride?: string | null;
 	}
 
-	let { message, streaming, sourcesWanted, folded, marks = [], onBadgeClick }: Props = $props();
+	let {
+		message,
+		streaming,
+		sourcesWanted,
+		folded,
+		marks = [],
+		onBadgeClick,
+		readingAids = false,
+		textOverride = null
+	}: Props = $props();
 
 	let html = $state("");
 	let bodyEl: HTMLElement | undefined = $state();
+	let aidLoading = $state(false);
+	let aidActive = $state(false);
 	let rendered: RenderedMessage | null = null;
 	let highlightRun = 0;
+	let aidRun = 0;
 
 	$effect(() => {
-		const content = message.content;
+		const content = textOverride ?? message.content;
 		// Read synchronously so the effect re-runs when badges change.
 		const items = marks;
 		const skipMarks = streaming || folded;
+		// Aids render from raw text (markdown set aside); Arabic vocalization
+		// arrives via textOverride and takes the normal path.
+		const aidScript =
+			!textOverride && readingAids && !streaming ? detectScript(message.content) : null;
+		// Marks apply after Svelte flushes the new HTML (see applyMarks).
+		const stamp = () => void tick().then(() => applyMarks(items, skipMarks));
+		if (aidScript === "zh") {
+			rendered = null;
+			aidLoading = false;
+			aidActive = true;
+			html = plainParagraphs(pinyinRuby(message.content));
+			stamp();
+			return;
+		}
+		if (aidScript === "ja") {
+			rendered = null;
+			aidLoading = true;
+			const run = ++aidRun;
+			void furiganaHtml(message.content)
+				.then((aided) => {
+					if (run !== aidRun) return;
+					aidActive = true;
+					html = aided;
+					stamp();
+				})
+				.finally(() => {
+					if (run === aidRun) aidLoading = false;
+				});
+			return;
+		}
+		aidLoading = false;
+		aidActive = false;
+		aidRun++; // invalidate any in-flight furigana conversion
 		const snapshot: RenderedMessage =
 			message.role === "assistant"
 				? renderMessage(content, sourcesWanted)
 				: renderMarkdown(content);
 		rendered = snapshot;
 		html = snapshot.html;
-		// Marks apply after Svelte flushes the new HTML (see applyMarks).
-		const stamp = () => void tick().then(() => applyMarks(items, skipMarks));
 		if (!streaming && snapshot.codes.length > 0) {
 			const run = ++highlightRun;
 			void highlightRendered(snapshot).then((enhanced) => {
@@ -129,9 +179,12 @@
 	<div class="folded-preview">{message.content.split("\n")[0].slice(0, 140)}</div>
 {:else}
 	<!-- Delegated code fold/copy buttons live inside the sanitized HTML. -->
+	{#if aidLoading}
+		<p class="aid-loading">loading dictionary…</p>
+	{/if}
 	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 	<!-- eslint-disable-next-line svelte/no-at-html-tags -- html is DOMPurify-sanitized in render.ts -->
-	<div class="rendered" bind:this={bodyEl} onclick={onBodyClick}>{@html html}</div>
+	<div class="rendered" class:aid={aidActive} bind:this={bodyEl} onclick={onBodyClick}>{@html html}</div>
 {/if}
 
 <style>
@@ -146,6 +199,21 @@
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
+	}
+	.aid-loading {
+		font-size: 0.78rem;
+		color: #98989f;
+		margin: 0 0 0.3em;
+	}
+	.rendered :global(ruby) {
+		ruby-align: center;
+	}
+	.rendered :global(rt) {
+		font-size: 0.62em;
+		color: #6e6e73;
+	}
+	.rendered.aid :global(p) {
+		line-height: 2.1;
 	}
 	.rendered :global(p) {
 		margin: 0.4em 0;

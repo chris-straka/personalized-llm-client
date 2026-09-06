@@ -49,7 +49,7 @@ export function estimateTextTokens(text: string): number {
 	return Math.max(1, Math.ceil(text.length / 4));
 }
 
-function escapeHtml(text: string): string {
+export function escapeHtml(text: string): string {
 	return text
 		.replace(/&/g, "&amp;")
 		.replace(/</g, "&lt;")
@@ -116,14 +116,14 @@ function renderInto(markdownText: string, codes: Array<{ lang: string; code: str
 
 let purifier: ReturnType<typeof DOMPurify> | null = null;
 
-function sanitize(dirty: string): string {
+export function sanitize(dirty: string): string {
 	if (typeof window === "undefined") {
 		// Non-DOM context (SSR/prerender): escape everything, no markup.
 		return `<p>${escapeHtml(dirty)}</p>`;
 	}
 	purifier ??= DOMPurify(window);
 	return purifier.sanitize(dirty, {
-		ADD_TAGS: ["details", "summary", "button"],
+		ADD_TAGS: ["details", "summary", "button", "ruby", "rt", "rp"],
 		ADD_ATTR: ["open", "class", "style", "data-code-index", "data-code-action", "type"]
 	});
 }
