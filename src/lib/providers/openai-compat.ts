@@ -1,0 +1,176 @@
+import {
+	type ChatMessage,
+	type ChatOptions,
+	type ChatProvider,
+	type ChatResult,
+	type StreamCallbacks,
+	type TokenUsage,
+	ProviderError
+} from "./types";
+
+export interface OpenAICompatConfig {
+	baseUrl: string;
+	apiKey: string;
+	model: string;
+}
+
+/**
+ * Minimal OpenAI-compatible chat client used by every provider in this app
+ * (DeepSeek and Meta's Model API both speak this protocol — verified live
+ * against the Muse Spark endpoint). No SDK dependency: plain fetch + SSE.
+ */
+export class OpenAICompatProvider implements ChatProvider {
+	readonly id: string;
+	private readonly config: OpenAICompatConfig;
+
+	constructor(id: string, config: OpenAICompatConfig) {
+		this.id = id;
+		this.config = { ...config, baseUrl: config.baseUrl.replace(/\/+$/, "") };
+	}
+
+	private url(path: string): string {
+		return `${this.config.baseUrl}${path}`;
+	}
+
+	private headers(): Record<string, string> {
+		return {
+			"Content-Type": "application/json",
+			Authorization: `Bearer ${this.config.apiKey}`
+		};
+	}
+
+	private body(messages: ChatMessage[], stream: boolean): string {
+		return JSON.stringify({ model: this.config.model, messages, stream });
+	}
+
+	async chat(messages: ChatMessage[], opts: ChatOptions = {}): Promise<ChatResult> {
+		let res: Response;
+		try {
+			res = await fetch(this.url("/chat/completions"), {
+				method: "POST",
+				headers: this.headers(),
+				body: this.body(messages, false),
+				signal: opts.signal
+			});
+		} catch (error) {
+			throw new ProviderError(`Network error talking to ${this.id}: ${messageOf(error)}`);
+		}
+		if (!res.ok) {
+			throw new ProviderError(
+				`${this.id} request failed (HTTP ${res.status}): ${(await safeText(res)).slice(0, 300)}`,
+				res.status
+			);
+		}
+		const json = (await res.json()) as {
+			choices?: Array<{ message?: { content?: string } }>;
+			usage?: {
+				prompt_tokens?: number;
+				completion_tokens?: number;
+				total_tokens?: number;
+				completion_tokens_details?: { reasoning_tokens?: number };
+			};
+		};
+		return {
+			content: json.choices?.[0]?.message?.content ?? "",
+			usage: toUsage(json.usage)
+		};
+	}
+
+	async stream(
+		messages: ChatMessage[],
+		callbacks: StreamCallbacks,
+		opts: ChatOptions = {}
+	): Promise<ChatResult> {
+		let res: Response;
+		try {
+			res = await fetch(this.url("/chat/completions"), {
+				method: "POST",
+				headers: { ...this.headers(), Accept: "text/event-stream" },
+				body: this.body(messages, true),
+				signal: opts.signal
+			});
+		} catch (error) {
+			throw new ProviderError(`Network error talking to ${this.id}: ${messageOf(error)}`);
+		}
+		if (!res.ok || !res.body) {
+			throw new ProviderError(
+				`${this.id} stream failed (HTTP ${res.status}): ${(await safeText(res)).slice(0, 300)}`,
+				res.status
+			);
+		}
+		let content = "";
+		let usage: TokenUsage | null = null;
+		for await (const event of readSse(res.body)) {
+			if (event === "[DONE]") break;
+			let parsed: {
+				choices?: Array<{ delta?: { content?: string } }>;
+				usage?: Parameters<typeof toUsage>[0];
+			};
+			try {
+				parsed = JSON.parse(event) as typeof parsed;
+			} catch {
+				continue;
+			}
+			const token = parsed.choices?.[0]?.delta?.content ?? "";
+			if (token) {
+				content += token;
+				callbacks.onToken(token);
+			}
+			if (parsed.usage) usage = toUsage(parsed.usage);
+		}
+		return { content, usage };
+	}
+}
+
+/** Split an SSE byte stream into `data:` payloads. Exported for tests. */
+export async function* readSse(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+	const reader = body.getReader();
+	const decoder = new TextDecoder();
+	let buffer = "";
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		buffer += decoder.decode(value, { stream: true });
+		const parts = buffer.split("\n\n");
+		buffer = parts.pop() ?? "";
+		for (const part of parts) {
+			for (const line of part.split("\n")) {
+				const text = line.trim();
+				if (text.startsWith("data:")) yield text.slice("data:".length).trim();
+			}
+		}
+	}
+}
+
+function toUsage(
+	raw:
+		| {
+				prompt_tokens?: number;
+				completion_tokens?: number;
+				total_tokens?: number;
+				completion_tokens_details?: { reasoning_tokens?: number };
+		  }
+		| null
+		| undefined
+): TokenUsage | null {
+	if (raw == null) return null;
+	if (raw.prompt_tokens == null && raw.completion_tokens == null) return null;
+	return {
+		prompt: raw.prompt_tokens ?? 0,
+		completion: raw.completion_tokens ?? 0,
+		total: raw.total_tokens ?? (raw.prompt_tokens ?? 0) + (raw.completion_tokens ?? 0),
+		reasoning: raw.completion_tokens_details?.reasoning_tokens
+	};
+}
+
+function messageOf(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+async function safeText(res: Response): Promise<string> {
+	try {
+		return await res.text();
+	} catch {
+		return "";
+	}
+}

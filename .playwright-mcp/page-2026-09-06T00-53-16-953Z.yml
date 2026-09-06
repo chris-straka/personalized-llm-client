@@ -1,0 +1,38 @@
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - link "← Chat" [ref=e5] [cursor=pointer]:
+      - /url: /
+    - heading "Settings" [level=1] [ref=e6]
+  - region [ref=e7]:
+    - heading "Model provider" [level=2] [ref=e8]
+    - radiogroup "Active provider" [ref=e9]:
+      - radio "DeepSeek unverified" [ref=e10] [cursor=pointer]
+      - radio "Muse Spark verified" [checked] [active] [ref=e11] [cursor=pointer]
+    - generic [ref=e12]:
+      - text: Base URL
+      - textbox "Base URL" [ref=e13]: https://api.meta.ai/v1
+    - generic [ref=e14]:
+      - text: Model
+      - textbox "Model" [ref=e15]: muse-spark-1.3-contributor
+    - generic [ref=e16]:
+      - text: API key Meta Model API key
+      - textbox "API key Meta Model API key" [ref=e36]
+    - paragraph [ref=e18]: Keys stay on this machine, in this app's local storage.
+  - region [ref=e19]:
+    - heading "Defaults" [level=2] [ref=e20]
+    - generic [ref=e21]:
+      - text: System prompt
+      - textbox "System prompt" [ref=e22]: Be brief, no summaries.
+    - group "Thinking level" [ref=e23]:
+      - radiogroup "Thinking level" [ref=e25]:
+        - radio "Low" [ref=e26] [cursor=pointer]
+        - radio "High" [checked] [ref=e27] [cursor=pointer]
+    - generic [ref=e28]:
+      - checkbox "Reading aids (pinyin / furigana / tashkeel)" [ref=e29]
+      - text: Reading aids (pinyin / furigana / tashkeel)
+    - generic [ref=e30]:
+      - checkbox "Voice readback (web speech engine)" [ref=e31]
+      - text: Voice readback (web speech engine)
+  - generic [ref=e32]:
+    - button "Save" [ref=e33] [cursor=pointer]
+    - button "Test connection" [ref=e34] [cursor=pointer]
