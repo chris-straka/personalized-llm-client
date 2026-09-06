@@ -33,7 +33,7 @@ function enterInsertMode(view: EditorView): void {
 	}
 }
 
-export type SubmitKind = "send" | "post-top";
+export type SubmitKind = "send" | "stage";
 
 export interface PromptEditor {
 	readonly view: EditorView;
@@ -354,9 +354,9 @@ export function createPromptEditor(
 		{
 			key: "Enter",
 			run: (view) => {
+				// AI Studio behavior: Enter is a newline; only ⌘+Enter sends.
 				if (fenceEnter(view)) return true;
-				options.onSubmit("send");
-				return true;
+				return false;
 			}
 		},
 		{
@@ -373,7 +373,7 @@ export function createPromptEditor(
 		{
 			key: "Alt-Enter",
 			run: () => {
-				options.onSubmit("post-top");
+				options.onSubmit("stage");
 				return true;
 			}
 		},

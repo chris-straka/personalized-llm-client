@@ -7,7 +7,7 @@ import {
 	deleteChat,
 	deleteAllChats,
 	deleteMessage,
-	postToTop,
+	stageMessage,
 	branchFrom,
 	truncateToMessage,
 	dismissFailedAssistant,
@@ -149,25 +149,29 @@ describe("chat", () => {
 		expect(activeChat(state).messages[0].content).toBe("one");
 	});
 
-	it("posts drafts to the top without sending", async () => {
+	it("stages messages last without sending, in order", async () => {
 		const { state, store } = stateWith(freshStore());
 		await sendMessage(state, scriptedProvider(["r"]), "sys", "q", {}, store);
-		postToTop(state, "remember this", [], store);
-		expect(activeChat(state).messages.map((m) => m.content)).toEqual([
-			"remember this",
-			"q",
-			"r"
-		]);
-		// The top post rides in the next send's history.
+		stageMessage(state, "foo", [], store);
+		expect(activeChat(state).messages.map((m) => m.content)).toEqual(["q", "r", "foo"]);
+		// foo rides unseen until the next submit carries it in order.
 		expect(buildApiMessages(activeChat(state), "sys").map((m) => m.content)).toEqual([
 			"sys",
-			"remember this",
 			"q",
-			"r"
+			"r",
+			"foo"
 		]);
-		// Empty posts are ignored.
-		postToTop(state, "   ", [], store);
-		expect(activeChat(state).messages).toHaveLength(3);
+		await sendMessage(state, scriptedProvider(["ok"]), "sys", "bar", {}, store);
+		expect(activeChat(state).messages.map((m) => m.content)).toEqual([
+			"q",
+			"r",
+			"foo",
+			"bar",
+			"ok"
+		]);
+		// Empty stages are ignored.
+		stageMessage(state, "   ", [], store);
+		expect(activeChat(state).messages).toHaveLength(5);
 	});
 
 	it("creates, selects, and deletes chats without stranding the selection", () => {

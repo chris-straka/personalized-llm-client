@@ -246,8 +246,9 @@
 <section aria-labelledby="keys-heading">
 	<h2 id="keys-heading">Keyboard shortcuts</h2>
 	<dl class="keys">
-		<div><dt>Send</dt><dd>Enter or ⌘+Enter</dd></div>
-		<div><dt>Post draft to top of log</dt><dd>⌥+Enter (no reply; rides in later sends)</dd></div>
+		<div><dt>Send</dt><dd>⌘+Enter (or the ↑ button)</dd></div>
+		<div><dt>New line</dt><dd>Enter</dd></div>
+		<div><dt>Stage message, no reply</dt><dd>⌥+Enter (seen at the next send, in order)</dd></div>
 		<div><dt>New chat</dt><dd>Ctrl+Alt+N</dd></div>
 		<div><dt>Chat list show/hide</dt><dd>⌘B</dd></div>
 		<div><dt>Settings show/hide</dt><dd>⌘.</dd></div>
@@ -266,9 +267,9 @@
 	<h3>Vim in the prompt box</h3>
 	<p class="note">
 		Vim is trapped inside the prompt: type to insert, Esc for normal mode,
-		Enter sends from either mode. Ctrl+G hops out to message scroll (J/K),
-		I or Enter hops back in. The rest of vim (motions, operators, :commands
-		via the vim layer) works where you left it.
+		Enter is a newline in either mode. Ctrl+G hops out to message scroll
+		(J/K), I or Enter hops back in. The rest of vim (motions, operators,
+		:commands via the vim layer) works where you left it.
 	</p>
 </section>
 

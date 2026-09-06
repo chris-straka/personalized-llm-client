@@ -109,10 +109,10 @@ export function deleteMessage(state: ChatState, index: number, store?: KeyValueS
 }
 
 /**
- * Post the draft as a user message at the very top of the log (⌥+Enter).
- * No reply is triggered — it rides along as history in every later send.
+ * Stage the draft as the most recent message (⌥+Enter) without sending.
+ * The model never sees it until the next submit carries the full history.
  */
-export function postToTop(
+export function stageMessage(
 	state: ChatState,
 	text: string,
 	attachments: Attachment[] = [],
@@ -122,6 +122,7 @@ export function postToTop(
 	if (!trimmed && attachments.length === 0) return;
 	const chat = activeChat(state);
 	chat.messages = [
+		...chat.messages,
 		{
 			id: newId(),
 			role: "user",
@@ -129,8 +130,7 @@ export function postToTop(
 			usage: null,
 			error: null,
 			...(attachments.length > 0 ? { attachments } : {})
-		},
-		...chat.messages
+		}
 	];
 	persistChats(state, store);
 }

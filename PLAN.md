@@ -152,7 +152,15 @@ All S0–S7 shipped. These items came from using the installed app:
 - Tests are hermetic: pure `envProviderDefaults` replaces env stubbing so
   the developer's real `.env` can never leak into assertions again.
 
-## Stages — S0–S7 done; Rounds 2–4 done
+## Round 5 — AI Studio submit semantics
+
+- Enter is a newline (fence auto-close preserved); only ⌘+Enter (or ↑)
+  sends, and submit clears the prompt.
+- ⌥+Enter stages the draft as the most recent message with no reply; the
+  next submit carries staged + new text in order (foo, then bar).
+- Pins array removed; old saves migrate.
+
+## Stages — S0–S7 done; Rounds 2–5 done
 
 - [x] **S0 clean slate** (+A3): git init + insurance commit, wipe,
   desktop-only Tauri+Svelte+TS scaffold, Vitest, lint/format.

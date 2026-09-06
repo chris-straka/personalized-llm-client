@@ -9,7 +9,7 @@
 		deleteChat,
 		deleteAllChats,
 		deleteMessage,
-		postToTop,
+		stageMessage,
 		branchFrom,
 		dismissFailedAssistant,
 		truncateToMessage,
@@ -525,13 +525,14 @@
 	}
 
 	function onSubmit(kind: SubmitKind) {
-		if (kind === "post-top") {
-			// ⌥+Enter: into the log at the very top, no reply triggered.
-			postToTop(chatState, composerText(), attachments);
+		if (kind === "stage") {
+			// ⌥+Enter: most recent message, no reply; the next submit
+			// carries the full history in order.
+			stageMessage(chatState, composerText(), attachments);
 			attachments = [];
 			previewId = null;
 			editor?.clear();
-			scrollBox?.scrollTo({ top: 0 });
+			scrollToBottom();
 			return;
 		}
 		void doSend();
@@ -852,8 +853,9 @@
 			{#if chat.messages.length === 0}
 				<div class="empty-state">
 					<p class="empty">
-						New chat — type below and hit Enter. ⌥+Enter posts the draft
-						to the top of the log. Select text in a reply to annotate it;
+						New chat — type below; ⌘+Enter sends, Enter is a newline.
+						⌥+Enter stages the draft as the latest message without replying.
+						Select text in a reply to annotate it;
 						⌘+T translates the selection.{#if useMock}
 							<strong>Mock provider active.</strong>{/if}
 					</p>
@@ -1084,7 +1086,7 @@
 			<button
 				type="button"
 				class="send-btn"
-				title="Send (Enter)"
+				title="Send (⌘+Enter)"
 				aria-label="Send"
 				onclick={() => onSubmit("send")}
 			>
@@ -1240,7 +1242,7 @@
 				<span><strong>scroll</strong> j/k move · i back to writing</span>
 			{:else}
 				<span
-					>vim inside · ctrl+g message scroll · ⌥+enter post to top ·
+					>vim inside · ctrl+g message scroll · ⌥+enter stage ·
 					ctrl+o thoughts · alt+r reading aids</span
 				>
 			{/if}
