@@ -34,6 +34,16 @@
 		IMAGE_MARKER,
 		type Attachment
 	} from "$lib/attachments";
+	import {
+		addAnnotation,
+		editAnnotationComment,
+		deleteAnnotation,
+		clearAnnotations,
+		annotationNumber,
+		withAnnotations,
+		type Annotation
+	} from "$lib/annotations";
+	import { translateSelection } from "$lib/translate";
 
 	let chatState = $state(createChatState());
 	let settings = $state(loadSettings());
@@ -48,6 +58,24 @@
 	let attachInput: HTMLInputElement | undefined = $state();
 	let foldedIds = new SvelteSet<string>();
 	let previewId: string | null = $state(null);
+	let annotations = $state<Annotation[]>([]);
+	let reviewOpen = $state(false);
+	let editingId: string | null = $state(null);
+	let editDraft = $state("");
+	let highlightAnnId: string | null = $state(null);
+	let selMenu = $state<{
+		x: number;
+		y: number;
+		quote: string;
+		messageId: string;
+	} | null>(null);
+	let translate = $state<{
+		quote: string;
+		messageId: string;
+		result: string | null;
+		error: string | null;
+		busy: boolean;
+	} | null>(null);
 
 	const useMock = mockProviderEnabled();
 	const chat = $derived(activeChat(chatState));
@@ -111,6 +139,145 @@
 		});
 	}
 
+	/** Message id owning the selection anchor, or null outside messages. */
+	function selectedMessageId(selection: Selection): string | null {
+		const node = selection.anchorNode;
+		const element = node instanceof Element ? node : node?.parentElement;
+		const article = element?.closest('article[id^="msg-"]');
+		if (!article) return null;
+		const index = Number(article.id.slice(4));
+		return chat.messages[index]?.id ?? null;
+	}
+
+	function currentQuote(): { quote: string; messageId: string } | null {
+		const selection = window.getSelection();
+		if (!selection || selection.isCollapsed) return null;
+		const inRendered = selection.anchorNode instanceof Element
+			? selection.anchorNode
+			: selection.anchorNode?.parentElement;
+		if (!inRendered?.closest(".rendered")) return null;
+		const quote = selection.toString().trim();
+		if (!quote) return null;
+		const messageId = selectedMessageId(selection);
+		if (!messageId) return null;
+		return { quote, messageId };
+	}
+
+	function onSelectEnd(event: MouseEvent): void {
+		if (event.altKey) return; // Option-click deletes; never a menu.
+		const found = currentQuote();
+		if (!found) {
+			selMenu = null;
+			return;
+		}
+		const rect = window.getSelection()?.getRangeAt(0).getBoundingClientRect();
+		if (!rect) {
+			selMenu = null;
+			return;
+		}
+		const width = 220;
+		const x = Math.min(Math.max(8, rect.left), window.innerWidth - width - 8);
+		let y = rect.top - 48;
+		if (y < 8) y = rect.bottom + 8;
+		selMenu = { x, y, quote: found.quote, messageId: found.messageId };
+	}
+
+	function clearSelection(): void {
+		window.getSelection()?.removeAllRanges();
+	}
+
+	function annotateFromMenu(moreDetails: boolean): void {
+		if (!selMenu) return;
+		annotations = addAnnotation(annotations, selMenu.messageId, selMenu.quote);
+		const created = annotations[annotations.length - 1];
+		clearSelection();
+		selMenu = null;
+		reviewOpen = true;
+		highlightAnnId = created.id;
+		if (moreDetails) {
+			editingId = created.id;
+			editDraft = "";
+		}
+	}
+
+	function openBadge(id: string): void {
+		reviewOpen = true;
+		editingId = null;
+		highlightAnnId = id;
+	}
+
+	function saveEdit(id: string): void {
+		annotations = editAnnotationComment(annotations, id, editDraft);
+		editingId = null;
+	}
+
+	function removeAnnotation(id: string): void {
+		annotations = deleteAnnotation(annotations, id);
+		if (editingId === id) editingId = null;
+		if (highlightAnnId === id) highlightAnnId = null;
+	}
+
+	function clearAllAnnotations(): void {
+		annotations = clearAnnotations();
+		reviewOpen = false;
+		editingId = null;
+		highlightAnnId = null;
+	}
+
+	async function openTranslate(): Promise<void> {
+		const found = currentQuote();
+		if (!found) return;
+		const provider = resolveProvider();
+		translate = {
+			quote: found.quote,
+			messageId: found.messageId,
+			result: null,
+			error: provider ? null : "Set an API key first — open Settings.",
+			busy: !!provider
+		};
+		clearSelection();
+		selMenu = null;
+		if (!provider) return;
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), 30000);
+		try {
+			const result = await translateSelection(
+				provider,
+				found.quote,
+				settings.translateTarget,
+				controller.signal
+			);
+			if (translate && translate.quote === found.quote) {
+				translate = { ...translate, result, busy: false };
+			}
+		} catch (error) {
+			if (translate && translate.quote === found.quote) {
+				translate = {
+					...translate,
+					error: error instanceof Error ? error.message : String(error),
+					busy: false
+				};
+			}
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
+	function annotateTranslation(): void {
+		if (!translate?.result) return;
+		annotations = addAnnotation(annotations, translate.messageId, translate.quote, translate.result);
+		highlightAnnId = annotations[annotations.length - 1].id;
+		translate = null;
+		reviewOpen = true;
+		editingId = null;
+	}
+
+	function marksFor(messageId: string): Array<{ id: string; number: number; quote: string }> {
+		return annotations
+			.filter((a) => a.messageId === messageId)
+			.map((a) => ({ id: a.id, number: annotationNumber(annotations, a.id), quote: a.quote }));
+	}
+
 	function persistSettings() {
 		saveSettings(settings);
 	}
@@ -132,12 +299,24 @@
 		missingKey = false;
 		focusMode = "edit";
 		const outgoing = attachments;
-		await sendMessage(chatState, provider, settings.systemPrompt, composerText(), {
-			includePins,
-			attachments: outgoing
-		});
-		attachments = [];
-		previewId = null;
+		const outgoingAnnotations = annotations;
+		await sendMessage(
+			chatState,
+			provider,
+			settings.systemPrompt,
+			withAnnotations(composerText(), outgoingAnnotations),
+			{ includePins, attachments: outgoing }
+		);
+		// Keep drafts when the reply failed so nothing silently drops.
+		const sent = chat.messages[chat.messages.length - 1];
+		if (sent?.role === "assistant" && !sent.error) {
+			attachments = [];
+			previewId = null;
+			annotations = [];
+			reviewOpen = false;
+			editingId = null;
+			highlightAnnId = null;
+		}
 		editor?.clear();
 		scrollToBottom();
 	}
@@ -225,6 +404,21 @@
 
 		const onKey = (event: KeyboardEvent) => {
 			const inEditor = (event.target as HTMLElement | null)?.closest(".cm-content");
+			if ((event.metaKey || event.ctrlKey) && (event.key === "t" || event.key === "T")) {
+				// Translate lookup only hijacks the combo over message text —
+				// vim and the browser keep it everywhere else.
+				if (!inEditor && currentQuote()) {
+					event.preventDefault();
+					event.stopPropagation();
+					void openTranslate();
+					return;
+				}
+			}
+			if (event.key === "Escape" && !inEditor) {
+				selMenu = null;
+				translate = null;
+				return;
+			}
 			if (event.ctrlKey && (event.key === "o" || event.key === "O")) {
 				// Thoughts toggle works from anywhere, even inside the prompt.
 				event.preventDefault();
@@ -260,11 +454,22 @@
 				focusMode = "edit";
 			}
 		};
+		const onMouseUp = (event: MouseEvent) => {
+			// Ignore clicks that start inside the prompt, popups, or buttons —
+			// only freshly selected message text summons the menu.
+			const target = event.target as HTMLElement | null;
+			if (target?.closest(".cm-content, .sel-menu, .review, .translate-panel, button, input, textarea")) {
+				return;
+			}
+			onSelectEnd(event);
+		};
 		window.addEventListener("keydown", onKey, true);
 		window.addEventListener("focusin", onFocusIn);
+		window.addEventListener("mouseup", onMouseUp);
 		return () => {
 			window.removeEventListener("keydown", onKey, true);
 			window.removeEventListener("focusin", onFocusIn);
+			window.removeEventListener("mouseup", onMouseUp);
 			editor?.destroy();
 			editor = null;
 		};
@@ -319,11 +524,12 @@
 			</nav>
 		{/if}
 
-		<div class="messages" bind:this={scrollBox}>
+		<div class="messages" bind:this={scrollBox} onscroll={() => (selMenu = null)}>
 			{#if chat.messages.length === 0}
 				<p class="empty">
 					New chat — type below and hit Enter. ⌘+Enter runs with pins, ⌥+Enter pins
-					the draft.{#if useMock} <strong>Mock provider active.</strong>{/if}
+					the draft. Select text in a reply to annotate it; ⌘+T translates the
+					selection.{#if useMock} <strong>Mock provider active.</strong>{/if}
 				</p>
 			{/if}
 			{#each chat.messages as msg, i (msg.id)}
@@ -345,6 +551,8 @@
 							i === chat.messages.length - 1}
 						sourcesWanted={sourcesWanted}
 						folded={foldedIds.has(msg.id)}
+						marks={marksFor(msg.id)}
+						onBadgeClick={openBadge}
 					/>
 					{#if msg.attachments && msg.attachments.length > 0}
 						<div class="sent-files">
@@ -465,7 +673,102 @@
 				if (files.length > 0) void addFiles(files);
 			}}
 		></div>
+		{#if reviewOpen && annotations.length > 0}
+			<div class="review" role="dialog" aria-label="Annotations">
+				{#each annotations as ann, n (ann.id)}
+					<div class="review-item" class:highlight={highlightAnnId === ann.id}>
+						<div class="review-head">
+							<span class="review-num">{n + 1}.</span>
+							<span class="review-label">Selected text:</span>
+							<span class="review-quote">“{ann.quote}”</span>
+							<button
+								type="button"
+								aria-label="Delete annotation {n + 1}"
+								title="Delete annotation"
+								onclick={() => removeAnnotation(ann.id)}
+							>
+								×
+							</button>
+						</div>
+						{#if editingId === ann.id}
+							<label>
+								<span class="review-label">User comment:</span>
+								<textarea rows="2" bind:value={editDraft} placeholder="Add an optional comment…"
+								></textarea>
+							</label>
+							<div class="review-edit-actions">
+								<button type="button" onclick={() => saveEdit(ann.id)}>Save</button>
+								<button type="button" onclick={() => (editingId = null)}>Cancel</button>
+							</div>
+						{:else}
+							<div class="review-head">
+								<span class="review-label">User comment:</span>
+								<span class="review-comment">{ann.comment || "—"}</span>
+								<button
+									type="button"
+									title="Edit comment"
+									onclick={() => {
+										editingId = ann.id;
+										editDraft = ann.comment;
+									}}
+								>
+									Edit
+								</button>
+							</div>
+						{/if}
+					</div>
+				{/each}
+			</div>
+		{/if}
+
+		{#if translate}
+			<div class="translate-panel" role="dialog" aria-label="Translate lookup">
+				<div class="review-head">
+					<span class="review-quote">“{translate.quote}”</span>
+					<button type="button" aria-label="Close translate" onclick={() => (translate = null)}>
+						×
+					</button>
+				</div>
+				{#if translate.busy}
+					<p class="muted">Translating to {settings.translateTarget}…</p>
+				{:else if translate.error}
+					<p class="error" role="alert">{translate.error}</p>
+				{:else if translate.result}
+					<p class="translate-result">{translate.result}</p>
+					<div class="review-edit-actions">
+						<button type="button" onclick={annotateTranslation}>Add as annotation</button>
+						<button
+							type="button"
+							onclick={() => {
+								if (translate?.result) copyMarkdown(translate.result);
+							}}
+						>
+							Copy
+						</button>
+					</div>
+				{/if}
+			</div>
+		{/if}
+
 		<div class="composer-bar">
+			{#if annotations.length > 0}
+				<button
+					type="button"
+					class="ann-pill"
+					title="Review annotations (× clears all)"
+					onclick={() => (reviewOpen = !reviewOpen)}
+				>
+					{annotations.length} annotation{annotations.length === 1 ? "" : "s"}
+				</button>
+				<button
+					type="button"
+					aria-label="Delete all annotations"
+					title="Delete all annotations"
+					onclick={clearAllAnnotations}
+				>
+					×
+				</button>
+			{/if}
 			<button type="button" title="Attach images or text files" onclick={() => attachInput?.click()}>
 				Attach{#if attachTokens > 0} · ~{attachTokens} tok{/if}
 			</button>
@@ -493,6 +796,13 @@
 			{/if}
 		</footer>
 	</main>
+
+	{#if selMenu}
+		<div class="sel-menu" style="left: {selMenu.x}px; top: {selMenu.y}px" role="menu">
+			<button type="button" onclick={() => annotateFromMenu(false)}>Add to chat</button>
+			<button type="button" onclick={() => annotateFromMenu(true)}>More details</button>
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -698,6 +1008,123 @@
 	.hidden-input {
 		display: none;
 	}
+	.sel-menu {
+		position: fixed;
+		z-index: 50;
+		display: flex;
+		gap: 0.25rem;
+		padding: 0.3rem;
+		border: 1px solid #c7c7cc;
+		border-radius: 10px;
+		background: #fff;
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+	}
+	.sel-menu button {
+		font-size: 0.8rem;
+		border: 0;
+		border-radius: 7px;
+		background: none;
+		cursor: pointer;
+		padding: 0.35rem 0.7rem;
+		white-space: nowrap;
+	}
+	.sel-menu button:hover {
+		background: #f1f1f4;
+	}
+	.review,
+	.translate-panel {
+		margin: 0.5rem 1.2rem 0;
+		border: 1px solid #e5e5ea;
+		border-radius: 10px;
+		padding: 0.6rem 0.8rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.6rem;
+		background: #fafafc;
+	}
+	.review-item {
+		border-radius: 8px;
+		padding: 0.35rem 0.5rem;
+	}
+	.review-item.highlight {
+		background: #eef4ff;
+	}
+	.review-head {
+		display: flex;
+		align-items: baseline;
+		gap: 0.45rem;
+		font-size: 0.82rem;
+	}
+	.review-head button {
+		margin-left: auto;
+		flex-shrink: 0;
+		font-size: 0.75rem;
+		color: #6e6e73;
+		border: 0;
+		background: none;
+		cursor: pointer;
+		padding: 0;
+	}
+	.review-head button:hover {
+		color: #1c1c1e;
+		text-decoration: underline;
+	}
+	.review-num {
+		font-weight: 700;
+	}
+	.review-label {
+		color: #6e6e73;
+		font-size: 0.75rem;
+	}
+	.review-quote {
+		font-weight: 550;
+		overflow-wrap: anywhere;
+	}
+	.review-comment {
+		overflow-wrap: anywhere;
+	}
+	.review label {
+		display: block;
+		font-size: 0.82rem;
+		margin-top: 0.3rem;
+	}
+	.review textarea {
+		display: block;
+		width: 100%;
+		box-sizing: border-box;
+		margin-top: 0.25rem;
+		font: inherit;
+		border: 1px solid #c7c7cc;
+		border-radius: 8px;
+		padding: 0.4rem 0.6rem;
+		resize: vertical;
+	}
+	.review-edit-actions {
+		display: flex;
+		gap: 0.5rem;
+		margin-top: 0.35rem;
+	}
+	.review-edit-actions button {
+		font-size: 0.78rem;
+		border: 1px solid #c7c7cc;
+		border-radius: 999px;
+		background: #fff;
+		cursor: pointer;
+		padding: 0.2rem 0.8rem;
+	}
+	.ann-pill {
+		font-weight: 650;
+	}
+	.muted {
+		font-size: 0.82rem;
+		color: #6e6e73;
+		margin: 0;
+	}
+	.translate-result {
+		font-size: 0.9rem;
+		margin: 0;
+		overflow-wrap: anywhere;
+	}
 	.actions {
 		display: flex;
 		align-items: center;
@@ -837,6 +1264,46 @@
 		}
 		.composer-bar button:hover {
 			color: #f2f2f7;
+		}
+		.sel-menu {
+			background: #1c1c1e;
+			border-color: #48484a;
+		}
+		.sel-menu button {
+			color: #f2f2f7;
+		}
+		.sel-menu button:hover {
+			background: #2c2c2e;
+		}
+		.review,
+		.translate-panel {
+			background: #1c1c1e;
+			border-color: #38383a;
+		}
+		.review-item.highlight {
+			background: #12233d;
+		}
+		.review-head button {
+			color: #98989f;
+		}
+		.review-head button:hover {
+			color: #f2f2f7;
+		}
+		.review-label {
+			color: #98989f;
+		}
+		.review textarea {
+			background: #101013;
+			border-color: #48484a;
+			color: #f2f2f7;
+		}
+		.review-edit-actions button {
+			background: #2c2c2e;
+			border-color: #48484a;
+			color: #f2f2f7;
+		}
+		.muted {
+			color: #98989f;
 		}
 		.prompt {
 			background: #1c1c1e;

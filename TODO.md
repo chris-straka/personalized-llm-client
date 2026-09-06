@@ -91,7 +91,12 @@ with the approval to start.
   attachments with downscale + token estimates, thoughts details + ctrl+O,
   Sources stripped unless asked. Paste-marker clicks needed the same
   mousedown guard as fence bars (vim swallowed every other click).
-- [ ] S4 annotation + translate helper
+- [x] S4 annotation + translate helper — select → Add to chat / More
+  details menu, numbered badges on quotes, review panel (edit/save/delete,
+  delete-all pill), annotations wrap into next query, drafts survive failed
+  sends, Cmd+T lookup feeding annotation, translate-target setting. Badge
+  marks needed a synchronous read in the render effect (async-only reads
+  never subscribe).
 - [ ] S5 reading aids (default OFF, A1)
 - [ ] S6 voice mode (+A4 bridge policy)
 - [ ] S7 desktop polish, updater, icon, cold-start checks

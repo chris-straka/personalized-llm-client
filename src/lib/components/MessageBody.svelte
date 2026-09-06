@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from "svelte";
 	import {
 		renderMessage,
 		renderMarkdown,
@@ -6,6 +7,12 @@
 		type RenderedMessage
 	} from "$lib/render";
 	import type { ChatMsg } from "$lib/chat";
+
+	export interface AnnotationMark {
+		id: string;
+		number: number;
+		quote: string;
+	}
 
 	interface Props {
 		message: ChatMsg;
@@ -15,31 +22,91 @@
 		sourcesWanted: boolean;
 		/** Whole-message fold state (owned by the parent). */
 		folded: boolean;
+		/** Annotation badges to stamp onto this message's quoted spans. */
+		marks?: AnnotationMark[];
+		/** Badge click (opens the review panel at the annotation). */
+		onBadgeClick?: (id: string) => void;
 	}
 
-	let { message, streaming, sourcesWanted, folded }: Props = $props();
+	let { message, streaming, sourcesWanted, folded, marks = [], onBadgeClick }: Props = $props();
 
 	let html = $state("");
+	let bodyEl: HTMLElement | undefined = $state();
 	let rendered: RenderedMessage | null = null;
 	let highlightRun = 0;
 
 	$effect(() => {
 		const content = message.content;
+		// Read synchronously so the effect re-runs when badges change.
+		const items = marks;
+		const skipMarks = streaming || folded;
 		const snapshot: RenderedMessage =
 			message.role === "assistant"
 				? renderMessage(content, sourcesWanted)
 				: renderMarkdown(content);
 		rendered = snapshot;
 		html = snapshot.html;
+		// Marks apply after Svelte flushes the new HTML (see applyMarks).
+		const stamp = () => void tick().then(() => applyMarks(items, skipMarks));
 		if (!streaming && snapshot.codes.length > 0) {
 			const run = ++highlightRun;
 			void highlightRendered(snapshot).then((enhanced) => {
-				if (run === highlightRun) html = enhanced;
+				if (run !== highlightRun) return;
+				html = enhanced;
+				stamp();
 			});
+		} else {
+			stamp();
 		}
 	});
 
+	/**
+	 * Wrap the first occurrence of each quoted span in a highlight + numbered
+	 * badge. Old marks unwrap first so re-renders never nest. Quotes that no
+	 * longer match (edited messages, markdown reshaping) stay listed in the
+	 * review panel without a badge — never an error.
+	 */
+	function applyMarks(items: AnnotationMark[], skip: boolean): void {
+		if (!bodyEl) return;
+		for (const badge of bodyEl.querySelectorAll("[data-ann-badge]")) badge.remove();
+		for (const mark of bodyEl.querySelectorAll("mark.ccez-ann")) {
+			mark.replaceWith(document.createTextNode(mark.textContent ?? ""));
+		}
+		if (skip || items.length === 0) return;
+		const walker = document.createTreeWalker(bodyEl, NodeFilter.SHOW_TEXT);
+		const nodes: Text[] = [];
+		while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+		for (const item of items) {
+			if (!item.quote) continue;
+			const node = nodes.find((n) => n.textContent?.includes(item.quote));
+			if (!node?.textContent) continue;
+			const at = node.textContent.indexOf(item.quote);
+			const range = document.createRange();
+			range.setStart(node, at);
+			range.setEnd(node, at + item.quote.length);
+			const highlight = document.createElement("mark");
+			highlight.className = "ccez-ann";
+			const badge = document.createElement("button");
+			badge.type = "button";
+			badge.className = "ccez-ann-badge";
+			badge.dataset.annBadge = item.id;
+			badge.textContent = String(item.number);
+			badge.title = "Open annotation";
+			try {
+				range.surroundContents(highlight);
+			} catch {
+				continue;
+			}
+			highlight.after(badge);
+		}
+	}
+
 	function onBodyClick(event: MouseEvent): void {
+		const badge = (event.target as HTMLElement).closest<HTMLElement>("[data-ann-badge]");
+		if (badge) {
+			onBadgeClick?.(badge.dataset.annBadge ?? "");
+			return;
+		}
 		const button = (event.target as HTMLElement).closest<HTMLElement>("[data-code-action]");
 		if (!button || !rendered) return;
 		const block = button.closest<HTMLElement>(".ccez-code");
@@ -64,7 +131,7 @@
 	<!-- Delegated code fold/copy buttons live inside the sanitized HTML. -->
 	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 	<!-- eslint-disable-next-line svelte/no-at-html-tags -- html is DOMPurify-sanitized in render.ts -->
-	<div class="rendered" onclick={onBodyClick}>{@html html}</div>
+	<div class="rendered" bind:this={bodyEl} onclick={onBodyClick}>{@html html}</div>
 {/if}
 
 <style>
@@ -160,8 +227,34 @@
 		cursor: pointer;
 		display: inline-block;
 	}
+	.rendered :global(mark.ccez-ann) {
+		background: #fff3b0;
+		border-radius: 3px;
+		padding: 0 1px;
+		color: inherit;
+	}
+	.rendered :global(button.ccez-ann-badge) {
+		display: inline-block;
+		min-width: 1.15rem;
+		height: 1.15rem;
+		margin-left: 0.15rem;
+		padding: 0 0.25rem;
+		border: 0;
+		border-radius: 999px;
+		background: #0a84ff;
+		color: #fff;
+		font-size: 0.7rem;
+		font-weight: 700;
+		line-height: 1.15rem;
+		text-align: center;
+		vertical-align: super;
+		cursor: pointer;
+	}
 	/* Shiki emits light colors inline + dark variants as CSS variables. */
 	@media (prefers-color-scheme: dark) {
+		.rendered :global(mark.ccez-ann) {
+			background: #5c4d00;
+		}
 		.folded-preview {
 			color: #98989f;
 		}

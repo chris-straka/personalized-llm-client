@@ -20,6 +20,8 @@ export interface AppSettings {
 	/** Voice readback. Off unless toggled. */
 	voice: boolean;
 	voiceEngine: VoiceEngine;
+	/** Target language for the Cmd+T translate lookup. */
+	translateTarget: string;
 }
 
 const STORAGE_KEY = "ccez-studio-settings-v1";
@@ -40,7 +42,8 @@ export function defaultSettings(): AppSettings {
 		thinkingLevel: "high",
 		readingAids: false,
 		voice: false,
-		voiceEngine: "web"
+		voiceEngine: "web",
+		translateTarget: "English"
 	};
 }
 

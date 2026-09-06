@@ -174,6 +174,10 @@
 				>
 			</div>
 		</fieldset>
+		<label>
+			Translate target (⌘+T lookup)
+			<input type="text" bind:value={settings.translateTarget} autocomplete="off" spellcheck="false" />
+		</label>
 		<label class="check">
 			<input type="checkbox" bind:checked={settings.readingAids} />
 			Reading aids (pinyin / furigana / tashkeel)
