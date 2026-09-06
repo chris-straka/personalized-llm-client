@@ -1,0 +1,37 @@
+#!/bin/bash
+
+# Files you want to explicitly include (excluding .env for safety)
+FILES=(
+  ".gitignore"
+  "index.html"
+  "package.json"
+  "README.md"
+  "tsconfig.json"
+)
+
+# Automatically find all files inside ./src (skipping directories)
+SRC=()
+if [ -d "./src" ]; then
+  while IFS= read -r -d '' file; do
+    SRC+=("$file")
+  done < <(find ./src -type f -print0)
+fi
+
+# Combine both lists into one array to loop once
+ALL_FILES=("${FILES[@]}" "${SRC[@]}")
+
+output=""
+
+for file in "${ALL_FILES[@]}"; do
+  if [ -f "$file" ]; then
+    ext="${file##*.}"
+    # Handle files with no extension (like .gitignore)
+    [ "$ext" = "$file" ] && ext="txt" 
+    output+="$file\n\n\`\`\`$ext\n$(cat "$file")\n\`\`\`\n\n"
+  fi
+done
+
+# Copy to clipboard
+echo -e "$output" | pbcopy
+
+echo "Project context copied to clipboard!"
