@@ -160,7 +160,12 @@ All S0–S7 shipped. These items came from using the installed app:
   next submit carries staged + new text in order (foo, then bar).
 - Pins array removed; old saves migrate.
 
-## Stages — S0–S7 done; Rounds 2–5 done
+## Round 6 — AI Studio composer button
+
+- ↑ fades (disabled) when the prompt is empty; holding ⌥ morphs it into
+  "Add +", which stages like ⌥+Enter. Empty submits are blocked everywhere.
+
+## Stages — S0–S7 done; Rounds 2–6 done
 
 - [x] **S0 clean slate** (+A3): git init + insurance commit, wipe,
   desktop-only Tauri+Svelte+TS scaffold, Vitest, lint/format.

@@ -246,7 +246,7 @@
 <section aria-labelledby="keys-heading">
 	<h2 id="keys-heading">Keyboard shortcuts</h2>
 	<dl class="keys">
-		<div><dt>Send</dt><dd>⌘+Enter (or the ↑ button)</dd></div>
+		<div><dt>Send</dt><dd>⌘+Enter (or ↑; faded when empty; hold ⌥ for Add +)</dd></div>
 		<div><dt>New line</dt><dd>Enter</dd></div>
 		<div><dt>Stage message, no reply</dt><dd>⌥+Enter (seen at the next send, in order)</dd></div>
 		<div><dt>New chat</dt><dd>Ctrl+Alt+N</dd></div>

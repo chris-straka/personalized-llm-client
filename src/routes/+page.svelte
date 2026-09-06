@@ -125,6 +125,11 @@
 	let openLangMenu: LanguageMenu["id"] | null = $state(null);
 	const activeReplyLang = $derived(replyLanguageFor(settings.replyLang));
 	let settingsOpen = $state(false);
+	let hasText = $state(false);
+	let altHeld = $state(false);
+	const canSubmit = $derived(
+		hasText || attachments.length > 0 || annotations.length > 0
+	);
 
 	function toggleSidebar(): void {
 		settings.sidebarCollapsed = !settings.sidebarCollapsed;
@@ -479,6 +484,7 @@
 	}
 
 	async function doSend() {
+		if (!canSubmit) return;
 		const provider = resolveProvider();
 		if (!provider) {
 			missingKey = true;
@@ -610,7 +616,10 @@
 		editor = createPromptEditor(promptEl, {
 			onSubmit,
 			onHopOut: enterScrollMode,
-			onImagePaste: onImagePasted
+			onImagePaste: onImagePasted,
+			onDocChange: (text) => {
+				hasText = text.trim().length > 0;
+			}
 		});
 		editor.focus();
 
@@ -733,13 +742,26 @@
 			event.preventDefault();
 			speakWord(word, settings.voiceLang?.trim() || "en-US");
 		};
+		// Holding Option morphs the send button into "Add +" (stage).
+		const onAlt = (event: KeyboardEvent) => {
+			if (event.key === "Alt") altHeld = event.type === "keydown";
+		};
+		const onBlur = () => {
+			altHeld = false;
+		};
 		canMic = micAvailable();
 		window.addEventListener("keydown", onKey, true);
+		window.addEventListener("keydown", onAlt);
+		window.addEventListener("keyup", onAlt);
+		window.addEventListener("blur", onBlur);
 		window.addEventListener("focusin", onFocusIn);
 		window.addEventListener("mouseup", onMouseUp);
 		window.addEventListener("contextmenu", onContextMenu, true);
 		return () => {
 			window.removeEventListener("keydown", onKey, true);
+			window.removeEventListener("keydown", onAlt);
+			window.removeEventListener("keyup", onAlt);
+			window.removeEventListener("blur", onBlur);
 			window.removeEventListener("focusin", onFocusIn);
 			window.removeEventListener("mouseup", onMouseUp);
 			window.removeEventListener("contextmenu", onContextMenu, true);
@@ -1086,11 +1108,13 @@
 			<button
 				type="button"
 				class="send-btn"
-				title="Send (⌘+Enter)"
-				aria-label="Send"
-				onclick={() => onSubmit("send")}
+				class:wide={altHeld}
+				disabled={!canSubmit}
+				title={altHeld ? "Stage (⌥+Enter)" : "Send (⌘+Enter)"}
+				aria-label={altHeld ? "Stage" : "Send"}
+				onclick={(event) => onSubmit(altHeld || event.altKey ? "stage" : "send")}
 			>
-				↑
+				{altHeld ? "Add +" : "↑"}
 			</button>
 		</div>
 		{#if reviewOpen && annotations.length > 0}
@@ -1931,8 +1955,19 @@
 		cursor: pointer;
 		padding: 0 0 0.1rem;
 	}
-	.send-btn:hover {
+	.send-btn:hover:not(:disabled) {
 		opacity: 0.8;
+	}
+	.send-btn:disabled {
+		opacity: 0.35;
+		cursor: default;
+	}
+	.send-btn.wide {
+		width: auto;
+		height: auto;
+		border-radius: 999px;
+		font-size: 0.78rem;
+		padding: 0.3rem 0.9rem;
 	}
 	.voice-float {
 		position: absolute;

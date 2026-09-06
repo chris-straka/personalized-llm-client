@@ -53,6 +53,8 @@ export interface PromptEditorOptions {
 	onHopOut: () => void;
 	/** An image was pasted or dropped; the host turns it into an attachment. */
 	onImagePaste?: (file: File) => void;
+	/** Document text changed (drives the submit button's faded state). */
+	onDocChange?: (text: string) => void;
 }
 
 /** Pastes longer than this collapse to a `[Pasted content N chars]` marker. */
@@ -391,6 +393,9 @@ export function createPromptEditor(
 		doc: options.initialDoc ?? "",
 		extensions: [
 			submitKeys,
+			EditorView.updateListener.of((update) => {
+				if (update.docChanged) options.onDocChange?.(update.state.doc.toString());
+			}),
 			vim(),
 			history(),
 			keymap.of([...defaultKeymap, ...historyKeymap]),
