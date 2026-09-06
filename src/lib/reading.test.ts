@@ -6,7 +6,11 @@ import {
 	ttsLangFor,
 	speakWord,
 	vocalizeArabic,
-	buildVocalizeMessages
+	buildVocalizeMessages,
+	buildAidMessages,
+	runModelAid,
+	MODEL_AIDS,
+	MODEL_AID_FOR_SCRIPT
 } from "./reading";
 import { pinyinRuby } from "./pinyin";
 import { furiganaHtml } from "./furigana";
@@ -32,39 +36,66 @@ describe("word extraction", () => {
 		expect(extractWordAt("你好世界", 1)).toBe("你好世界");
 		expect(extractWordAt("ancienne d'un", 11)).toBe("un");
 		expect(extractWordAt("ancienne d'un", 9)).toBe("d");
+		expect(extractWordAt("«bonjour» verstehen", 1)).toBe("bonjour");
 		expect(extractWordAt("بالعالم، كيف", 3)).toBe("بالعالم");
 		expect(extractWordAt("", 0)).toBe("");
 		expect(extractWordAt("hi", 9)).toBe("");
 	});
 });
 
-describe("speech", () => {
+describe("speech locales", () => {
 	it("maps scripts to voice locales", () => {
 		expect(ttsLangFor("你好")).toBe("zh-CN");
 		expect(ttsLangFor("読む")).toBe("ja-JP");
 		expect(ttsLangFor("مرحبا")).toBe("ar-SA");
+		expect(ttsLangFor("안녕하세요")).toBe("ko-KR");
+		expect(ttsLangFor("спасибо")).toBe("ru-RU");
+		expect(ttsLangFor("ευχαριστώ")).toBe("el-GR");
+		expect(ttsLangFor("שלום")).toBe("he-IL");
+		expect(ttsLangFor("สวัสดี")).toBe("th-TH");
+		expect(ttsLangFor("नमस्ते")).toBe("hi-IN");
+	});
+
+	it("falls back for Latin script (French/German/English)", () => {
 		expect(ttsLangFor("hello")).toBe("en-US");
+		expect(ttsLangFor("bonjour", "fr-FR")).toBe("fr-FR");
+		expect(ttsLangFor("verstehen", "de-DE")).toBe("de-DE");
 	});
 
 	it("reports unavailable synthesis without throwing", () => {
 		expect(speakWord("hello")).toEqual({ spoken: false, lang: "en-US" });
+		expect(speakWord("bonjour", "fr-FR")).toEqual({ spoken: false, lang: "fr-FR" });
 	});
 });
 
-describe("vocalization", () => {
-	it("builds a tashkeel-only prompt", () => {
-		const messages = buildVocalizeMessages("مرحبا");
-		expect(messages[0].content).toContain("tashkeel");
-		expect(messages[1]).toEqual({ role: "user", content: "مرحبا" });
+describe("model-assisted reading aids", () => {
+	it("registers tashkeel as the Arabic model aid", () => {
+		expect(MODEL_AID_FOR_SCRIPT.ar).toBe("tashkeel");
+		expect(MODEL_AID_FOR_SCRIPT.zh).toBeNull();
+		expect(MODEL_AID_FOR_SCRIPT.ja).toBeNull();
+		expect(MODEL_AIDS.tashkeel.instruction).toContain("tashkeel");
 	});
 
-	it("caches by exact input", async () => {
+	it("builds a tashkeel-only prompt", () => {
+		const messages = buildAidMessages("tashkeel", "مرحبا");
+		expect(messages[0].content).toContain("tashkeel");
+		expect(messages[1]).toEqual({ role: "user", content: "مرحبا" });
+		expect(() => buildAidMessages("nope", "x")).toThrow("Unknown reading aid");
+	});
+
+	it("keeps the vocalize wrappers working", () => {
+		expect(buildVocalizeMessages("مرحبا")[0].content).toContain("tashkeel");
+	});
+
+	it("caches by aid + exact input", async () => {
 		const chat = vi.fn(async () => ({ content: "مَرْحَبًا", usage: null }));
 		const provider = { id: "scripted", chat, stream: chat } as unknown as ChatProvider;
-		await expect(vocalizeArabic(provider, "مرحبا")).resolves.toBe("مَرْحَبًا");
+		await expect(runModelAid(provider, "tashkeel", "مرحبا")).resolves.toBe("مَرْحَبًا");
+		await expect(runModelAid(provider, "tashkeel", "مرحبا")).resolves.toBe("مَرْحَبًا");
+		expect(chat).toHaveBeenCalledTimes(1);
+		await expect(runModelAid(provider, "tashkeel", "  ")).rejects.toThrow("Nothing to vocalize");
 		await expect(vocalizeArabic(provider, "مرحبا")).resolves.toBe("مَرْحَبًا");
 		expect(chat).toHaveBeenCalledTimes(1);
-		await expect(vocalizeArabic(provider, "  ")).rejects.toThrow("Nothing to vocalize");
 	});
 });
 

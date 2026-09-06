@@ -49,10 +49,22 @@
 		detectScript,
 		SCRIPT_LABEL,
 		AID_LABEL,
+		MODEL_AIDS,
+		MODEL_AID_FOR_SCRIPT,
 		extractWordAt,
 		speakWord,
-		vocalizeArabic
+		ttsLangFor,
+		runModelAid
 	} from "$lib/reading";
+	import {
+		speakText,
+		speechText,
+		replyLangFor,
+		stopSpeaking,
+		micAvailable,
+		dictateOnce,
+		type VoiceProgress
+	} from "$lib/voice";
 
 	let chatState = $state(createChatState());
 	let settings = $state(loadSettings());
@@ -88,6 +100,13 @@
 	let vocalized = $state<Record<string, string>>({});
 	let vocalizing = new SvelteSet<string>();
 	let vocalizeError: string | null = $state(null);
+	let speakingId: string | null = $state(null);
+	let spokenNow = $state("");
+	let voiceError: string | null = $state(null);
+	let canMic = $state(false);
+	let dictating = $state(false);
+	let micError: string | null = $state(null);
+	let stopDictation: (() => void) | null = null;
 
 	const useMock = mockProviderEnabled();
 	const chat = $derived(activeChat(chatState));
@@ -295,7 +314,7 @@
 		persistSettings();
 	}
 
-	async function runVocalize(msg: ChatMsg): Promise<void> {
+	async function runModelAidFor(msg: ChatMsg, aidId: string): Promise<void> {
 		if (vocalized[msg.id] || vocalizing.has(msg.id)) return;
 		const provider = resolveProvider();
 		if (!provider) {
@@ -305,13 +324,108 @@
 		vocalizeError = null;
 		vocalizing.add(msg.id);
 		try {
-			const text = await vocalizeArabic(provider, msg.content);
+			const text = await runModelAid(provider, aidId, msg.content);
 			vocalized = { ...vocalized, [msg.id]: text };
 		} catch (error) {
 			vocalizeError = error instanceof Error ? error.message : String(error);
 		} finally {
 			vocalizing.delete(msg.id);
 		}
+	}
+
+	function latinFallback(): string {
+		return settings.voiceLang?.trim() || "en-US";
+	}
+
+	function onVoiceProgress(progress: VoiceProgress): void {
+		spokenNow = progress.current;
+	}
+
+	function resetVoice(): void {
+		speakingId = null;
+		spokenNow = "";
+	}
+
+	function stopVoice(): void {
+		stopSpeaking();
+		resetVoice();
+	}
+
+	function startSpeech(id: string, text: string, lang: string): void {
+		stopSpeaking();
+		voiceError = null;
+		speakingId = id;
+		spokenNow = "";
+		const ok = speakText(text, lang, {
+			onProgress: onVoiceProgress,
+			onEnd: resetVoice,
+			onError: (message) => {
+				voiceError = message;
+				resetVoice();
+			}
+		});
+		if (!ok) {
+			resetVoice();
+			voiceError = "Voice not available in this browser.";
+		}
+	}
+
+	function speakReply(msg: ChatMsg): void {
+		const text = speechText(msg.content);
+		if (!text) return;
+		startSpeech(msg.id, text, replyLangFor(msg.content, latinFallback()));
+	}
+
+	function maybeSpeakReply(): void {
+		if (!settings.voice) return;
+		const last = chat.messages[chat.messages.length - 1];
+		if (last?.role === "assistant" && !last.error && last.content.trim()) {
+			speakReply(last);
+		}
+	}
+
+	function toggleVoice(): void {
+		settings.voice = !settings.voice;
+		if (!settings.voice) stopVoice();
+		persistSettings();
+	}
+
+	/** Highlight-to-speak: only what was selected, only when asked. */
+	function speakSelection(): void {
+		if (!selMenu) return;
+		const quote = selMenu.quote;
+		clearSelection();
+		selMenu = null;
+		startSpeech("selection", quote, ttsLangFor(quote, latinFallback()));
+	}
+
+	function toggleMic(): void {
+		if (dictating) {
+			stopDictation?.();
+			stopDictation = null;
+			dictating = false;
+			return;
+		}
+		micError = null;
+		const stop = dictateOnce(
+			latinFallback(),
+			(transcript) => {
+				editor?.insertText(transcript.endsWith(" ") ? transcript : `${transcript} `);
+				dictating = false;
+				stopDictation = null;
+			},
+			(message) => {
+				micError = message;
+				dictating = false;
+				stopDictation = null;
+			}
+		);
+		if (!stop) {
+			micError = "Mic input not available in this browser.";
+			return;
+		}
+		stopDictation = stop;
+		dictating = true;
 	}
 
 	function unvocalize(id: string): void {
@@ -340,6 +454,7 @@
 		}
 		missingKey = false;
 		focusMode = "edit";
+		stopVoice();
 		const outgoing = attachments;
 		const outgoingAnnotations = annotations;
 		await sendMessage(
@@ -361,6 +476,7 @@
 		}
 		editor?.clear();
 		scrollToBottom();
+		maybeSpeakReply();
 	}
 
 	async function resend() {
@@ -370,8 +486,10 @@
 			return;
 		}
 		missingKey = false;
+		stopVoice();
 		await resendLast(chatState, provider, settings.systemPrompt);
 		scrollToBottom();
+		maybeSpeakReply();
 	}
 
 	function onSubmit(kind: SubmitKind) {
@@ -459,6 +577,7 @@
 			if (event.key === "Escape" && !inEditor) {
 				selMenu = null;
 				translate = null;
+				stopVoice();
 				return;
 			}
 			if (event.altKey && (event.key === "r" || event.key === "R")) {
@@ -533,8 +652,9 @@
 			const word = extractWordAt(node.textContent ?? "", range?.startOffset ?? 0);
 			if (!word) return;
 			event.preventDefault();
-			speakWord(word);
+			speakWord(word, settings.voiceLang?.trim() || "en-US");
 		};
+		canMic = micAvailable();
 		window.addEventListener("keydown", onKey, true);
 		window.addEventListener("focusin", onFocusIn);
 		window.addEventListener("mouseup", onMouseUp);
@@ -544,6 +664,8 @@
 			window.removeEventListener("focusin", onFocusIn);
 			window.removeEventListener("mouseup", onMouseUp);
 			window.removeEventListener("contextmenu", onContextMenu, true);
+			stopSpeaking();
+			stopDictation?.();
 			editor?.destroy();
 			editor = null;
 		};
@@ -585,6 +707,15 @@
 		<header>
 			<span class="pill">{providerLabel}{useMock ? "" : ` · ${settings.thinkingLevel}`}</span>
 			<span class="tokens" title="Accrued tokens this chat">{total} tokens</span>
+			<button
+				type="button"
+				class="voice-toggle"
+				class:on={settings.voice}
+				title="Toggle voice readback (replies are read aloud while text streams in)"
+				onclick={toggleVoice}
+			>
+				{settings.voice ? "🔊 Voice on" : "🔇 Voice off"}
+			</button>
 			<a href={resolve("/settings")}>Settings</a>
 		</header>
 
@@ -608,6 +739,7 @@
 			{/if}
 			{#each chat.messages as msg, i (msg.id)}
 				{@const script = detectScript(msg.content)}
+				{@const aidId = script ? MODEL_AID_FOR_SCRIPT[script] : null}
 				<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 				<!-- Option-click is mouse-only by design; keyboard users get the Delete button below. -->
 				<article
@@ -630,7 +762,7 @@
 								{SCRIPT_LABEL[script]} · {AID_LABEL[script]}
 								{settings.readingAids ? "on" : "off"}
 							</button>
-							{#if script === "ar" && settings.readingAids}
+							{#if aidId && settings.readingAids}
 								{#if vocalized[msg.id]}
 									<button type="button" title="Show original" onclick={() => unvocalize(msg.id)}>
 										original
@@ -638,11 +770,11 @@
 								{:else}
 									<button
 										type="button"
-										title="Add tashkeel (uses the active model)"
+										title={MODEL_AIDS[aidId].title}
 										disabled={vocalizing.has(msg.id)}
-										onclick={() => void runVocalize(msg)}
+										onclick={() => void runModelAidFor(msg, aidId)}
 									>
-										{vocalizing.has(msg.id) ? "…" : "تشكيل"}
+										{vocalizing.has(msg.id) ? "…" : MODEL_AIDS[aidId].button}
 									</button>
 								{/if}
 							{/if}
@@ -683,6 +815,9 @@
 						</button>
 						<button type="button" title="Branch from here" onclick={() => branchFrom(chatState, i)}>
 							Branch
+						</button>
+						<button type="button" title="Read this message aloud" onclick={() => speakReply(msg)}>
+							Speak
 						</button>
 						<button
 							type="button"
@@ -831,6 +966,21 @@
 			<p class="error-banner" role="alert">{vocalizeError}</p>
 		{/if}
 
+		{#if speakingId}
+			<div class="voice-bar" role="status">
+				<span class="voice-dot" aria-hidden="true"></span>
+				<span class="voice-text"
+					>{spokenNow
+						? `“${spokenNow.length > 90 ? `${spokenNow.slice(0, 90)}…` : spokenNow}”`
+						: "Speaking…"}</span
+				>
+				<button type="button" title="Skip (stop reading)" onclick={stopVoice}>Skip</button>
+			</div>
+		{/if}
+		{#if voiceError}
+			<p class="error-banner" role="alert">{voiceError}</p>
+		{/if}
+
 		{#if translate}
 			<div class="translate-panel" role="dialog" aria-label="Translate lookup">
 				<div class="review-head">
@@ -882,6 +1032,14 @@
 			<button type="button" title="Attach images or text files" onclick={() => attachInput?.click()}>
 				Attach{#if attachTokens > 0} · ~{attachTokens} tok{/if}
 			</button>
+			{#if canMic}
+				<button type="button" title="Dictate into the prompt" onclick={toggleMic}>
+					{dictating ? "■ Stop" : "🎤 Mic"}
+				</button>
+			{/if}
+			{#if micError}
+				<span class="mic-error" role="alert">{micError}</span>
+			{/if}
 			<input
 				type="file"
 				class="hidden-input"
@@ -911,6 +1069,9 @@
 		<div class="sel-menu" style="left: {selMenu.x}px; top: {selMenu.y}px" role="menu">
 			<button type="button" onclick={() => annotateFromMenu(false)}>Add to chat</button>
 			<button type="button" onclick={() => annotateFromMenu(true)}>More details</button>
+			<button type="button" title="Read only the selection aloud" onclick={speakSelection}>
+				Speak aloud
+			</button>
 		</div>
 	{/if}
 </div>
@@ -1144,6 +1305,72 @@
 	}
 	.composer-bar button:hover {
 		color: #1c1c1e;
+	}
+	.mic-error {
+		align-self: center;
+		font-size: 0.78rem;
+		color: #94250a;
+	}
+	.voice-toggle {
+		font: inherit;
+		font-size: 0.78rem;
+		color: #6e6e73;
+		border: 1px solid #c7c7cc;
+		border-radius: 999px;
+		background: none;
+		cursor: pointer;
+		padding: 0.2rem 0.7rem;
+	}
+	.voice-toggle.on {
+		color: #1c1c1e;
+		border-color: #1c1c1e;
+		background: #f1f1f4;
+	}
+	.voice-bar {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		margin: 0.5rem 1.2rem 0;
+		padding: 0.45rem 0.8rem;
+		border: 1px solid #c7c7cc;
+		border-radius: 12px;
+		background: #fafafc;
+		box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+		font-size: 0.82rem;
+	}
+	.voice-dot {
+		width: 0.55rem;
+		height: 0.55rem;
+		flex-shrink: 0;
+		border-radius: 50%;
+		background: #30a46c;
+		animation: voice-pulse 1.2s ease-in-out infinite;
+	}
+	@keyframes voice-pulse {
+		0%,
+		100% {
+			opacity: 1;
+		}
+		50% {
+			opacity: 0.35;
+		}
+	}
+	.voice-text {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		color: #3a3a3c;
+	}
+	.voice-bar button {
+		flex-shrink: 0;
+		font-size: 0.78rem;
+		border: 1px solid #c7c7cc;
+		border-radius: 999px;
+		background: #fff;
+		cursor: pointer;
+		padding: 0.2rem 0.8rem;
 	}
 	.hidden-input {
 		display: none;

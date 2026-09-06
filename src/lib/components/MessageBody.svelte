@@ -31,7 +31,7 @@
 		onBadgeClick?: (id: string) => void;
 		/** Global reading-aids toggle (pinyin / furigana). */
 		readingAids?: boolean;
-		/** Vocalized Arabic text replacing the message body when present. */
+		/** Model-aid text replacing the message body when present. */
 		textOverride?: string | null;
 	}
 
@@ -59,8 +59,8 @@
 		// Read synchronously so the effect re-runs when badges change.
 		const items = marks;
 		const skipMarks = streaming || folded;
-		// Aids render from raw text (markdown set aside); Arabic vocalization
-		// arrives via textOverride and takes the normal path.
+		// Aids render from raw text (markdown set aside); model-aid text
+		// (e.g. tashkeel) arrives via textOverride and takes the normal path.
 		const aidScript =
 			!textOverride && readingAids && !streaming ? detectScript(message.content) : null;
 		// Marks apply after Svelte flushes the new HTML (see applyMarks).

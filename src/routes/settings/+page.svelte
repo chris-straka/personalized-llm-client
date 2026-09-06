@@ -186,6 +186,16 @@
 			<input type="checkbox" bind:checked={settings.voice} />
 			Voice readback (web speech engine)
 		</label>
+		<label>
+			Voice language for Latin-script text (French, German, English… — BCP-47)
+			<input
+				type="text"
+				bind:value={settings.voiceLang}
+				placeholder="en-US"
+				autocomplete="off"
+				spellcheck="false"
+			/>
+		</label>
 	</section>
 
 	<footer>

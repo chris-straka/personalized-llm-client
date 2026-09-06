@@ -13,6 +13,7 @@ describe("settings", () => {
 		expect(s.thinkingLevel).toBe("high");
 		expect(s.readingAids).toBe(false);
 		expect(s.voice).toBe(false);
+		expect(s.voiceLang).toBe("en-US");
 		expect(s.systemPrompt).toBe(DEFAULT_SYSTEM_PROMPT);
 		expect(s.providers["deepseek"].model).toBe("deepseek-v4-pro");
 		expect(s.providers["muse"].model).toBe("muse-spark-1.3-contributor");

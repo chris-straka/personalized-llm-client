@@ -20,6 +20,11 @@ export interface AppSettings {
 	/** Voice readback. Off unless toggled. */
 	voice: boolean;
 	voiceEngine: VoiceEngine;
+	/**
+	 * Default voice locale for Latin-script text (French, German, English…),
+	 * which cannot self-identify by script. BCP-47, e.g. "fr-FR".
+	 */
+	voiceLang: string;
 	/** Target language for the Cmd+T translate lookup. */
 	translateTarget: string;
 }
@@ -43,6 +48,7 @@ export function defaultSettings(): AppSettings {
 		readingAids: false,
 		voice: false,
 		voiceEngine: "web",
+		voiceLang: "en-US",
 		translateTarget: "English"
 	};
 }

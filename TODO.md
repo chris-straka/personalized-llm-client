@@ -1,6 +1,6 @@
 # Ccez Studio — TODO
 
-Spec: `README.md`. Full plan: `AI2.md`. Q&A: `AI.md`.
+Spec: `README.md`. Full plan: `PLAN.md` (merges `AI.md` + `AI2.md`, both superseded).
 Amendments A1–A4 below are agreed but not yet folded into `AI2.md` — they go in
 with the approval to start.
 
@@ -58,7 +58,7 @@ with the approval to start.
 
 ### From ChatGPT desktop app
 - [ ] Annotation: select → comment → wrapped into next query (edit/delete), per `imgs/` → S4
-- [ ] Voice: type-then-it-talks, streaming word display, on-demand highlight
+- [x] Voice: type-then-it-talks, streaming word display, on-demand highlight
   readback, skip midway, clean voice-mode chrome → S6 (download = stretch)
 - [ ] Cmd+T translate lookup: cheap helper feeding annotation, NOT a mini-browser → S4
 - [ ] Multiple chats, no titles → S2
@@ -98,5 +98,8 @@ with the approval to start.
   marks needed a synchronous read in the render effect (async-only reads
   never subscribe).
 - [x] S5 reading aids (default OFF, A1)
-- [ ] S6 voice mode (+A4 bridge policy)
+- [x] S6 voice mode (+A4 bridge policy, +A6 multilingual) — header toggle,
+  auto-read replies with live voice bar + Skip, per-message Speak,
+  highlight-to-speak on demand, guarded mic dictation, voiceLang setting,
+  script-wide TTS locales, tashkeel folded into generic model-aid path
 - [ ] S7 desktop polish, updater, icon, cold-start checks
