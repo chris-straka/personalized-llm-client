@@ -104,3 +104,7 @@ with the approval to start.
   script-wide TTS locales, tashkeel folded into generic model-aid path
 - [x] S7 desktop polish, updater, icon, keychain keys (cold-start +
   installer-run stay manual on real hardware)
+- [ ] R2 post-install polish: overlay titlebar, minimalist header, clean
+  pills/badges, reply-language menus + clear, real thinking levels,
+  .env prefill, no translate-target, shortcut/vim maps, editor cursor,
+  prompt flash fix

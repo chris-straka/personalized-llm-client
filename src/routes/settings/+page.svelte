@@ -199,7 +199,7 @@
 			<textarea rows="2" bind:value={settings.systemPrompt} spellcheck="false"></textarea>
 		</label>
 		<fieldset>
-			<legend>Thinking level</legend>
+			<legend>Thinking level (appends a deliberation hint to the system prompt)</legend>
 			<div class="segmented" role="radiogroup" aria-label="Thinking level">
 				<button
 					type="button"
@@ -211,16 +211,19 @@
 				<button
 					type="button"
 					role="radio"
+					aria-checked={settings.thinkingLevel === "medium"}
+					class:selected={settings.thinkingLevel === "medium"}
+					onclick={() => setThinking("medium")}>Medium</button
+				>
+				<button
+					type="button"
+					role="radio"
 					aria-checked={settings.thinkingLevel === "high"}
 					class:selected={settings.thinkingLevel === "high"}
 					onclick={() => setThinking("high")}>High</button
 				>
 			</div>
 		</fieldset>
-		<label>
-			Translate target (⌘+T lookup)
-			<input type="text" bind:value={settings.translateTarget} autocomplete="off" spellcheck="false" />
-		</label>
 		<label class="check">
 			<input type="checkbox" bind:checked={settings.readingAids} />
 			Reading aids (pinyin / furigana / tashkeel)
@@ -239,6 +242,33 @@
 				spellcheck="false"
 			/>
 		</label>
+	</section>
+
+	<section aria-labelledby="keys-heading">
+		<h2 id="keys-heading">Keyboard shortcuts</h2>
+		<dl class="keys">
+			<div><dt>Send</dt><dd>Enter</dd></div>
+			<div><dt>Run with pins</dt><dd>⌘+Enter</dd></div>
+			<div><dt>Pin draft to top</dt><dd>⌥+Enter</dd></div>
+			<div><dt>Switch model / key</dt><dd>Ctrl+Alt+← / →</dd></div>
+			<div><dt>Thinking low / medium / high</dt><dd>Ctrl+Alt+↓ / ↑ (cycles)</dd></div>
+			<div><dt>Hop out of the prompt</dt><dd>Ctrl+G (vim swallows the rest)</dd></div>
+			<div><dt>Scroll messages</dt><dd>J / K, then I or Enter to write again</dd></div>
+			<div><dt>Reading aids on/off</dt><dd>Alt+R (outside the prompt)</dd></div>
+			<div><dt>Speak hovered word</dt><dd>Right-click the word</dd></div>
+			<div><dt>Thoughts show/hide</dt><dd>Ctrl+O</dd></div>
+			<div><dt>Translate selection</dt><dd>⌘+T (to English; feeds annotation)</dd></div>
+			<div><dt>Stop voice / close menus</dt><dd>Esc (outside the prompt)</dd></div>
+			<div><dt>Delete a message</dt><dd>Option-click it (or its Delete button)</dd></div>
+			<div><dt>Rerun a prompt</dt><dd>Rerun button (deletes everything after; Branch keeps it)</dd></div>
+		</dl>
+		<h3>Vim in the prompt box</h3>
+		<p class="note">
+			Vim is trapped inside the prompt: type to insert, Esc for normal mode,
+			Enter sends from either mode. Ctrl+G hops out to message scroll (J/K),
+			I or Enter hops back in. The rest of vim (motions, operators, :commands
+			via the vim layer) works where you left it.
+		</p>
 	</section>
 
 	<section aria-labelledby="updates-heading">
@@ -339,6 +369,36 @@
 	}
 	.key-state code {
 		font-family: ui-monospace, monospace;
+	}
+	h3 {
+		font-size: 0.9rem;
+		font-weight: 650;
+		margin: 1.1rem 0 0.4rem;
+	}
+	.keys {
+		margin: 0;
+		display: flex;
+		flex-direction: column;
+	}
+	.keys div {
+		display: flex;
+		gap: 1rem;
+		padding: 0.35rem 0;
+		border-top: 1px solid #e5e5ea;
+		font-size: 0.83rem;
+	}
+	.keys div:first-child {
+		border-top: 0;
+	}
+	.keys dt {
+		flex: 0 0 13rem;
+		color: #3a3a3c;
+	}
+	.keys dd {
+		margin: 0;
+		font-family: ui-monospace, monospace;
+		font-size: 0.78rem;
+		color: #1c1c1e;
 	}
 	.key-state button {
 		font-size: 0.8rem;

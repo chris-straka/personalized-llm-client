@@ -80,6 +80,11 @@ sharing, no plugins, no agentic/build features).
   No upgrade needed. Known legacy smells, kept while they work: kuroshiro
   (unmaintained — lazy-loaded, API fallback), pako + path-browserify shims
   (replacement candidate: fflate), 17 MB kuromoji dict (git-lfs/download TBD).
+- **A8. Round 2 chrome rules.** Overlay native titlebar; no product-name
+  text in the UI; no emoji as interface icons (text pills + status dots +
+  ISO-code badges, except the three user-requested menu markers 🌍🌏🏛 and
+  the three classics markers). Latin-script voice locale follows the reply
+  language; ancient languages use stated modern approximations.
 
 ## Architecture Rules (learned mid-build)
 
@@ -90,7 +95,36 @@ sharing, no plugins, no agentic/build features).
 - Never run `check`/`lint`/`build` during a browser pass: `svelte-kit sync`
   rewrites watched files and HMR-invalidates the dev session mid-test.
 
-## Stages — 2 of 8 remaining (S6 in progress, then S7)
+## Round 2 — post-install polish (Sep 2026, from running the .app in dark mode)
+
+All S0–S7 shipped. These items came from using the installed app:
+
+- **R2.1 Chrome.** Native overlay titlebar (no title text, floating traffic
+  lights, window title "Ccez"); in-app header restyled minimalist and airy
+  with traffic-light clearance in the shell; no emoji icons (taste rule) —
+  Voice/Mic are text pills with status dots; language options are ISO-code
+  badges, not emoji flags.
+- **R2.2 Reply-language menus.** Empty-state menus 🌍 Europe / 🌏 Asia /
+  🏛 Classics (Latin 🏛, Ancient Greek 🏺, Sanskrit 🪷), order as specified.
+  Choosing sets the reply language (system-prompt suffix) and the voice
+  locale; Clear restores the default brief prompt.
+- **R2.3 Thinking levels that do something.** low/medium/high append a
+  deliberation hint to the system prompt (previously display-only). Default
+  stays high; 3-way cycling on the shortcut.
+- **R2.4 Keys from `.env` in dev.** `VITE_DEEPSEEK_API_KEY`,
+  `VITE_MUSE_API_KEY` (+ `_BASE_URL` overrides) prefill blank settings at
+  dev/preview time. The installed app cannot read `.env` (baked at build) —
+  it uses Settings → Keychain, which already hides the field and shows
+  masked `••••last4` while a key is loaded.
+- **R2.5 Translate target removed.** Cmd+T lookup targets English; the
+  setting is gone (you specify other targets in the chat itself).
+- **R2.6 Shortcut maps.** Settings gains full keyboard-shortcut and vim
+  exit-mode maps (single-sourced from the audit: everything in README is
+  implemented, including option+enter pin and Ctrl+G hop-out).
+- **R2.7 Editor legibility.** Caret + vim block-cursor colors for dark mode;
+  stable prompt-box min-height kills the navigation resize flash.
+
+## Stages — S0–S7 done; Round 2 in progress
 
 - [x] **S0 clean slate** (+A3): git init + insurance commit, wipe,
   desktop-only Tauri+Svelte+TS scaffold, Vitest, lint/format.

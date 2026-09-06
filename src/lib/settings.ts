@@ -1,7 +1,24 @@
 import { getProviderDef } from "./providers/registry";
+import { replyLanguageFor } from "./languages";
 
-export type ThinkingLevel = "low" | "high";
+export type ThinkingLevel = "low" | "medium" | "high";
 export type VoiceEngine = "web";
+
+export const THINKING_LEVELS: ThinkingLevel[] = ["low", "medium", "high"];
+
+/** System-prompt deliberation hint per level (medium = the plain default). */
+export const THINKING_HINT: Record<ThinkingLevel, string> = {
+	low: "Answer directly with minimal deliberation.",
+	medium: "",
+	high: "Think carefully before answering."
+};
+
+export function cycleThinkingLevel(level: ThinkingLevel, direction: 1 | -1): ThinkingLevel {
+	const next =
+		(THINKING_LEVELS.indexOf(level) + direction + THINKING_LEVELS.length) %
+		THINKING_LEVELS.length;
+	return THINKING_LEVELS[next];
+}
 
 export interface ProviderSettings {
 	baseUrl: string;
@@ -22,22 +39,44 @@ export interface AppSettings {
 	voiceEngine: VoiceEngine;
 	/**
 	 * Default voice locale for Latin-script text (French, German, English…),
-	 * which cannot self-identify by script. BCP-47, e.g. "fr-FR".
+	 * which cannot self-identify by script. BCP-47, e.g. "fr-FR". Follows
+	 * the reply language when one is chosen.
 	 */
 	voiceLang: string;
-	/** Target language for the Cmd+T translate lookup. */
-	translateTarget: string;
+	/** Reply-language code from the empty-state menus; null = default. */
+	replyLang: string | null;
 }
 
 const STORAGE_KEY = "ccez-studio-settings-v1";
 
 export const DEFAULT_SYSTEM_PROMPT = "Be brief, no summaries.";
 
+/**
+ * Dev-time `.env` prefill (Vite bakes these into dev/preview builds only —
+ * the installed app cannot read `.env` and uses Settings → Keychain).
+ * Add to `.env`, never commit it:
+ *   VITE_DEEPSEEK_API_KEY=...  VITE_MUSE_API_KEY=...
+ *   VITE_DEEPSEEK_BASE_URL=... VITE_MUSE_BASE_URL=...
+ */
+function devEnv(): Record<string, string | undefined> {
+	try {
+		return (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
+	} catch {
+		return {};
+	}
+}
+
 export function defaultSettings(): AppSettings {
+	const env = devEnv();
 	const providers: Record<string, ProviderSettings> = {};
 	for (const id of ["deepseek", "muse"]) {
 		const def = getProviderDef(id);
-		providers[id] = { baseUrl: def.defaultBaseUrl, apiKey: "", model: def.defaultModel };
+		const prefix = `VITE_${id.toUpperCase()}`;
+		providers[id] = {
+			baseUrl: env[`${prefix}_BASE_URL`] || def.defaultBaseUrl,
+			apiKey: env[`${prefix}_API_KEY`] || "",
+			model: def.defaultModel
+		};
 	}
 	return {
 		version: 1,
@@ -49,8 +88,18 @@ export function defaultSettings(): AppSettings {
 		voice: false,
 		voiceEngine: "web",
 		voiceLang: "en-US",
-		translateTarget: "English"
+		replyLang: null
 	};
+}
+
+/** Base prompt + thinking deliberation hint + reply-language suffix. */
+export function effectiveSystemPrompt(settings: AppSettings): string {
+	const parts = [settings.systemPrompt.trim()];
+	const hint = THINKING_HINT[settings.thinkingLevel] ?? "";
+	if (hint) parts.push(hint);
+	const lang = replyLanguageFor(settings.replyLang);
+	if (lang) parts.push(lang.prompt);
+	return parts.filter(Boolean).join(" ");
 }
 
 /** Storage behind an interface so Tauri secure storage can replace it later. */
@@ -81,12 +130,15 @@ export function loadSettings(store?: KeyValueStore): AppSettings {
 	try {
 		const parsed = JSON.parse(raw) as Partial<AppSettings>;
 		const fresh = defaultSettings();
-		return {
+		const merged: AppSettings = {
 			...fresh,
 			...parsed,
 			version: 1,
 			providers: { ...fresh.providers, ...(parsed.providers ?? {}) }
 		};
+		// Drop the removed translate-target setting from older saves.
+		delete (merged as unknown as Record<string, unknown>).translateTarget;
+		return merged;
 	} catch {
 		return defaultSettings();
 	}

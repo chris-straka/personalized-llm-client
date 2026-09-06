@@ -21,7 +21,17 @@
 		sendMessage,
 		type ChatMsg
 	} from "$lib/chat";
-	import { loadSettings, saveSettings } from "$lib/settings";
+	import {
+		loadSettings,
+		saveSettings,
+		effectiveSystemPrompt,
+		cycleThinkingLevel
+	} from "$lib/settings";
+	import {
+		LANGUAGE_MENUS,
+		replyLanguageFor,
+		type LanguageMenu
+	} from "$lib/languages";
 	import { PROVIDERS, createProvider, getProviderDef } from "$lib/providers/registry";
 	import { MockProvider, mockProviderEnabled } from "$lib/providers/mock";
 	import { createPromptEditor, type PromptEditor, type SubmitKind } from "$lib/editor";
@@ -113,6 +123,8 @@
 	let dictating = $state(false);
 	let micError: string | null = $state(null);
 	let stopDictation: (() => void) | null = null;
+	let openLangMenu: LanguageMenu["id"] | null = $state(null);
+	const activeReplyLang = $derived(replyLanguageFor(settings.replyLang));
 
 	const useMock = mockProviderEnabled();
 	const chat = $derived(activeChat(chatState));
@@ -278,10 +290,11 @@
 		const controller = new AbortController();
 		const timer = setTimeout(() => controller.abort(), 30000);
 		try {
+			// Lookup targets English; anything else goes in the chat itself.
 			const result = await translateSelection(
 				provider,
 				found.quote,
-				settings.translateTarget,
+				"English",
 				controller.signal
 			);
 			if (translate && translate.quote === found.quote) {
@@ -466,7 +479,7 @@
 		await sendMessage(
 			chatState,
 			provider,
-			settings.systemPrompt,
+			effectiveSystemPrompt(settings),
 			withAnnotations(composerText(), outgoingAnnotations),
 			{ includePins, attachments: outgoing }
 		);
@@ -493,7 +506,7 @@
 		}
 		missingKey = false;
 		stopVoice();
-		await resendLast(chatState, provider, settings.systemPrompt);
+		await resendLast(chatState, provider, effectiveSystemPrompt(settings));
 		scrollToBottom();
 		maybeSpeakReply();
 	}
@@ -546,7 +559,22 @@
 	}
 
 	function cycleThinking(direction: 1 | -1) {
-		settings.thinkingLevel = direction === 1 ? "high" : "low";
+		settings.thinkingLevel = cycleThinkingLevel(settings.thinkingLevel, direction);
+		persistSettings();
+	}
+
+	function setReplyLang(code: string): void {
+		const lang = replyLanguageFor(code);
+		if (!lang) return;
+		settings.replyLang = code;
+		settings.voiceLang = lang.voice;
+		openLangMenu = null;
+		persistSettings();
+	}
+
+	function clearReplyLang(): void {
+		settings.replyLang = null;
+		openLangMenu = null;
 		persistSettings();
 	}
 
@@ -583,6 +611,7 @@
 			if (event.key === "Escape" && !inEditor) {
 				selMenu = null;
 				translate = null;
+				openLangMenu = null;
 				stopVoice();
 				return;
 			}
@@ -633,6 +662,10 @@
 			// Ignore clicks that start inside the prompt, popups, or buttons —
 			// only freshly selected message text summons the menu.
 			if (event.button === 2) return; // right-click reads aloud instead
+			if (openLangMenu) {
+				const target = event.target as HTMLElement | null;
+				if (!target?.closest(".lang-menu")) openLangMenu = null;
+			}
 			const target = event.target as HTMLElement | null;
 			if (target?.closest(".cm-content, .sel-menu, .review, .translate-panel, button, input, textarea")) {
 				return;
@@ -682,7 +715,11 @@
 	<title>Ccez Studio</title>
 </svelte:head>
 
-<div class="app" data-focus-mode={focusMode}>
+<div
+	class="app"
+	data-focus-mode={focusMode}
+	data-shell={tauriBackendAvailable() ? "tauri" : "browser"}
+>
 	<aside>
 		<button type="button" class="new" onclick={() => newChat(chatState)}>+ New chat</button>
 		<ul>
@@ -710,17 +747,28 @@
 	</aside>
 
 	<main>
-		<header>
+		<header data-tauri-drag-region>
 			<span class="pill">{providerLabel}{useMock ? "" : ` · ${settings.thinkingLevel}`}</span>
+			{#if activeReplyLang}
+				<button
+					type="button"
+					class="lang-chip"
+					title="Reply language — click to clear"
+					onclick={clearReplyLang}
+				>
+					{activeReplyLang.name} ×
+				</button>
+			{/if}
 			<span class="tokens" title="Accrued tokens this chat">{total} tokens</span>
+			<span class="spacer"></span>
 			<button
 				type="button"
-				class="voice-toggle"
+				class="pill-btn"
 				class:on={settings.voice}
 				title="Toggle voice readback (replies are read aloud while text streams in)"
 				onclick={toggleVoice}
 			>
-				{settings.voice ? "🔊 Voice on" : "🔇 Voice off"}
+				<span class="dot" aria-hidden="true"></span>Voice
 			</button>
 			<a href={resolve("/settings")}>Settings</a>
 		</header>
@@ -737,11 +785,56 @@
 
 		<div class="messages" bind:this={scrollBox} onscroll={() => (selMenu = null)}>
 			{#if chat.messages.length === 0}
-				<p class="empty">
-					New chat — type below and hit Enter. ⌘+Enter runs with pins, ⌥+Enter pins
-					the draft. Select text in a reply to annotate it; ⌘+T translates the
-					selection.{#if useMock} <strong>Mock provider active.</strong>{/if}
-				</p>
+				<div class="empty-state">
+					<p class="empty">
+						New chat — type below and hit Enter. ⌘+Enter runs with pins,
+						⌥+Enter pins the draft. Select text in a reply to annotate it;
+						⌘+T translates the selection.{#if useMock}
+							<strong>Mock provider active.</strong>{/if}
+					</p>
+					<div class="lang-menus" aria-label="Reply language">
+						{#each LANGUAGE_MENUS as menu (menu.id)}
+							<div class="lang-menu">
+								<button
+									type="button"
+									aria-haspopup="true"
+									aria-expanded={openLangMenu === menu.id}
+									title="Reply in a {menu.label.toLowerCase()} language"
+									onclick={() =>
+										(openLangMenu = openLangMenu === menu.id ? null : menu.id)}
+								>
+									<span aria-hidden="true">{menu.marker}</span>
+									{menu.label}
+								</button>
+								{#if openLangMenu === menu.id}
+									<div class="lang-list" role="menu">
+										{#each menu.languages as lang (lang.code)}
+											<button
+												type="button"
+												role="menuitem"
+												class:selected={settings.replyLang === lang.code}
+												onclick={() => setReplyLang(lang.code)}
+											>
+												<span class="badge" aria-hidden="true">{lang.badge}</span>
+												{lang.name}
+											</button>
+										{/each}
+									</div>
+								{/if}
+							</div>
+						{/each}
+						{#if activeReplyLang}
+							<button
+								type="button"
+								class="clear"
+								title="Back to the default brief prompt"
+								onclick={clearReplyLang}
+							>
+								Clear · {activeReplyLang.name}
+							</button>
+						{/if}
+					</div>
+				</div>
 			{/if}
 			{#each chat.messages as msg, i (msg.id)}
 				{@const script = detectScript(msg.content)}
@@ -996,7 +1089,7 @@
 					</button>
 				</div>
 				{#if translate.busy}
-					<p class="muted">Translating to {settings.translateTarget}…</p>
+					<p class="muted">Translating to English…</p>
 				{:else if translate.error}
 					<p class="error" role="alert">{translate.error}</p>
 				{:else if translate.result}
@@ -1039,8 +1132,13 @@
 				Attach{#if attachTokens > 0} · ~{attachTokens} tok{/if}
 			</button>
 			{#if canMic}
-				<button type="button" title="Dictate into the prompt" onclick={toggleMic}>
-					{dictating ? "■ Stop" : "🎤 Mic"}
+				<button
+					type="button"
+					class:recording={dictating}
+					title="Dictate into the prompt"
+					onclick={toggleMic}
+				>
+					<span class="dot" aria-hidden="true"></span>{dictating ? "Stop" : "Mic"}
 				</button>
 			{/if}
 			{#if micError}
@@ -1152,21 +1250,68 @@
 	header {
 		display: flex;
 		align-items: center;
-		gap: 0.7rem;
-		padding: 0.7rem 1.2rem;
+		gap: 1rem;
+		padding: 0.9rem 1.4rem;
 		border-bottom: 1px solid #e5e5ea;
 		font-size: 0.82rem;
 	}
 	.pill {
 		font-weight: 650;
+		white-space: nowrap;
 	}
 	.tokens {
 		color: #6e6e73;
+		white-space: nowrap;
+	}
+	.spacer {
+		flex: 1;
+	}
+	.lang-chip {
+		font: inherit;
+		font-size: 0.78rem;
+		color: #1c1c1e;
+		border: 1px solid #1c1c1e;
+		border-radius: 999px;
+		background: none;
+		cursor: pointer;
+		padding: 0.2rem 0.7rem;
+		white-space: nowrap;
+	}
+	.pill-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		font: inherit;
+		font-size: 0.78rem;
+		color: #6e6e73;
+		border: 1px solid #c7c7cc;
+		border-radius: 999px;
+		background: none;
+		cursor: pointer;
+		padding: 0.25rem 0.8rem;
+		white-space: nowrap;
+	}
+	.pill-btn .dot {
+		width: 0.45rem;
+		height: 0.45rem;
+		border-radius: 50%;
+		background: #c7c7cc;
+	}
+	.pill-btn.on {
+		color: #1c1c1e;
+		border-color: #1c1c1e;
+	}
+	.pill-btn.on .dot {
+		background: #30a46c;
 	}
 	header a {
-		margin-left: auto;
 		color: #3a3a3c;
 		text-decoration: none;
+		white-space: nowrap;
+	}
+	/* Traffic lights float over the sidebar in the Tauri shell. */
+	.app[data-shell="tauri"] aside {
+		padding-top: 2.1rem;
 	}
 	nav {
 		display: flex;
@@ -1194,6 +1339,84 @@
 	.empty {
 		color: #6e6e73;
 		font-size: 0.9rem;
+	}
+	.empty-state {
+		display: flex;
+		flex-direction: column;
+		gap: 1.2rem;
+		padding: 1.5rem 0.5rem;
+	}
+	.lang-menus {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		flex-wrap: wrap;
+	}
+	.lang-menu {
+		position: relative;
+	}
+	.lang-menu > button,
+	.lang-menus .clear {
+		font-size: 0.82rem;
+		border: 1px solid #c7c7cc;
+		border-radius: 10px;
+		background: none;
+		cursor: pointer;
+		padding: 0.4rem 0.8rem;
+		color: #1c1c1e;
+	}
+	.lang-menu > button:hover,
+	.lang-menus .clear:hover {
+		border-color: #1c1c1e;
+	}
+	.lang-list {
+		position: absolute;
+		z-index: 40;
+		top: calc(100% + 0.35rem);
+		left: 0;
+		min-width: 13rem;
+		max-height: 16rem;
+		overflow-y: auto;
+		display: flex;
+		flex-direction: column;
+		padding: 0.3rem;
+		border: 1px solid #c7c7cc;
+		border-radius: 10px;
+		background: #fff;
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+	}
+	.lang-list button {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		font-size: 0.82rem;
+		border: 0;
+		border-radius: 7px;
+		background: none;
+		cursor: pointer;
+		padding: 0.4rem 0.6rem;
+		text-align: left;
+		color: #1c1c1e;
+		white-space: nowrap;
+	}
+	.lang-list button:hover {
+		background: #f1f1f4;
+	}
+	.lang-list button.selected {
+		font-weight: 650;
+		background: #f1f1f4;
+	}
+	.badge {
+		display: inline-block;
+		min-width: 2rem;
+		text-align: center;
+		font-size: 0.7rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		color: #3a3a3c;
+		border: 1px solid #c7c7cc;
+		border-radius: 6px;
+		padding: 0.1rem 0.3rem;
 	}
 	article {
 		position: relative;
@@ -1317,20 +1540,17 @@
 		font-size: 0.78rem;
 		color: #94250a;
 	}
-	.voice-toggle {
-		font: inherit;
-		font-size: 0.78rem;
-		color: #6e6e73;
-		border: 1px solid #c7c7cc;
-		border-radius: 999px;
-		background: none;
-		cursor: pointer;
-		padding: 0.2rem 0.7rem;
+	.composer-bar button .dot {
+		display: inline-block;
+		width: 0.45rem;
+		height: 0.45rem;
+		border-radius: 50%;
+		background: #c7c7cc;
+		margin-right: 0.4rem;
+		vertical-align: baseline;
 	}
-	.voice-toggle.on {
-		color: #1c1c1e;
-		border-color: #1c1c1e;
-		background: #f1f1f4;
+	.composer-bar button.recording .dot {
+		background: #c0362c;
 	}
 	.voice-bar {
 		display: flex;
@@ -1560,6 +1780,9 @@
 		border-radius: 12px;
 		padding: 0 0.8rem;
 		background: #fff;
+		/* Fixed floor so mounting the editor never shifts layout. */
+		min-height: 3.1rem;
+		box-sizing: border-box;
 	}
 	.prompt:focus-within {
 		border-color: #3a3a3c;
@@ -1687,6 +1910,42 @@
 		}
 		.prompt:focus-within {
 			border-color: #aeaeb2;
+		}
+		.pill-btn {
+			color: #98989f;
+			border-color: #48484a;
+		}
+		.pill-btn.on {
+			color: #f2f2f7;
+			border-color: #aeaeb2;
+		}
+		.lang-chip {
+			color: #f2f2f7;
+			border-color: #aeaeb2;
+		}
+		.lang-menu > button,
+		.lang-menus .clear {
+			color: #f2f2f7;
+			border-color: #48484a;
+		}
+		.lang-menu > button:hover,
+		.lang-menus .clear:hover {
+			border-color: #aeaeb2;
+		}
+		.lang-list {
+			background: #1c1c1e;
+			border-color: #48484a;
+		}
+		.lang-list button {
+			color: #f2f2f7;
+		}
+		.lang-list button:hover,
+		.lang-list button.selected {
+			background: #2c2c2e;
+		}
+		.badge {
+			color: #aeaeb2;
+			border-color: #48484a;
 		}
 		footer {
 			color: #98989f;
