@@ -4,6 +4,7 @@ import type {
 	ChatResult,
 	StreamCallbacks
 } from "./types";
+import { messageText } from "./types";
 
 /**
  * Dev/test-only provider: streams a canned reply so the chat UI (streaming
@@ -35,7 +36,7 @@ export class MockProvider implements ChatProvider {
 
 function canned(messages: ChatMessage[]): string {
 	const last = [...messages].reverse().find((m) => m.role === "user");
-	const excerpt = (last?.content ?? "").slice(0, 60);
+	const excerpt = messageText(last?.content ?? "").slice(0, 60);
 	return `Mock reply to: ${excerpt || "(empty)"}`;
 }
 

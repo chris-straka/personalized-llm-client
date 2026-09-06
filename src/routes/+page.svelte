@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
+	import { SvelteSet } from "svelte/reactivity";
 	import { resolve } from "$app/paths";
 	import {
 		createChatState,
@@ -25,6 +26,14 @@
 	import { createPromptEditor, type PromptEditor, type SubmitKind } from "$lib/editor";
 	import { isEjected } from "$lib/session";
 	import type { ChatProvider } from "$lib/providers/types";
+	import MessageBody from "$lib/components/MessageBody.svelte";
+	import { renderMessage, htmlToText, sourcesAsked } from "$lib/render";
+	import {
+		fileToAttachment,
+		stripImageMarkers,
+		IMAGE_MARKER,
+		type Attachment
+	} from "$lib/attachments";
 
 	let chatState = $state(createChatState());
 	let settings = $state(loadSettings());
@@ -34,6 +43,11 @@
 	let focusMode: "edit" | "scroll" = $state("edit");
 	let selectedIdx = $state(-1);
 	let missingKey = $state(false);
+	let attachments = $state<Attachment[]>([]);
+	let attachError: string | null = $state(null);
+	let attachInput: HTMLInputElement | undefined = $state();
+	let foldedIds = new SvelteSet<string>();
+	let previewId: string | null = $state(null);
 
 	const useMock = mockProviderEnabled();
 	const chat = $derived(activeChat(chatState));
@@ -42,6 +56,60 @@
 	);
 	const total = $derived(tokenTotal(chatState));
 	const points = $derived(waypoints(chatState));
+	const sourcesWanted = $derived(
+		sourcesAsked(chat.messages.filter((m) => m.role === "user").map((m) => m.content))
+	);
+	const attachTokens = $derived(attachments.reduce((sum, a) => sum + a.tokens, 0));
+
+	/** Prompt text minus pasted-image marker lines (images travel as attachments). */
+	function composerText(): string {
+		return stripImageMarkers(editor?.getText() ?? "").trim();
+	}
+
+	async function addFiles(files: File[]): Promise<void> {
+		attachError = null;
+		for (const file of files) {
+			try {
+				attachments = [...attachments, await fileToAttachment(file)];
+			} catch (error) {
+				attachError = error instanceof Error ? error.message : String(error);
+			}
+		}
+	}
+
+	function onImagePasted(file: File): void {
+		void addFiles([file]).then(() => {
+			editor?.insertText(`\n${IMAGE_MARKER}\n`);
+		});
+	}
+
+	function removeAttachment(id: string): void {
+		attachments = attachments.filter((a) => a.id !== id);
+		if (previewId === id) previewId = null;
+	}
+
+	function toggleFold(id: string): void {
+		if (foldedIds.has(id)) foldedIds.delete(id);
+		else foldedIds.add(id);
+	}
+
+	function copyMarkdown(text: string): void {
+		void navigator.clipboard?.writeText(text).catch(() => {});
+	}
+
+	function copyText(content: string): void {
+		const html = renderMessage(content, true).html;
+		void navigator.clipboard?.writeText(htmlToText(html)).catch(() => {});
+	}
+
+	function toggleThoughts(): void {
+		const blocks = scrollBox?.querySelectorAll("details.ccez-thoughts");
+		if (!blocks || blocks.length === 0) return;
+		const open = [...blocks].some((b) => !(b as HTMLDetailsElement).open);
+		blocks.forEach((b) => {
+			(b as HTMLDetailsElement).open = open;
+		});
+	}
 
 	function persistSettings() {
 		saveSettings(settings);
@@ -63,9 +131,13 @@
 		}
 		missingKey = false;
 		focusMode = "edit";
-		await sendMessage(chatState, provider, settings.systemPrompt, editor?.getText() ?? "", {
-			includePins
+		const outgoing = attachments;
+		await sendMessage(chatState, provider, settings.systemPrompt, composerText(), {
+			includePins,
+			attachments: outgoing
 		});
+		attachments = [];
+		previewId = null;
 		editor?.clear();
 		scrollToBottom();
 	}
@@ -85,7 +157,7 @@
 		if (kind === "send") void doSend(false);
 		else if (kind === "run-pins") void doSend(true);
 		else {
-			pinMessage(chatState, editor?.getText() ?? "");
+			pinMessage(chatState, composerText());
 			editor?.clear();
 		}
 	}
@@ -146,12 +218,20 @@
 		if (!promptEl) return;
 		editor = createPromptEditor(promptEl, {
 			onSubmit,
-			onHopOut: enterScrollMode
+			onHopOut: enterScrollMode,
+			onImagePaste: onImagePasted
 		});
 		editor.focus();
 
 		const onKey = (event: KeyboardEvent) => {
 			const inEditor = (event.target as HTMLElement | null)?.closest(".cm-content");
+			if (event.ctrlKey && (event.key === "o" || event.key === "O")) {
+				// Thoughts toggle works from anywhere, even inside the prompt.
+				event.preventDefault();
+				event.stopPropagation();
+				toggleThoughts();
+				return;
+			}
 			if (event.ctrlKey && event.altKey && event.key.startsWith("Arrow")) {
 				// Capture phase (see listener below): fires before CodeMirror or
 				// vim can swallow the combo, so the shortcuts work from anywhere.
@@ -258,8 +338,35 @@
 						if (e.altKey) deleteMessage(chatState, i);
 					}}
 				>
-					<div class="body">{msg.content}</div>
+					<MessageBody
+						message={msg}
+						streaming={chatState.sending &&
+							msg.role === "assistant" &&
+							i === chat.messages.length - 1}
+						sourcesWanted={sourcesWanted}
+						folded={foldedIds.has(msg.id)}
+					/>
+					{#if msg.attachments && msg.attachments.length > 0}
+						<div class="sent-files">
+							{#each msg.attachments as att (att.id)}
+								<span title="{att.name} · ~{att.tokens} tokens">📎 {att.name}</span>
+							{/each}
+						</div>
+					{/if}
 					<div class="actions">
+						<button
+							type="button"
+							title="Fold this message"
+							onclick={() => toggleFold(msg.id)}
+						>
+							{foldedIds.has(msg.id) ? "Unfold" : "Fold"}
+						</button>
+						<button type="button" title="Copy as markdown" onclick={() => copyMarkdown(msg.content)}>
+							Copy MD
+						</button>
+						<button type="button" title="Copy as plain text" onclick={() => copyText(msg.content)}>
+							Copy text
+						</button>
 						<button type="button" title="Branch from here" onclick={() => branchFrom(chatState, i)}>
 							Branch
 						</button>
@@ -311,12 +418,78 @@
 			</ul>
 		{/if}
 
-		<div class="prompt" bind:this={promptEl}></div>
+		{#if attachments.length > 0 || attachError}
+			<ul class="attachments">
+				{#each attachments as att (att.id)}
+					<li>
+						{#if att.kind === "image"}
+							<button
+								type="button"
+								class="thumb"
+								title="Toggle preview"
+								onclick={() => (previewId = previewId === att.id ? null : att.id)}
+							>
+								🖼
+							</button>
+						{:else}
+							<span aria-hidden="true">📄</span>
+						{/if}
+						<span class="name" title="{att.name} · ~{att.tokens} tokens">{att.name}</span>
+						<span class="tok">~{att.tokens}</span>
+						<button type="button" aria-label="Remove attachment" onclick={() => removeAttachment(att.id)}>
+							×
+						</button>
+					</li>
+				{/each}
+			</ul>
+			{#if previewId}
+				{#each attachments.filter((a) => a.id === previewId) as att (att.id)}
+					{#if att.dataUrl}
+						<img class="preview" src={att.dataUrl} alt={att.name} />
+					{/if}
+				{/each}
+			{/if}
+			{#if attachError}
+				<p class="error" role="alert">{attachError}</p>
+			{/if}
+		{/if}
+
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class="prompt"
+			bind:this={promptEl}
+			ondragover={(e) => e.preventDefault()}
+			ondrop={(e) => {
+				e.preventDefault();
+				const files = [...(e.dataTransfer?.files ?? [])];
+				if (files.length > 0) void addFiles(files);
+			}}
+		></div>
+		<div class="composer-bar">
+			<button type="button" title="Attach images or text files" onclick={() => attachInput?.click()}>
+				Attach{#if attachTokens > 0} · ~{attachTokens} tok{/if}
+			</button>
+			<input
+				type="file"
+				class="hidden-input"
+				bind:this={attachInput}
+				multiple
+				accept="image/*,.txt,.md,.markdown,.json,.js,.ts,.tsx,.jsx,.py,.rb,.go,.rs,.java,.c,.h,.cpp,.cs,.swift,.kt,.php,.sh,.yaml,.yml,.toml,.xml,.html,.css,.sql,.csv,.log"
+				onchange={(e) => {
+					const files = [...(e.currentTarget.files ?? [])];
+					e.currentTarget.value = "";
+					if (files.length > 0) void addFiles(files);
+				}}
+			/>
+		</div>
 		<footer>
 			{#if focusMode === "scroll"}
 				<span><strong>scroll</strong> j/k move · i back to writing</span>
 			{:else}
-				<span>vim inside · ctrl+g message scroll · ⌥+enter pin · ⌘+enter run+pins</span>
+				<span
+					>vim inside · ctrl+g message scroll · ⌥+enter pin · ⌘+enter run+pins ·
+					ctrl+o thoughts</span
+				>
 			{/if}
 		</footer>
 	</main>
@@ -453,11 +626,77 @@
 		outline: 2px solid #3a3a3c;
 		outline-offset: 2px;
 	}
-	.body {
-		white-space: pre-wrap;
-		word-break: break-word;
-		font-size: 0.92rem;
-		line-height: 1.5;
+	.sent-files {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		margin-top: 0.35rem;
+		font-size: 0.75rem;
+		color: #6e6e73;
+	}
+	.attachments {
+		list-style: none;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		margin: 0;
+		padding: 0.5rem 1.2rem 0;
+	}
+	.attachments li {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-size: 0.78rem;
+		background: #eef4ff;
+		border-radius: 999px;
+		padding: 0.25rem 0.3rem 0.25rem 0.7rem;
+		max-width: 100%;
+	}
+	.attachments .name {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		max-width: 16rem;
+	}
+	.attachments .tok {
+		color: #6e6e73;
+	}
+	.attachments button {
+		border: 0;
+		background: none;
+		cursor: pointer;
+		color: #3a3a3c;
+	}
+	.attachments .thumb {
+		font-size: 0.9rem;
+		padding: 0;
+	}
+	.preview {
+		display: block;
+		max-width: 16rem;
+		max-height: 12rem;
+		margin: 0.4rem 1.2rem 0;
+		border-radius: 8px;
+		border: 1px solid #c7c7cc;
+	}
+	.composer-bar {
+		display: flex;
+		padding: 0.35rem 1.2rem 0;
+	}
+	.composer-bar button {
+		font-size: 0.78rem;
+		color: #6e6e73;
+		border: 1px solid #c7c7cc;
+		border-radius: 999px;
+		background: none;
+		cursor: pointer;
+		padding: 0.2rem 0.7rem;
+	}
+	.composer-bar button:hover {
+		color: #1c1c1e;
+	}
+	.hidden-input {
+		display: none;
 	}
 	.actions {
 		display: flex;
@@ -576,6 +815,28 @@
 		}
 		.pins li {
 			background: #12233d;
+		}
+		.sent-files {
+			color: #98989f;
+		}
+		.attachments li {
+			background: #12233d;
+		}
+		.attachments .tok {
+			color: #98989f;
+		}
+		.attachments button {
+			color: #f2f2f7;
+		}
+		.preview {
+			border-color: #48484a;
+		}
+		.composer-bar button {
+			color: #98989f;
+			border-color: #48484a;
+		}
+		.composer-bar button:hover {
+			color: #f2f2f7;
 		}
 		.prompt {
 			background: #1c1c1e;

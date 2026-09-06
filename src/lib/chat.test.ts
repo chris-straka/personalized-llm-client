@@ -17,6 +17,7 @@ import {
 	tokenTotal,
 	waypoints,
 	sendMessage,
+	buildApiMessages,
 	type ChatState
 } from "./chat";
 import type { ChatProvider, ChatResult } from "./providers/types";
@@ -223,5 +224,84 @@ describe("chat", () => {
 		const { state, store } = stateWith(freshStore());
 		await sendMessage(state, new MockProvider(), "sys", "ping", {}, store);
 		expect(activeChat(state).messages[1].content).toContain("ping");
+	});
+
+	it("sends images as content parts and inlines text files", async () => {
+		const { state, store } = stateWith(freshStore());
+		const attachments = [
+			{
+				id: "img",
+				name: "pic.jpg",
+				mime: "image/jpeg",
+				kind: "image",
+				dataUrl: "data:image/jpeg;base64,AAA",
+				text: null,
+				width: 100,
+				height: 100,
+				tokens: 255
+			},
+			{
+				id: "txt",
+				name: "notes.txt",
+				mime: "text/plain",
+				kind: "text",
+				dataUrl: null,
+				text: "remember this",
+				width: null,
+				height: null,
+				tokens: 4
+			}
+		] as const;
+		await sendMessage(state, scriptedProvider(["ok"]), "sys", "look", {
+			attachments: [...attachments]
+		}, store);
+		const sent = activeChat(state).messages[0];
+		expect(sent.attachments).toHaveLength(2);
+
+		const api = buildApiMessages(activeChat(state), "sys", false);
+		const user = api.find((m) => m.role === "user");
+		expect(Array.isArray(user?.content)).toBe(true);
+		const parts = user?.content as Array<{ type: string }>;
+		expect(parts[0]).toEqual({
+			type: "text",
+			text: "look\n\n```notes.txt\nremember this\n```"
+		});
+		expect(parts[1]).toEqual({
+			type: "image_url",
+			image_url: { url: "data:image/jpeg;base64,AAA" }
+		});
+	});
+
+	it("sends attachment-free messages as plain strings", async () => {
+		const { state, store } = stateWith(freshStore());
+		await sendMessage(state, scriptedProvider(["ok"]), "sys", "plain", {}, store);
+		const api = buildApiMessages(activeChat(state), "sys", false);
+		expect(api.find((m) => m.role === "user")?.content).toBe("plain");
+	});
+
+	it("carries attachments across resend and branch", async () => {
+		const { state, store } = stateWith(freshStore());
+		const attachments = [
+			{
+				id: "t",
+				name: "a.txt",
+				mime: "text/plain",
+				kind: "text",
+				dataUrl: null,
+				text: "x",
+				width: null,
+				height: null,
+				tokens: 1
+			}
+		] as const;
+		await sendMessage(state, scriptedProvider(["one"]), "sys", "first", {
+			attachments: [...attachments]
+		}, store);
+		await resendLast(state, scriptedProvider(["two"]), "sys", store);
+		expect(activeChat(state).messages[0].attachments).toHaveLength(1);
+
+		branchFrom(state, 1, store);
+		selectChat(state, state.chats[0].id);
+		expect(activeChat(state).messages[0].attachments).toHaveLength(1);
 	});
 });

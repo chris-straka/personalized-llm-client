@@ -85,7 +85,12 @@ with the approval to start.
 - [x] S2 core chat + prompt box + fenced-code input (A2) — streaming,
   rerun/branch/retry, pins, waypoints, vim + J/K, shortcuts, key eject UI.
   Shortcuts needed capture-phase listener (CodeMirror swallows combos).
-- [ ] S3 messages/code rendering, paste collapse, thoughts toggle
+- [x] S3 messages/code rendering, paste collapse, thoughts toggle —
+  markdown + sanitize + Shiki (dual light/dark), code fold/copy/label,
+  message fold, copy MD/text, paste-collapse markers (click to expand),
+  attachments with downscale + token estimates, thoughts details + ctrl+O,
+  Sources stripped unless asked. Paste-marker clicks needed the same
+  mousedown guard as fence bars (vim swallowed every other click).
 - [ ] S4 annotation + translate helper
 - [ ] S5 reading aids (default OFF, A1)
 - [ ] S6 voice mode (+A4 bridge policy)

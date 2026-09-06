@@ -1,6 +1,27 @@
+export interface TextPart {
+	type: "text";
+	text: string;
+}
+
+export interface ImagePart {
+	type: "image_url";
+	image_url: { url: string };
+}
+
+export type ContentPart = TextPart | ImagePart;
+
 export interface ChatMessage {
 	role: "system" | "user" | "assistant";
-	content: string;
+	content: string | ContentPart[];
+}
+
+/** Plain-text view of a message, skipping image parts. */
+export function messageText(content: string | ContentPart[]): string {
+	if (typeof content === "string") return content;
+	return content
+		.filter((p): p is TextPart => p.type === "text")
+		.map((p) => p.text)
+		.join("\n");
 }
 
 export interface TokenUsage {

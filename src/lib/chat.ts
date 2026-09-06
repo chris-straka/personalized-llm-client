@@ -1,8 +1,10 @@
 import type {
 	ChatMessage,
 	ChatProvider,
+	ContentPart,
 	TokenUsage
 } from "./providers/types";
+import type { Attachment } from "./attachments";
 import type { KeyValueStore } from "./settings";
 import { memoryStore } from "./settings";
 
@@ -13,6 +15,8 @@ export interface ChatMsg {
 	usage: TokenUsage | null;
 	/** Set when the assistant reply failed; the message is retryable. */
 	error: string | null;
+	/** Files/images sent with a user message (persisted with history). */
+	attachments?: Attachment[];
 }
 
 export interface Chat {
@@ -176,7 +180,7 @@ export async function resendLast(
 	const last = chat.messages[chat.messages.length - 1];
 	if (!last || last.role !== "user" || state.sending) return;
 	chat.messages = chat.messages.slice(0, -1);
-	await sendMessage(state, provider, systemPrompt, last.content, {}, store);
+	await sendMessage(state, provider, systemPrompt, last.content, { attachments: last.attachments }, store);
 }
 
 export function tokenTotal(state: ChatState, chat?: Chat): number {
@@ -205,9 +209,29 @@ export function buildApiMessages(
 	}
 	for (const m of chat.messages) {
 		if (m.role === "assistant" && m.error) continue;
-		api.push({ role: m.role, content: m.content });
+		api.push({ role: m.role, content: apiContent(m) });
 	}
 	return api;
+}
+
+/**
+ * User messages with image attachments go out as multimodal content parts;
+ * text attachments are appended as fenced blocks so every provider sees them.
+ */
+export function apiContent(message: ChatMsg): string | ContentPart[] {
+	const images = (message.attachments ?? []).filter((a) => a.kind === "image" && a.dataUrl);
+	let text = message.content;
+	for (const a of message.attachments ?? []) {
+		if (a.kind === "text" && a.text !== null) {
+			text += `\n\n\`\`\`${a.name}\n${a.text}\n\`\`\``;
+		}
+	}
+	if (images.length === 0) return text;
+	const parts: ContentPart[] = [{ type: "text", text }];
+	for (const image of images) {
+		parts.push({ type: "image_url", image_url: { url: image.dataUrl! } });
+	}
+	return parts;
 }
 
 export async function sendMessage(
@@ -215,15 +239,23 @@ export async function sendMessage(
 	provider: ChatProvider,
 	systemPrompt: string,
 	text: string,
-	opts: { includePins?: boolean; signal?: AbortSignal } = {},
+	opts: { includePins?: boolean; signal?: AbortSignal; attachments?: Attachment[] } = {},
 	store?: KeyValueStore
 ): Promise<void> {
 	const trimmed = text.trim();
-	if (!trimmed || state.sending) return;
+	const attachments = opts.attachments ?? [];
+	if ((!trimmed && attachments.length === 0) || state.sending) return;
 	const chat = activeChat(state);
 	chat.messages = [
 		...chat.messages,
-		{ id: newId(), role: "user", content: trimmed, usage: null, error: null }
+		{
+			id: newId(),
+			role: "user",
+			content: trimmed,
+			usage: null,
+			error: null,
+			...(attachments.length > 0 ? { attachments } : {})
+		}
 	];
 	persistChats(state, store);
 
