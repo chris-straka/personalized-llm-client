@@ -26,6 +26,7 @@
 	import { MockProvider, mockProviderEnabled } from "$lib/providers/mock";
 	import { createPromptEditor, type PromptEditor, type SubmitKind } from "$lib/editor";
 	import { isEjected } from "$lib/session";
+	import { hydrateSecrets, tauriBackendAvailable } from "$lib/secrets";
 	import type { ChatProvider } from "$lib/providers/types";
 	import MessageBody from "$lib/components/MessageBody.svelte";
 	import { renderMessage, htmlToText, sourcesAsked } from "$lib/render";
@@ -68,6 +69,11 @@
 
 	let chatState = $state(createChatState());
 	let settings = $state(loadSettings());
+
+	if (tauriBackendAvailable()) {
+		// Pull Keychain keys into memory before the first send; no-op in browsers.
+		void hydrateSecrets(settings);
+	}
 	let editor: PromptEditor | null = $state(null);
 	let promptEl: HTMLElement | undefined = $state();
 	let scrollBox: HTMLElement | undefined = $state();

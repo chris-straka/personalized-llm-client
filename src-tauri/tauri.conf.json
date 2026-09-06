@@ -13,12 +13,22 @@
     "windows": [
       {
         "title": "Ccez Studio",
-        "width": 800,
-        "height": 600
+        "width": 1280,
+        "height": 860,
+        "minWidth": 960,
+        "minHeight": 640
       }
     ],
     "security": {
       "csp": null
+    }
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "dialog": false,
+      "endpoints": ["https://ccez.studio/updates/{{target}}/{{current_version}}"],
+      "pubkey": "UPDATE_PUBKEY_NOT_CONFIGURED_SEE_PLAN_MD"
     }
   },
   "bundle": {

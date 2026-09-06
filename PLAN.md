@@ -114,8 +114,15 @@ sharing, no plugins, no agentic/build features).
   hint, Alt+R toggle, pinyin / furigana / tashkeel ruby, hover + right-click
   single-word TTS even when aids are off.
 - [ ] **S6 voice mode** (OFF default, A4/A5/A6) — IN PROGRESS.
-- [ ] **S7 desktop polish**: icon set, Tauri updater, keychain-backed keys,
-  cold-start check (M4 mini + M1 Pro), 144 Hz scroll judgment.
+- [x] **S7 desktop polish**: custom icon set (chat-bubble master +
+  `tauri icon`), keychain-backed keys (Rust commands + `secrets.ts`,
+  Keychain in shell / localStorage fallback in browsers), updater wiring
+  (`tauri-plugin-updater` + Settings check with graceful errors), 1280×860
+  window with minimums, matching favicon. Updater activation needs release
+  signing keys + a hosted feed (endpoint + pubkey are placeholders) — the
+  check button reports this instead of failing silently. Still manual on
+  real hardware: cold start on both Macs, 144 Hz scroll judgment,
+  installer run.
 
 ### S6 scope
 

@@ -102,4 +102,5 @@ with the approval to start.
   auto-read replies with live voice bar + Skip, per-message Speak,
   highlight-to-speak on demand, guarded mic dictation, voiceLang setting,
   script-wide TTS locales, tashkeel folded into generic model-aid path
-- [ ] S7 desktop polish, updater, icon, cold-start checks
+- [x] S7 desktop polish, updater, icon, keychain keys (cold-start +
+  installer-run stay manual on real hardware)

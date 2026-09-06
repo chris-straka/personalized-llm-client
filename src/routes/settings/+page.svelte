@@ -9,17 +9,28 @@
 		type ThinkingLevel
 	} from "$lib/settings";
 	import { ejectProvider, restoreProvider } from "$lib/session";
+	import {
+		hydrateSecrets,
+		persistSecrets,
+		withBlankedKeys,
+		tauriBackendAvailable
+	} from "$lib/secrets";
+	import { check } from "@tauri-apps/plugin-updater";
 	import { ProviderError, type ChatMessage } from "$lib/providers/types";
+	import { onMount } from "svelte";
 
 	let settings: AppSettings = $state(loadSettings());
 	let savedFlash = $state(false);
 	let testing = $state(false);
 	let testResult = $state("");
 	let testError = $state("");
+	let updateStatus = $state("");
+	let checkingUpdate = $state(false);
 	/** Per-provider "replace key" mode; otherwise a stored key shows masked. */
 	let editingKey: Record<string, boolean> = $state({});
 	/** Local mirror of the session module set, so eject/restore re-renders. */
 	let ejectedIds: string[] = $state([]);
+	const inShell = tauriBackendAvailable();
 
 	const activeDef = $derived(PROVIDERS.find((p) => p.id === settings.activeProviderId)!);
 	const active = $derived(settings.providers[settings.activeProviderId]);
@@ -36,12 +47,37 @@
 		ejectedIds = ejectedIds.filter((id) => id !== settings.activeProviderId);
 	}
 
-	function save() {
-		saveSettings(settings);
+	async function save() {
+		// Mirror keys into secret storage first; in the Tauri shell the
+		// persisted settings then keep no key material at all.
+		await persistSecrets(settings);
+		saveSettings(inShell ? withBlankedKeys(settings) : settings);
 		editingKey[settings.activeProviderId] = false;
 		savedFlash = true;
 		setTimeout(() => (savedFlash = false), 1500);
 	}
+
+	async function checkUpdates() {
+		checkingUpdate = true;
+		updateStatus = "Checking…";
+		try {
+			const update = await check();
+			updateStatus = update
+				? `Version ${update.version} is available — download it from the release page to install.`
+				: "You're on the latest version.";
+		} catch (error) {
+			updateStatus = `Updater unavailable: ${error instanceof Error ? error.message : String(error)}`;
+		} finally {
+			checkingUpdate = false;
+		}
+	}
+
+	onMount(() => {
+		// Pull Keychain keys into memory (Tauri shell); no-op elsewhere.
+		void hydrateSecrets(settings).then((ids) => {
+			if (ids.length > 0) settings = { ...settings };
+		});
+	});
 
 	function switchProvider(id: string) {
 		settings.activeProviderId = id;
@@ -146,7 +182,14 @@
 				<button type="button" onclick={eject}>Eject for this session</button>
 			</p>
 		{/if}
-		<p class="note">Keys stay on this machine, in this app's local storage.</p>
+		<p class="note">
+			{#if inShell}
+				Keys stay in the macOS Keychain, never in a file. Eject unloads a key
+				for this session only.
+			{:else}
+				Keys stay on this machine, in this app's local storage.
+			{/if}
+		</p>
 	</section>
 
 	<section aria-labelledby="defaults-heading">
@@ -198,8 +241,16 @@
 		</label>
 	</section>
 
+	<section aria-labelledby="updates-heading">
+		<h2 id="updates-heading">Updates</h2>
+		<button type="button" onclick={() => void checkUpdates()} disabled={checkingUpdate}>
+			{checkingUpdate ? "Checking…" : "Check for updates"}
+		</button>
+		{#if updateStatus}<p class="result" role="status">{updateStatus}</p>{/if}
+	</section>
+
 	<footer>
-		<button type="button" class="primary" onclick={save}>Save</button>
+		<button type="button" class="primary" onclick={() => void save()}>Save</button>
 		<button type="button" onclick={testConnection} disabled={testing}>
 			{testing ? "Testing…" : "Test connection"}
 		</button>

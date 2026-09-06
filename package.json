@@ -25,6 +25,7 @@
     "@replit/codemirror-vim": "^6.4.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-updater": "^2",
     "@types/pako": "^3.0.0",
     "dompurify": "^3.4.14",
     "kuroshiro": "^1.2.0",
