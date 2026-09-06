@@ -1976,6 +1976,11 @@
 		font-family:
 			"Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 		padding-right: 4.6rem;
+		caret-color: #1c1c1e;
+	}
+	:global(.cm-editor.cm-focused) {
+		/* Kills the dotted focus outline some Chromium builds draw. */
+		outline: none !important;
 	}
 	:global(.cm-editor .cm-cursor) {
 		/* !important: CodeMirror injects its own cursor styles at runtime,
@@ -1987,6 +1992,9 @@
 		color: #fff;
 	}
 	@media (prefers-color-scheme: dark) {
+		.prompt :global(.cm-content) {
+			caret-color: #f2f2f7;
+		}
 		:global(.cm-editor .cm-cursor) {
 			border-left-color: #f2f2f7 !important;
 		}
