@@ -9,8 +9,7 @@
 		deleteChat,
 		deleteAllChats,
 		deleteMessage,
-		pinMessage,
-		unpinMessage,
+		postToTop,
 		branchFrom,
 		dismissFailedAssistant,
 		truncateToMessage,
@@ -130,6 +129,14 @@
 	function toggleSidebar(): void {
 		settings.sidebarCollapsed = !settings.sidebarCollapsed;
 		persistSettings();
+	}
+
+	function doNewChat(): void {
+		stopVoice();
+		selMenu = null;
+		newChat(chatState);
+		scrollBox?.scrollTo({ top: 0 });
+		editor?.focus();
 	}
 
 	const useMock = mockProviderEnabled();
@@ -471,7 +478,7 @@
 		return createProvider(settings.activeProviderId, conf);
 	}
 
-	async function doSend(includePins: boolean) {
+	async function doSend() {
 		const provider = resolveProvider();
 		if (!provider) {
 			missingKey = true;
@@ -487,7 +494,7 @@
 			provider,
 			effectiveSystemPrompt(settings),
 			withAnnotations(composerText(), outgoingAnnotations),
-			{ includePins, attachments: outgoing }
+			{ attachments: outgoing }
 		);
 		// Keep drafts when the reply failed so nothing silently drops.
 		const sent = chat.messages[chat.messages.length - 1];
@@ -518,12 +525,16 @@
 	}
 
 	function onSubmit(kind: SubmitKind) {
-		if (kind === "send") void doSend(false);
-		else if (kind === "run-pins") void doSend(true);
-		else {
-			pinMessage(chatState, composerText());
+		if (kind === "post-top") {
+			// ⌥+Enter: into the log at the very top, no reply triggered.
+			postToTop(chatState, composerText(), attachments);
+			attachments = [];
+			previewId = null;
 			editor?.clear();
+			scrollBox?.scrollTo({ top: 0 });
+			return;
 		}
+		void doSend();
 	}
 
 	function retryFailed() {
@@ -648,6 +659,27 @@
 				else if (event.key === "ArrowDown") cycleThinking(-1);
 				return;
 			}
+			if (event.ctrlKey && event.altKey && (event.key === "n" || event.key === "N")) {
+				event.preventDefault();
+				event.stopPropagation();
+				doNewChat();
+				return;
+			}
+			if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey) {
+				const combo = event.key.toLowerCase();
+				if (combo === "b") {
+					event.preventDefault();
+					event.stopPropagation();
+					toggleSidebar();
+					return;
+				}
+				if (event.key === ".") {
+					event.preventDefault();
+					event.stopPropagation();
+					settingsOpen = !settingsOpen;
+					return;
+				}
+			}
 			if (focusMode !== "scroll" || inEditor) return;
 			if (event.key === "j" || event.key === "ArrowDown") {
 				event.preventDefault();
@@ -727,27 +759,20 @@
 	data-focus-mode={focusMode}
 	data-shell={tauriBackendAvailable() ? "tauri" : "browser"}
 >
-	{#if settings.sidebarCollapsed}
-		<div class="rail">
-			<button type="button" title="Expand sidebar" aria-label="Expand sidebar" onclick={toggleSidebar}>
-				»
+	<aside class:collapsed={settings.sidebarCollapsed} inert={settings.sidebarCollapsed}>
+		<div class="side-head">
+			<button type="button" class="new" onclick={() => doNewChat()}>+ New chat</button>
+			<button
+				type="button"
+				class="fold-side"
+				title="Collapse chat list (⌘B)"
+				aria-label="Collapse chat list"
+				onclick={toggleSidebar}
+			>
+				«
 			</button>
 		</div>
-	{:else}
-		<aside>
-			<div class="side-head">
-				<button type="button" class="new" onclick={() => newChat(chatState)}>+ New chat</button>
-				<button
-					type="button"
-					class="fold-side"
-					title="Collapse sidebar"
-					aria-label="Collapse sidebar"
-					onclick={toggleSidebar}
-				>
-					«
-				</button>
-			</div>
-			<ul>
+		<ul>
 			{#each chatState.chats as item (item.id)}
 				<li>
 					<button
@@ -769,11 +794,18 @@
 		<button type="button" class="danger" onclick={() => deleteAllChats(chatState)}>
 			Delete all chats
 		</button>
-		</aside>
-	{/if}
+	</aside>
 
 	<main>
 		<header data-tauri-drag-region>
+			<button
+				type="button"
+				class="pill-btn"
+				title="Toggle chat list (⌘B)"
+				onclick={toggleSidebar}
+			>
+				<span aria-hidden="true">{settings.sidebarCollapsed ? "»" : "«"}</span> Chats
+			</button>
 			<span class="pill">{providerLabel}{useMock ? "" : ` · ${settings.thinkingLevel}`}</span>
 			{#if activeReplyLang}
 				<button
@@ -790,16 +822,15 @@
 			<button
 				type="button"
 				class="pill-btn"
-				class:on={settings.voice}
-				title="Toggle voice readback (replies are read aloud while text streams in)"
-				onclick={toggleVoice}
+				title="New chat (Ctrl+Alt+N)"
+				onclick={doNewChat}
 			>
-				<span class="dot" aria-hidden="true"></span>Voice
+				+ New chat
 			</button>
 			<button
 				type="button"
 				class="settings-btn"
-				title="Open settings"
+				title="Toggle settings (⌘.)"
 				aria-expanded={settingsOpen}
 				onclick={() => (settingsOpen = !settingsOpen)}
 			>
@@ -821,8 +852,8 @@
 			{#if chat.messages.length === 0}
 				<div class="empty-state">
 					<p class="empty">
-						New chat — type below and hit Enter. ⌘+Enter runs with pins,
-						⌥+Enter pins the draft. Select text in a reply to annotate it;
+						New chat — type below and hit Enter. ⌥+Enter posts the draft
+						to the top of the log. Select text in a reply to annotate it;
 						⌘+T translates the selection.{#if useMock}
 							<strong>Mock provider active.</strong>{/if}
 					</p>
@@ -994,17 +1025,6 @@
 			</p>
 		{/if}
 
-		{#if chat.pins.length > 0}
-			<ul class="pins">
-				{#each chat.pins as pin, i (i)}
-					<li>
-						<span>{pin.length > 60 ? `${pin.slice(0, 60)}…` : pin}</span>
-						<button type="button" aria-label="Unpin" onclick={() => unpinMessage(chatState, i)}>×</button>
-					</li>
-				{/each}
-			</ul>
-		{/if}
-
 		{#if attachments.length > 0 || attachError}
 			<ul class="attachments">
 				{#each attachments as att (att.id)}
@@ -1052,6 +1072,15 @@
 				if (files.length > 0) void addFiles(files);
 			}}
 		>
+			<button
+				type="button"
+				class="voice-float"
+				class:on={settings.voice}
+				title="Toggle voice readback (replies are read aloud)"
+				onclick={toggleVoice}
+			>
+				<span class="dot" aria-hidden="true"></span>Voice
+			</button>
 			<button
 				type="button"
 				class="send-btn"
@@ -1211,7 +1240,7 @@
 				<span><strong>scroll</strong> j/k move · i back to writing</span>
 			{:else}
 				<span
-					>vim inside · ctrl+g message scroll · ⌥+enter pin · ⌘+enter run+pins ·
+					>vim inside · ctrl+g message scroll · ⌥+enter post to top ·
 					ctrl+o thoughts · alt+r reading aids</span
 				>
 			{/if}
@@ -1228,11 +1257,14 @@
 		</div>
 	{/if}
 
-	{#if settingsOpen}
-		<aside class="settings-panel" aria-label="Settings">
-			<SettingsPanel settings={settings} onClose={() => (settingsOpen = false)} />
-		</aside>
-	{/if}
+	<aside
+		class="settings-panel"
+		class:closed={!settingsOpen}
+		aria-label="Settings"
+		inert={!settingsOpen}
+	>
+		<SettingsPanel settings={settings} onClose={() => (settingsOpen = false)} />
+	</aside>
 </div>
 
 <style>
@@ -1296,8 +1328,7 @@
 	.side-head .new {
 		flex: 1;
 	}
-	.fold-side,
-	.rail button {
+	.fold-side {
 		flex-shrink: 0;
 		font: inherit;
 		font-size: 0.9rem;
@@ -1308,18 +1339,26 @@
 		cursor: pointer;
 		padding: 0.4rem 0.5rem;
 	}
-	.fold-side:hover,
-	.rail button:hover {
+	.fold-side:hover {
 		color: #1c1c1e;
 		border-color: #c7c7cc;
 	}
-	.rail {
-		flex-shrink: 0;
-		border-right: 1px solid #e5e5ea;
-		padding: 0.8rem 0.35rem;
-		display: flex;
-		flex-direction: column;
-		gap: 0.6rem;
+	aside {
+		transition:
+			width 0.22s ease,
+			opacity 0.18s ease,
+			padding 0.22s ease,
+			border-color 0.22s ease;
+		overflow: hidden;
+	}
+	aside.collapsed {
+		width: 0;
+		min-width: 0;
+		opacity: 0;
+		padding-left: 0;
+		padding-right: 0;
+		border-right-width: 0;
+		pointer-events: none;
 	}
 	.settings-panel {
 		width: 22rem;
@@ -1327,7 +1366,21 @@
 		border-left: 1px solid #e5e5ea;
 		padding: 1.2rem 1.2rem 2rem;
 		overflow-y: auto;
+		overflow-x: hidden;
 		background: #fff;
+		transition:
+			width 0.22s ease,
+			opacity 0.18s ease,
+			padding 0.22s ease,
+			border-color 0.22s ease;
+	}
+	.settings-panel.closed {
+		width: 0;
+		opacity: 0;
+		padding-left: 0;
+		padding-right: 0;
+		border-left-color: transparent;
+		pointer-events: none;
 	}
 	aside .del {
 		color: #6e6e73;
@@ -1385,19 +1438,6 @@
 		cursor: pointer;
 		padding: 0.25rem 0.8rem;
 		white-space: nowrap;
-	}
-	.pill-btn .dot {
-		width: 0.45rem;
-		height: 0.45rem;
-		border-radius: 50%;
-		background: #c7c7cc;
-	}
-	.pill-btn.on {
-		color: #1c1c1e;
-		border-color: #1c1c1e;
-	}
-	.pill-btn.on .dot {
-		background: #30a46c;
 	}
 	.settings-btn {
 		font: inherit;
@@ -1863,29 +1903,6 @@
 		background: #fdecea;
 		color: #94250a;
 	}
-	.pins {
-		list-style: none;
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.4rem;
-		margin: 0;
-		padding: 0.5rem 1.2rem 0;
-	}
-	.pins li {
-		display: flex;
-		align-items: center;
-		gap: 0.4rem;
-		font-size: 0.78rem;
-		background: #eef4ff;
-		border-radius: 999px;
-		padding: 0.25rem 0.3rem 0.25rem 0.7rem;
-	}
-	.pins button {
-		border: 0;
-		background: none;
-		cursor: pointer;
-		color: #3a3a3c;
-	}
 	.prompt {
 		position: relative;
 		margin: 0.6rem 1.2rem 0;
@@ -1915,11 +1932,84 @@
 	.send-btn:hover {
 		opacity: 0.8;
 	}
+	.voice-float {
+		position: absolute;
+		top: 0.45rem;
+		right: 0.6rem;
+		z-index: 5;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		font: inherit;
+		font-size: 0.72rem;
+		color: #6e6e73;
+		border: 1px solid #c7c7cc;
+		border-radius: 999px;
+		background: #fff;
+		cursor: pointer;
+		padding: 0.15rem 0.6rem;
+		white-space: nowrap;
+	}
+	.voice-float .dot {
+		width: 0.4rem;
+		height: 0.4rem;
+		border-radius: 50%;
+		background: #c7c7cc;
+	}
+	.voice-float.on {
+		color: #1c1c1e;
+		border-color: #1c1c1e;
+	}
+	.voice-float.on .dot {
+		background: #30a46c;
+	}
 	.file-kind {
 		font-size: 0.68rem;
 		font-weight: 700;
 		letter-spacing: 0.05em;
 		color: #6e6e73;
+	}
+	/* Prompt editor legibility (global: CodeMirror owns these nodes).
+	   Dark rules live here — not in the CM theme object — because real
+	   media queries are the only reliable switch. */
+	.prompt :global(.cm-content) {
+		font-family:
+			"Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+		padding-right: 4.6rem;
+	}
+	:global(.cm-editor .cm-cursor) {
+		/* !important: CodeMirror injects its own cursor styles at runtime,
+		   after this stylesheet — only importance wins deterministically. */
+		border-left-color: #1c1c1e !important;
+	}
+	:global(.cm-editor .cm-fat-cursor) {
+		background-color: #1c1c1e !important;
+		color: #fff;
+	}
+	@media (prefers-color-scheme: dark) {
+		:global(.cm-editor .cm-cursor) {
+			border-left-color: #f2f2f7 !important;
+		}
+		:global(.cm-editor .cm-fat-cursor) {
+			background-color: #f2f2f7 !important;
+			color: #17171a;
+		}
+		:global(.cm-fence-bar) {
+			background: #2c2c2e;
+		}
+		:global(.cm-fence-lang) {
+			color: #aeaeb2;
+		}
+		:global(.cm-fence-bar button) {
+			background: #1c1c1e;
+			border-color: #48484a;
+			color: #f2f2f7;
+		}
+		:global(.cm-paste-marker) {
+			background: #2c2c2e;
+			border-color: #48484a;
+			color: #f2f2f7;
+		}
 	}
 	/* Centered reading column on wide screens (DeepSeek-web rhythm). */
 	article,
@@ -1932,7 +2022,6 @@
 	}
 	.prompt,
 	.composer-bar,
-	.pins,
 	.attachments,
 	.review,
 	.translate-panel,
@@ -1973,13 +2062,18 @@
 		.settings-btn {
 			color: #aeaeb2;
 		}
-		.rail {
-			border-color: #38383a;
-		}
-		.fold-side:hover,
-		.rail button:hover {
+		.fold-side:hover {
 			color: #f2f2f7;
 			border-color: #48484a;
+		}
+		.voice-float {
+			background: #1c1c1e;
+			border-color: #48484a;
+			color: #98989f;
+		}
+		.voice-float.on {
+			color: #f2f2f7;
+			border-color: #aeaeb2;
 		}
 		.settings-panel {
 			background: #17171a;
@@ -2011,9 +2105,6 @@
 		.error-banner {
 			background: #3d1008;
 			color: #ffb4a2;
-		}
-		.pins li {
-			background: #12233d;
 		}
 		.sent-files {
 			color: #98989f;
@@ -2087,10 +2178,6 @@
 		.pill-btn {
 			color: #98989f;
 			border-color: #48484a;
-		}
-		.pill-btn.on {
-			color: #f2f2f7;
-			border-color: #aeaeb2;
 		}
 		.lang-chip {
 			color: #f2f2f7;

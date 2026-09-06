@@ -33,7 +33,7 @@ function enterInsertMode(view: EditorView): void {
 	}
 }
 
-export type SubmitKind = "send" | "run-pins" | "pin";
+export type SubmitKind = "send" | "post-top";
 
 export interface PromptEditor {
 	readonly view: EditorView;
@@ -339,26 +339,11 @@ const appTheme = EditorView.theme({
 		padding: "0.1rem 0.5rem"
 	},
 	".cm-fence-bar button + button": { marginLeft: "0" },
-	// Insert-mode caret: dark on light, light on dark.
+	// Insert-mode caret (light scheme; dark lives in +page.svelte global
+	// CSS because @media inside a CM theme object is unreliable).
 	".cm-cursor": { borderLeftColor: "#1c1c1e" },
 	// Vim normal-mode block cursor (replit draws .cm-fat-cursor).
-	".cm-fat-cursor": { backgroundColor: "#1c1c1e", color: "#fff" },
-	"@media (prefers-color-scheme: dark)": {
-		".cm-cursor": { borderLeftColor: "#f2f2f7" },
-		".cm-fat-cursor": { backgroundColor: "#f2f2f7", color: "#17171a" },
-		".cm-fence-bar": { background: "#2c2c2e" },
-		".cm-fence-lang": { color: "#aeaeb2" },
-		".cm-fence-bar button": {
-			background: "#1c1c1e",
-			borderColor: "#48484a",
-			color: "#f2f2f7"
-		},
-		".cm-paste-marker": {
-			background: "#2c2c2e",
-			borderColor: "#48484a",
-			color: "#f2f2f7"
-		}
-	}
+	".cm-fat-cursor": { backgroundColor: "#1c1c1e", color: "#fff" }
 });
 
 export function createPromptEditor(
@@ -381,14 +366,14 @@ export function createPromptEditor(
 		{
 			key: "Mod-Enter",
 			run: () => {
-				options.onSubmit("run-pins");
+				options.onSubmit("send");
 				return true;
 			}
 		},
 		{
 			key: "Alt-Enter",
 			run: () => {
-				options.onSubmit("pin");
+				options.onSubmit("post-top");
 				return true;
 			}
 		},

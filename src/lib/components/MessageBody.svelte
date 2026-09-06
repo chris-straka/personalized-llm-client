@@ -232,6 +232,11 @@
 		font-size: 0.82rem;
 		line-height: 1.45;
 	}
+	.rendered :global(pre),
+	.rendered :global(code) {
+		font-family:
+			"Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	}
 	.rendered :global(:not(pre) > code) {
 		background: #f1f1f4;
 		border-radius: 5px;

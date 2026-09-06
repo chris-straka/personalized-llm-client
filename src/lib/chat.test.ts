@@ -7,8 +7,7 @@ import {
 	deleteChat,
 	deleteAllChats,
 	deleteMessage,
-	pinMessage,
-	unpinMessage,
+	postToTop,
 	branchFrom,
 	truncateToMessage,
 	dismissFailedAssistant,
@@ -150,33 +149,25 @@ describe("chat", () => {
 		expect(activeChat(state).messages[0].content).toBe("one");
 	});
 
-	it("pins ride along only when requested", async () => {
-		const seen: unknown[] = [];
-		const spy: ChatProvider = {
-			id: "spy",
-			async chat(m): Promise<ChatResult> {
-				seen.push(m);
-				return { content: "r", usage: null };
-			},
-			async stream(m, cb): Promise<ChatResult> {
-				seen.push(m);
-				cb.onToken("r");
-				return { content: "r", usage: null };
-			}
-		};
+	it("posts drafts to the top without sending", async () => {
 		const { state, store } = stateWith(freshStore());
-		pinMessage(state, "remember this", store);
-		await sendMessage(state, spy, "sys", "q", {}, store);
-		const plain = seen[0] as Array<{ content: string }>;
-		expect(plain.map((m) => m.content)).toEqual(["sys", "q"]);
-
-		takeBackLastReply(state, store);
-		await sendMessage(state, spy, "sys", "q2", { includePins: true }, store);
-		const pinned = seen[1] as Array<{ content: string }>;
-		expect(pinned.map((m) => m.content)).toEqual(["sys", "remember this", "q", "q2"]);
-
-		unpinMessage(state, 0, store);
-		expect(activeChat(state).pins).toEqual([]);
+		await sendMessage(state, scriptedProvider(["r"]), "sys", "q", {}, store);
+		postToTop(state, "remember this", [], store);
+		expect(activeChat(state).messages.map((m) => m.content)).toEqual([
+			"remember this",
+			"q",
+			"r"
+		]);
+		// The top post rides in the next send's history.
+		expect(buildApiMessages(activeChat(state), "sys").map((m) => m.content)).toEqual([
+			"sys",
+			"remember this",
+			"q",
+			"r"
+		]);
+		// Empty posts are ignored.
+		postToTop(state, "   ", [], store);
+		expect(activeChat(state).messages).toHaveLength(3);
 	});
 
 	it("creates, selects, and deletes chats without stranding the selection", () => {
@@ -258,7 +249,7 @@ describe("chat", () => {
 		const sent = activeChat(state).messages[0];
 		expect(sent.attachments).toHaveLength(2);
 
-		const api = buildApiMessages(activeChat(state), "sys", false);
+		const api = buildApiMessages(activeChat(state), "sys");
 		const user = api.find((m) => m.role === "user");
 		expect(Array.isArray(user?.content)).toBe(true);
 		const parts = user?.content as Array<{ type: string }>;
@@ -275,7 +266,7 @@ describe("chat", () => {
 	it("sends attachment-free messages as plain strings", async () => {
 		const { state, store } = stateWith(freshStore());
 		await sendMessage(state, scriptedProvider(["ok"]), "sys", "plain", {}, store);
-		const api = buildApiMessages(activeChat(state), "sys", false);
+		const api = buildApiMessages(activeChat(state), "sys");
 		expect(api.find((m) => m.role === "user")?.content).toBe("plain");
 	});
 

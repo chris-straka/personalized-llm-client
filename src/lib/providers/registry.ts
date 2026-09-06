@@ -22,7 +22,7 @@ export const PROVIDERS: ProviderDef[] = [
 	},
 	{
 		id: "muse",
-		label: "Muse Spark",
+		label: "Muse Spark 1.3",
 		defaultBaseUrl: "https://api.meta.ai/v1",
 		defaultModel: "muse-spark-1.3-contributor",
 		keyHint: "Meta Model API key",

@@ -246,9 +246,11 @@
 <section aria-labelledby="keys-heading">
 	<h2 id="keys-heading">Keyboard shortcuts</h2>
 	<dl class="keys">
-		<div><dt>Send</dt><dd>Enter</dd></div>
-		<div><dt>Run with pins</dt><dd>⌘+Enter</dd></div>
-		<div><dt>Pin draft to top</dt><dd>⌥+Enter</dd></div>
+		<div><dt>Send</dt><dd>Enter or ⌘+Enter</dd></div>
+		<div><dt>Post draft to top of log</dt><dd>⌥+Enter (no reply; rides in later sends)</dd></div>
+		<div><dt>New chat</dt><dd>Ctrl+Alt+N</dd></div>
+		<div><dt>Chat list show/hide</dt><dd>⌘B</dd></div>
+		<div><dt>Settings show/hide</dt><dd>⌘.</dd></div>
 		<div><dt>Switch model / key</dt><dd>Ctrl+Alt+← / →</dd></div>
 		<div><dt>Thinking low / medium / high</dt><dd>Ctrl+Alt+↓ / ↑ (cycles)</dd></div>
 		<div><dt>Hop out of the prompt</dt><dd>Ctrl+G (vim swallows the rest)</dd></div>

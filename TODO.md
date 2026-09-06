@@ -1,10 +1,8 @@
 # Ccez Studio — TODO
 
-Spec: `README.md`. Full plan: `PLAN.md` (merges `AI.md` + `AI2.md`, both superseded).
-Amendments A1–A4 below are agreed but not yet folded into `AI2.md` — they go in
-with the approval to start.
+Spec: `README.md`. Full plan: `PLAN.md` (`AI.md`/`AI2.md` merged then deleted).
 
-## Amendments to AI2.md (pending approval)
+## Amendments (all folded into PLAN.md, kept here for history)
 
 - **A1.** Reading aids (pinyin / furigana / tashkeel) default OFF (Stage 5).
 - **A2.** Fenced-code input box in the prompt (Stage 2): typing ```lang + Enter
@@ -112,3 +110,6 @@ with the approval to start.
   panel (/settings route deleted), collapsible chat sidebar (persisted),
   centered 46rem column, composer send button, shortcut-map dark contrast
   fixed — pixel-verified light+dark at 1600px after the a11y-snapshot miss
+- [x] R4 behavior: cursor root cause fixed, pins → top-posted messages,
+  header rework (new chat/chats/voice), animated zero-space sidebars,
+  Muse default + empty prompt + .env backfill, Fira Code stack

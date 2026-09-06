@@ -132,7 +132,27 @@ All S0–S7 shipped. These items came from using the installed app:
 - Shortcut-map dark contrast fixed. Lesson: a11y snapshots carry no color —
   visual work is verified with pixel screenshots (light + dark, 1600px).
 
-## Stages — S0–S7 done; Rounds 2–3 done
+## Round 4 — behavior corrections (from using :5200)
+
+- Cursor root cause: `@media` inside a CodeMirror theme object is unreliable
+  AND CodeMirror injects cursor styles at runtime after ours — caret/block
+  colors now live in global CSS with `!important`. Verified in the cascade.
+- Pins removed as a separate concept: ⌥+Enter posts the draft as a user
+  message at the top of the log (no reply); history carries it everywhere.
+  Enter/⌘+Enter both send. Old saves migrate (pins stripped on load).
+- Header: New chat (Ctrl+Alt+N) right, Chats toggle (⌘B) left, voice pill
+  floats top-right inside the prompt. Sidebars animate width (no unmount),
+  collapsed takes zero space; hover titles carry shortcuts.
+- Defaults: Muse active, empty system prompt, header reads "Muse Spark 1.3".
+  `.env` prefill reads VITE_ names plus the existing META_ aliases; blank
+  saved keys backfill on load without clobbering. (Vite only exposes VITE_
+  to the browser, so two VITE_ mirror lines were appended to the
+  gitignored `.env` — originals untouched.)
+- Fira Code-first mono stack for prompt, rendered code, shortcut keys.
+- Tests are hermetic: pure `envProviderDefaults` replaces env stubbing so
+  the developer's real `.env` can never leak into assertions again.
+
+## Stages — S0–S7 done; Rounds 2–4 done
 
 - [x] **S0 clean slate** (+A3): git init + insurance commit, wipe,
   desktop-only Tauri+Svelte+TS scaffold, Vitest, lint/format.

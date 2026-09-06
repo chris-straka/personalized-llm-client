@@ -23,7 +23,6 @@ export interface Chat {
 	id: string;
 	createdAt: number;
 	messages: ChatMsg[];
-	pins: string[];
 }
 
 /**
@@ -44,7 +43,7 @@ export function newId(): string {
 }
 
 function blankChat(): Chat {
-	return { id: newId(), createdAt: Date.now(), messages: [], pins: [] };
+	return { id: newId(), createdAt: Date.now(), messages: [] };
 }
 
 function browserStore(): KeyValueStore | null {
@@ -109,16 +108,30 @@ export function deleteMessage(state: ChatState, index: number, store?: KeyValueS
 	persistChats(state, store);
 }
 
-export function pinMessage(state: ChatState, text: string, store?: KeyValueStore): void {
+/**
+ * Post the draft as a user message at the very top of the log (⌥+Enter).
+ * No reply is triggered — it rides along as history in every later send.
+ */
+export function postToTop(
+	state: ChatState,
+	text: string,
+	attachments: Attachment[] = [],
+	store?: KeyValueStore
+): void {
 	const trimmed = text.trim();
-	if (!trimmed) return;
-	activeChat(state).pins = [...activeChat(state).pins, trimmed];
-	persistChats(state, store);
-}
-
-export function unpinMessage(state: ChatState, index: number, store?: KeyValueStore): void {
+	if (!trimmed && attachments.length === 0) return;
 	const chat = activeChat(state);
-	chat.pins = chat.pins.filter((_, i) => i !== index);
+	chat.messages = [
+		{
+			id: newId(),
+			role: "user",
+			content: trimmed,
+			usage: null,
+			error: null,
+			...(attachments.length > 0 ? { attachments } : {})
+		},
+		...chat.messages
+	];
 	persistChats(state, store);
 }
 
@@ -129,8 +142,7 @@ export function branchFrom(state: ChatState, index: number, store?: KeyValueStor
 		...blankChat(),
 		messages: source.messages
 			.slice(0, index + 1)
-			.map((m) => ({ ...m, id: newId(), error: null })),
-		pins: [...source.pins]
+			.map((m) => ({ ...m, id: newId(), error: null }))
 	};
 	state.chats = [fork, ...state.chats];
 	state.activeChatId = fork.id;
@@ -198,15 +210,8 @@ export function waypoints(state: ChatState, chat?: Chat): number[] {
 	return out;
 }
 
-export function buildApiMessages(
-	chat: Chat,
-	systemPrompt: string,
-	includePins: boolean
-): ChatMessage[] {
+export function buildApiMessages(chat: Chat, systemPrompt: string): ChatMessage[] {
 	const api: ChatMessage[] = [{ role: "system", content: systemPrompt }];
-	if (includePins) {
-		for (const pin of chat.pins) api.push({ role: "user", content: pin });
-	}
 	for (const m of chat.messages) {
 		if (m.role === "assistant" && m.error) continue;
 		api.push({ role: m.role, content: apiContent(m) });
@@ -239,7 +244,7 @@ export async function sendMessage(
 	provider: ChatProvider,
 	systemPrompt: string,
 	text: string,
-	opts: { includePins?: boolean; signal?: AbortSignal; attachments?: Attachment[] } = {},
+	opts: { signal?: AbortSignal; attachments?: Attachment[] } = {},
 	store?: KeyValueStore
 ): Promise<void> {
 	const trimmed = text.trim();
@@ -259,7 +264,7 @@ export async function sendMessage(
 	];
 	persistChats(state, store);
 
-	const apiMessages = buildApiMessages(chat, systemPrompt, opts.includePins ?? false);
+	const apiMessages = buildApiMessages(chat, systemPrompt);
 	const replyId = newId();
 	chat.messages = [
 		...chat.messages,
@@ -315,9 +320,15 @@ function loadChats(state: ChatState, store: KeyValueStore): void {
 	}
 	if (!raw) return;
 	try {
-		const parsed = JSON.parse(raw) as Chat[];
+		const parsed = JSON.parse(raw) as Array<Chat & { pins?: unknown }>;
 		if (Array.isArray(parsed)) {
-			state.chats = parsed.filter((c) => c && typeof c.id === "string");
+			state.chats = parsed
+				.filter((c) => c && typeof c.id === "string")
+				.map((c) => {
+					// The old pins array is gone; top-posted messages replaced it.
+					delete c.pins;
+					return c;
+				});
 			if (state.chats.length > 0) state.activeChatId = state.chats[0].id;
 		}
 	} catch {

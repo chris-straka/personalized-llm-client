@@ -33,7 +33,8 @@ describe("secrets fallback (no Tauri shell)", () => {
 	it("hydrates blank settings keys from storage", async () => {
 		await setSecret(secretAccount("muse"), "muse-test");
 		const settings = defaultSettings();
-		expect(settings.providers["muse"].apiKey).toBe("");
+		settings.providers["deepseek"].apiKey = "";
+		settings.providers["muse"].apiKey = "";
 		const hydrated = await hydrateSecrets(settings);
 		expect(hydrated).toEqual(["muse"]);
 		expect(settings.providers["muse"].apiKey).toBe("muse-test");

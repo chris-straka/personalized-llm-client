@@ -51,38 +51,66 @@ export interface AppSettings {
 
 const STORAGE_KEY = "ccez-studio-settings-v1";
 
-export const DEFAULT_SYSTEM_PROMPT = "Be brief, no summaries.";
+export const DEFAULT_SYSTEM_PROMPT = "";
 
 /**
  * Dev-time `.env` prefill (Vite bakes these into dev/preview builds only —
  * the installed app cannot read `.env` and uses Settings → Keychain).
- * Add to `.env`, never commit it:
- *   VITE_DEEPSEEK_API_KEY=...  VITE_MUSE_API_KEY=...
- *   VITE_DEEPSEEK_BASE_URL=... VITE_MUSE_BASE_URL=...
+ * Recognized names (VITE_ first, then legacy META_ aliases), never commit:
+ *   VITE_MUSE_API_KEY / META_OPENAI_API_KEY_MUSE_SPARK_ONE_POINT_THREE
+ *   VITE_MUSE_BASE_URL / META_BASE_URL, VITE_DEEPSEEK_API_KEY, ...
  */
 function devEnv(): Record<string, string | undefined> {
+	const fromProcess = (
+		globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }
+	).process?.env;
 	try {
-		return (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
+		const viteEnv = (import.meta as unknown as { env?: Record<string, string | undefined> })
+			.env;
+		return { ...(fromProcess ?? {}), ...(viteEnv ?? {}) };
 	} catch {
-		return {};
+		return { ...(fromProcess ?? {}) };
 	}
 }
 
-export function defaultSettings(): AppSettings {
-	const env = devEnv();
+const ENV_ALIASES: Record<string, string[]> = {
+	deepseek: ["VITE_DEEPSEEK_API_KEY"],
+	muse: ["VITE_MUSE_API_KEY", "META_OPENAI_API_KEY_MUSE_SPARK_ONE_POINT_THREE"]
+};
+
+const BASE_URL_ALIASES: Record<string, string[]> = {
+	deepseek: ["VITE_DEEPSEEK_BASE_URL"],
+	muse: ["VITE_MUSE_BASE_URL", "META_BASE_URL"]
+};
+
+function firstSet(env: Record<string, string | undefined>, names: string[]): string {
+	for (const name of names) {
+		if (env[name]) return env[name];
+	}
+	return "";
+}
+
+/** Pure env → provider defaults (tested with literal objects, never real env). */
+export function envProviderDefaults(
+	env: Record<string, string | undefined>
+): Record<string, ProviderSettings> {
 	const providers: Record<string, ProviderSettings> = {};
 	for (const id of ["deepseek", "muse"]) {
 		const def = getProviderDef(id);
-		const prefix = `VITE_${id.toUpperCase()}`;
 		providers[id] = {
-			baseUrl: env[`${prefix}_BASE_URL`] || def.defaultBaseUrl,
-			apiKey: env[`${prefix}_API_KEY`] || "",
+			baseUrl: firstSet(env, BASE_URL_ALIASES[id]) || def.defaultBaseUrl,
+			apiKey: firstSet(env, ENV_ALIASES[id]),
 			model: def.defaultModel
 		};
 	}
+	return providers;
+}
+
+export function defaultSettings(): AppSettings {
+	const providers = envProviderDefaults(devEnv());
 	return {
 		version: 1,
-		activeProviderId: "deepseek",
+		activeProviderId: "muse",
 		providers,
 		systemPrompt: DEFAULT_SYSTEM_PROMPT,
 		thinkingLevel: "high",
@@ -141,6 +169,14 @@ export function loadSettings(store?: KeyValueStore): AppSettings {
 		};
 		// Drop the removed translate-target setting from older saves.
 		delete (merged as unknown as Record<string, unknown>).translateTarget;
+		// Backfill blank keys from dev-time env so existing profiles pick
+		// up `.env` keys without clobbering anything already saved.
+		const env = devEnv();
+		for (const id of Object.keys(merged.providers)) {
+			if (!merged.providers[id].apiKey) {
+				merged.providers[id].apiKey = firstSet(env, ENV_ALIASES[id] ?? []);
+			}
+		}
 		return merged;
 	} catch {
 		return defaultSettings();

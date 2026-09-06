@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
 	defaultSettings,
+	envProviderDefaults,
 	loadSettings,
 	saveSettings,
 	memoryStore,
@@ -9,8 +10,16 @@ import {
 	effectiveSystemPrompt
 } from "./settings";
 
+/** Blank slate: tests must never see the developer's real `.env`. */
+function blankSettings() {
+	const s = defaultSettings();
+	s.providers["deepseek"].apiKey = "";
+	s.providers["muse"].apiKey = "";
+	return s;
+}
+
 describe("settings", () => {
-	it("defaults to high thinking, aids off, voice off, brief system prompt", () => {
+	it("defaults to high thinking, aids off, voice off, empty system prompt", () => {
 		const s = defaultSettings();
 		expect(s.thinkingLevel).toBe("high");
 		expect(s.readingAids).toBe(false);
@@ -31,30 +40,60 @@ describe("settings", () => {
 
 	it("composes thinking hint and reply language into the prompt", () => {
 		const s = defaultSettings();
-		expect(effectiveSystemPrompt(s)).toBe(
-			`${DEFAULT_SYSTEM_PROMPT} Think carefully before answering.`
-		);
+		s.systemPrompt = "Be brief.";
+		expect(effectiveSystemPrompt(s)).toBe("Be brief. Think carefully before answering.");
 		s.thinkingLevel = "medium";
-		expect(effectiveSystemPrompt(s)).toBe(DEFAULT_SYSTEM_PROMPT);
+		expect(effectiveSystemPrompt(s)).toBe("Be brief.");
 		s.thinkingLevel = "low";
 		s.replyLang = "fr";
 		expect(effectiveSystemPrompt(s)).toBe(
-			`${DEFAULT_SYSTEM_PROMPT} Answer directly with minimal deliberation. Reply in French.`
+			"Be brief. Answer directly with minimal deliberation. Reply in French."
 		);
 		s.replyLang = "nope";
-		expect(effectiveSystemPrompt(s)).toBe(
-			`${DEFAULT_SYSTEM_PROMPT} Answer directly with minimal deliberation.`
-		);
+		expect(effectiveSystemPrompt(s)).toBe("Be brief. Answer directly with minimal deliberation.");
+	});
+
+	it("defaults to Muse with an empty system prompt", () => {
+		const s = defaultSettings();
+		expect(s.activeProviderId).toBe("muse");
+		expect(s.systemPrompt).toBe("");
+	});
+
+	it("never clobbers a saved key when loading", () => {
+		const s = blankSettings();
+		s.providers["muse"].apiKey = "typed";
+		saveSettings(s, memoryStore);
+		expect(loadSettings(memoryStore).providers["muse"].apiKey).toBe("typed");
+	});
+
+	it("resolves dev-time env names, VITE_ first", () => {
+		expect(
+			envProviderDefaults({
+				META_OPENAI_API_KEY_MUSE_SPARK_ONE_POINT_THREE: "sk-legacy",
+				META_BASE_URL: "https://meta.example"
+			}).muse
+		).toEqual({
+			baseUrl: "https://meta.example",
+			apiKey: "sk-legacy",
+			model: "muse-spark-1.3-contributor"
+		});
+		expect(
+			envProviderDefaults({
+				META_OPENAI_API_KEY_MUSE_SPARK_ONE_POINT_THREE: "sk-legacy",
+				VITE_MUSE_API_KEY: "sk-vite"
+			}).muse.apiKey
+		).toBe("sk-vite");
+		expect(envProviderDefaults({}).muse.apiKey).toBe("");
 	});
 
 	it("round-trips through a store and survives corrupt JSON", () => {
-		const s = defaultSettings();
+		const s = blankSettings();
 		s.providers["muse"].apiKey = "secret";
 		saveSettings(s, memoryStore);
 		const loaded = loadSettings(memoryStore);
 		expect(loaded.providers["muse"].apiKey).toBe("secret");
 
 		memoryStore.setItem("ccez-studio-settings-v1", "{not json");
-		expect(loadSettings(memoryStore).providers["muse"].apiKey).toBe("");
+		expect(loadSettings(memoryStore)).toEqual(defaultSettings());
 	});
 });
