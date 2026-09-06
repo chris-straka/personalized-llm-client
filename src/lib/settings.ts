@@ -87,3 +87,10 @@ export function saveSettings(settings: AppSettings, store?: KeyValueStore): void
 	const backend = store ?? browserStore() ?? memoryStore;
 	backend.setItem(STORAGE_KEY, JSON.stringify(settings));
 }
+
+/** Masked display for a stored key: bullets plus the last 4 characters. */
+export function maskKey(key: string): string {
+	const trimmed = key.trim();
+	if (!trimmed) return "";
+	return trimmed.length <= 8 ? "••••" : `••••${trimmed.slice(-4)}`;
+}

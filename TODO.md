@@ -35,7 +35,7 @@ with the approval to start.
 - [ ] Hover + right-click reads a single word even when aids are off → S5
 - [ ] Vim trapped in prompt box; hop out to J/K message scroll → S2
 - [ ] Fenced-code input box: Collapse + Copy (Run later, A2) → S2
-- [ ] Attachments (images + files) → S2/S3
+- [ ] Attachments (images + files) → S3 (with paste-collapse + downscale)
 - [ ] Prompt box at bottom → S2
 - [ ] Desktop icon → S7
 
@@ -48,7 +48,7 @@ with the approval to start.
 - [ ] Branch from here → S2
 - [ ] Copy as markdown / as text → S3
 - [ ] Fast delete one/all chats → S2
-- [ ] Token estimates for files/images → S2
+- [ ] Token estimates for files/images → S3 (needs attachments first)
 - [ ] Rerun prompt → S2
 - [ ] Error handling with retry → S2
 - [ ] Waypoint jump navigation in long chats → S2
@@ -67,13 +67,24 @@ with the approval to start.
 ### Later (not this build)
 - [ ] Cloudflare-domain hosting, mobile UI, model-version bump, code Run button
 
+## Architecture rules (learned Stage 2)
+
+- Chat state is a plain object in `$state` with function updates (`src/lib/chat.ts`).
+  Class instances in `$state` never re-rendered — do not use them for UI state.
+- Never mutate a message object in place: Svelte proxy signals capture values on
+  first read, so streaming updates must replace (`map` + local accumulator).
+- Never run `check`/`lint`/`build` during a browser pass: `svelte-kit sync`
+  rewrites watched files and HMR-invalidates the dev session mid-test.
+
 ## Stages
 - [x] S0 clean slate (+A3): git init + insurance commit, wipe, desktop-only
   Tauri+Svelte+TS scaffold, Vitest, lint/format — all checks green
 - [x] S1 providers (DeepSeek + Muse Spark checkpoint), keys, settings page, shortcuts
   — Muse verified live (models + chat + SSE); DeepSeek adapter pending a key.
   Shortcuts move to S2 with the prompt box they operate.
-- [ ] S2 core chat + prompt box + fenced-code input (A2)
+- [x] S2 core chat + prompt box + fenced-code input (A2) — streaming,
+  rerun/branch/retry, pins, waypoints, vim + J/K, shortcuts, key eject UI.
+  Shortcuts needed capture-phase listener (CodeMirror swallows combos).
 - [ ] S3 messages/code rendering, paste collapse, thoughts toggle
 - [ ] S4 annotation + translate helper
 - [ ] S5 reading aids (default OFF, A1)

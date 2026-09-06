@@ -4,9 +4,11 @@
 	import {
 		loadSettings,
 		saveSettings,
+		maskKey,
 		type AppSettings,
 		type ThinkingLevel
 	} from "$lib/settings";
+	import { ejectProvider, restoreProvider } from "$lib/session";
 	import { ProviderError, type ChatMessage } from "$lib/providers/types";
 
 	let settings: AppSettings = $state(loadSettings());
@@ -14,12 +16,29 @@
 	let testing = $state(false);
 	let testResult = $state("");
 	let testError = $state("");
+	/** Per-provider "replace key" mode; otherwise a stored key shows masked. */
+	let editingKey: Record<string, boolean> = $state({});
+	/** Local mirror of the session module set, so eject/restore re-renders. */
+	let ejectedIds: string[] = $state([]);
 
 	const activeDef = $derived(PROVIDERS.find((p) => p.id === settings.activeProviderId)!);
 	const active = $derived(settings.providers[settings.activeProviderId]);
+	const ejected = $derived(ejectedIds.includes(settings.activeProviderId));
+	const showKeyField = $derived(!active.apiKey.trim() || editingKey[settings.activeProviderId]);
+
+	function eject() {
+		ejectProvider(settings.activeProviderId);
+		ejectedIds = [...ejectedIds, settings.activeProviderId];
+	}
+
+	function restore() {
+		restoreProvider(settings.activeProviderId);
+		ejectedIds = ejectedIds.filter((id) => id !== settings.activeProviderId);
+	}
 
 	function save() {
 		saveSettings(settings);
+		editingKey[settings.activeProviderId] = false;
 		savedFlash = true;
 		setTimeout(() => (savedFlash = false), 1500);
 	}
@@ -39,6 +58,7 @@
 		testResult = "";
 		testError = "";
 		try {
+			if (ejected) throw new ProviderError("Key is ejected for this session — restore it to test.");
 			if (!active.apiKey.trim()) throw new ProviderError("Enter an API key first.");
 			const provider = createProvider(settings.activeProviderId, active);
 			const messages: ChatMessage[] = [
@@ -99,10 +119,33 @@
 			Model
 			<input type="text" bind:value={active.model} autocomplete="off" spellcheck="false" />
 		</label>
-		<label>
-			API key <span class="hint">{activeDef.keyHint}</span>
-			<input type="password" bind:value={active.apiKey} autocomplete="off" spellcheck="false" />
-		</label>
+		{#if showKeyField}
+			<label>
+				API key <span class="hint">{activeDef.keyHint}</span>
+				<input
+					type="password"
+					bind:value={active.apiKey}
+					autocomplete="off"
+					spellcheck="false"
+				/>
+			</label>
+		{:else if ejected}
+			<p class="key-state" role="status">
+				Key ejected for this session.
+				<button type="button" onclick={restore}>Restore</button>
+			</p>
+		{:else}
+			<p class="key-state" role="status">
+				Key loaded: <code>{maskKey(active.apiKey)}</code>
+				<button
+					type="button"
+					onclick={() => (editingKey[settings.activeProviderId] = true)}
+				>
+					Replace
+				</button>
+				<button type="button" onclick={eject}>Eject for this session</button>
+			</p>
+		{/if}
 		<p class="note">Keys stay on this machine, in this app's local storage.</p>
 	</section>
 
@@ -154,6 +197,10 @@
 </main>
 
 <style>
+	:global(body) {
+		margin: 0;
+		background: #fff;
+	}
 	main {
 		max-width: 36rem;
 		margin: 0 auto;
@@ -161,6 +208,7 @@
 		font-family:
 			-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
 		color: #1c1c1e;
+		color-scheme: light dark;
 	}
 	header {
 		display: flex;
@@ -216,6 +264,24 @@
 		font-size: 0.8rem;
 		color: #6e6e73;
 		margin: 0.2rem 0 0;
+	}
+	.key-state {
+		font-size: 0.85rem;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+	.key-state code {
+		font-family: ui-monospace, monospace;
+	}
+	.key-state button {
+		font-size: 0.8rem;
+		border: 1px solid #c7c7cc;
+		border-radius: 6px;
+		background: #fff;
+		cursor: pointer;
+		padding: 0.2rem 0.6rem;
 	}
 	.provider-row,
 	.segmented {
@@ -321,6 +387,9 @@
 		color: #94250a;
 	}
 	@media (prefers-color-scheme: dark) {
+		:global(body) {
+			background: #17171a;
+		}
 		main {
 			color: #f2f2f7;
 		}
