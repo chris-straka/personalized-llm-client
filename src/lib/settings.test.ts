@@ -59,6 +59,16 @@ describe("settings", () => {
 		expect(s.systemPrompt).toBe("");
 	});
 
+	it("migrates the retired default prompt but keeps custom ones", () => {
+		const s = blankSettings();
+		s.systemPrompt = "Be brief, no summaries.";
+		saveSettings(s, memoryStore);
+		expect(loadSettings(memoryStore).systemPrompt).toBe("");
+		s.systemPrompt = "Talk like a pirate.";
+		saveSettings(s, memoryStore);
+		expect(loadSettings(memoryStore).systemPrompt).toBe("Talk like a pirate.");
+	});
+
 	it("never clobbers a saved key when loading", () => {
 		const s = blankSettings();
 		s.providers["muse"].apiKey = "typed";

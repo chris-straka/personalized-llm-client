@@ -169,6 +169,11 @@ export function loadSettings(store?: KeyValueStore): AppSettings {
 		};
 		// Drop the removed translate-target setting from older saves.
 		delete (merged as unknown as Record<string, unknown>).translateTarget;
+		// Retire the old "Be brief, no summaries." default: profiles that
+		// never customized it inherit the new (empty) default instead.
+		if (merged.systemPrompt === "Be brief, no summaries.") {
+			merged.systemPrompt = DEFAULT_SYSTEM_PROMPT;
+		}
 		// Backfill blank keys from dev-time env so existing profiles pick
 		// up `.env` keys without clobbering anything already saved.
 		const env = devEnv();
