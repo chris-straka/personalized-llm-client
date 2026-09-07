@@ -10,6 +10,7 @@
 		type RenderedMessage
 	} from "$lib/render";
 	import type { ChatMsg } from "$lib/chat";
+	import { locateQuote, type QuoteLocation } from "$lib/annotations";
 
 	export interface AnnotationMark {
 		id: string;
@@ -27,8 +28,15 @@
 		folded: boolean;
 		/** Annotation badges to stamp onto this message's quoted spans. */
 		marks?: AnnotationMark[];
-		/** Badge click (opens the review panel at the annotation). */
-		onBadgeClick?: (id: string) => void;
+		/**
+		 * The one annotation (by id) whose quote also gets the yellow wash:
+		 * the annotation whose comment box is currently open. Saved
+		 * annotations keep their numbered badge but no wash, so finishing
+		 * one clears its highlight instead of leaving it painted on.
+		 */
+		washId?: string | null;
+		/** Badge click (opens the edit popover at the badge). */
+		onBadgeClick?: (id: string, anchor: { x: number; y: number }) => void;
 		/** Global reading-aids toggle (pinyin / furigana). */
 		readingAids?: boolean;
 		/** Model-aid text replacing the message body when present. */
@@ -41,6 +49,7 @@
 		sourcesWanted,
 		folded,
 		marks = [],
+		washId = null,
 		onBadgeClick,
 		readingAids = false,
 		textOverride = null
@@ -58,13 +67,14 @@
 		const content = textOverride ?? message.content;
 		// Read synchronously so the effect re-runs when badges change.
 		const items = marks;
+		const wash = washId;
 		const skipMarks = streaming || folded;
 		// Aids render from raw text (markdown set aside); model-aid text
 		// (e.g. tashkeel) arrives via textOverride and takes the normal path.
 		const aidScript =
 			!textOverride && readingAids && !streaming ? detectScript(message.content) : null;
 		// Marks apply after Svelte flushes the new HTML (see applyMarks).
-		const stamp = () => void tick().then(() => applyMarks(items, skipMarks));
+		const stamp = () => void tick().then(() => applyMarks(items, skipMarks, wash));
 		if (aidScript === "zh") {
 			rendered = null;
 			aidLoading = false;
@@ -111,50 +121,84 @@
 	});
 
 	/**
-	 * Wrap the first occurrence of each quoted span in a highlight + numbered
-	 * badge. Old marks unwrap first so re-renders never nest. Quotes that no
-	 * longer match (edited messages, markdown reshaping) stay listed in the
-	 * review panel without a badge — never an error.
+	 * Numbered badge on the first occurrence of each quoted span, plus the
+	 * yellow wash on the one annotation whose comment box is open. Old
+	 * marks unwrap first so re-renders never accumulate. Quotes that no
+	 * longer match (edited messages, cross-message selections) stay
+	 * listed in the review panel without a badge — never an error.
 	 */
-	function applyMarks(items: AnnotationMark[], skip: boolean): void {
+	function applyMarks(items: AnnotationMark[], skip: boolean, wash: string | null): void {
 		if (!bodyEl) return;
 		for (const badge of bodyEl.querySelectorAll("[data-ann-badge]")) badge.remove();
 		for (const mark of bodyEl.querySelectorAll("mark.ccez-ann")) {
 			mark.replaceWith(document.createTextNode(mark.textContent ?? ""));
 		}
 		if (skip || items.length === 0) return;
-		const walker = document.createTreeWalker(bodyEl, NodeFilter.SHOW_TEXT);
-		const nodes: Text[] = [];
-		while (walker.nextNode()) nodes.push(walker.currentNode as Text);
 		for (const item of items) {
-			if (!item.quote) continue;
-			const node = nodes.find((n) => n.textContent?.includes(item.quote));
-			if (!node?.textContent) continue;
-			const at = node.textContent.indexOf(item.quote);
-			const range = document.createRange();
-			range.setStart(node, at);
-			range.setEnd(node, at + item.quote.length);
-			const highlight = document.createElement("mark");
-			highlight.className = "ccez-ann";
+			// Fresh snapshot per item: the previous wrap splits text nodes,
+			// so earlier indices go stale — nested quotes (a sentence and
+			// its parts) only locate on the current DOM.
+			const walker = document.createTreeWalker(bodyEl, NodeFilter.SHOW_TEXT);
+			const nodes: Text[] = [];
+			while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+			const texts = nodes.map((n) => n.textContent ?? "");
+			const loc = locateQuote(texts, item.quote);
+			if (!loc) continue;
+			const anchor = item.id === wash ? wrapRange(nodes, loc) : endNodeOf(nodes, loc);
+			if (!anchor) continue;
 			const badge = document.createElement("button");
 			badge.type = "button";
 			badge.className = "ccez-ann-badge";
 			badge.dataset.annBadge = item.id;
 			badge.textContent = String(item.number);
 			badge.title = "Open annotation";
+			anchor.after(badge);
+		}
+	}
+
+	/** End node of a located quote (badge anchor when no wash is wanted). */
+	function endNodeOf(nodes: Text[], loc: QuoteLocation): Text | null {
+		return nodes[loc.endNode] ?? null;
+	}
+
+	/**
+	 * Wrap every text-node part of a located quote in its own highlight
+	 * (sub-ranges stay inside single text nodes, so splitting is safe).
+	 * Returns the last mark for badge placement. Out-of-range offsets
+	 * (stale indices, partial overlaps) skip instead of throwing.
+	 */
+	function wrapRange(nodes: Text[], loc: QuoteLocation): HTMLElement | null {
+		let last: HTMLElement | null = null;
+		for (let i = loc.startNode; i <= loc.endNode; i++) {
+			const node = nodes[i];
+			if (!node) continue;
+			const length = node.textContent?.length ?? 0;
+			const from = i === loc.startNode ? loc.startOffset : 0;
+			const to = i === loc.endNode ? loc.endOffset : length;
+			if (from >= to) continue;
 			try {
+				const range = document.createRange();
+				range.setStart(node, from);
+				range.setEnd(node, to);
+				const highlight = document.createElement("mark");
+				highlight.className = "ccez-ann";
 				range.surroundContents(highlight);
+				last = highlight;
 			} catch {
 				continue;
 			}
-			highlight.after(badge);
 		}
+		return last;
 	}
 
 	function onBodyClick(event: MouseEvent): void {
 		const badge = (event.target as HTMLElement).closest<HTMLElement>("[data-ann-badge]");
 		if (badge) {
-			onBadgeClick?.(badge.dataset.annBadge ?? "");
+			const rect = badge.getBoundingClientRect();
+			onBadgeClick?.(badge.dataset.annBadge ?? "", {
+				x: rect.left + rect.width / 2,
+				y: rect.bottom
+			});
 			return;
 		}
 		const button = (event.target as HTMLElement).closest<HTMLElement>("[data-code-action]");
@@ -190,7 +234,7 @@
 <style>
 	.rendered {
 		word-break: break-word;
-		font-size: 0.92rem;
+		font-size: calc(0.92rem * var(--font-scale, 1));
 		line-height: 1.5;
 	}
 	.folded-preview {

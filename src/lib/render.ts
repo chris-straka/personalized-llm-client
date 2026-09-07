@@ -49,6 +49,14 @@ export function estimateTextTokens(text: string): number {
 	return Math.max(1, Math.ceil(text.length / 4));
 }
 
+/** Copy body for a message: thoughts and unasked sources stripped for
+ * assistants, raw content otherwise. */
+export function plainBody(content: string, role: string, sourcesWanted: boolean): string {
+	if (role !== "assistant") return content;
+	const { body } = extractThoughts(content);
+	return stripSourcesIfUnasked(body, sourcesWanted);
+}
+
 export function escapeHtml(text: string): string {
 	return text
 		.replace(/&/g, "&amp;")

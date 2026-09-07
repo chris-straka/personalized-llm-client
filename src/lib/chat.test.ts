@@ -14,6 +14,7 @@ import {
 	takeBackLastReply,
 	resendLast,
 	tokenTotal,
+	formatTokens,
 	waypoints,
 	sendMessage,
 	buildApiMessages,
@@ -63,6 +64,21 @@ describe("chat", () => {
 		expect(chat.messages[1].usage?.total).toBe(2);
 		expect(tokenTotal(state)).toBe(2);
 		expect(state.sending).toBe(false);
+	});
+
+	it("compacts token counts with K/M/B suffixes", () => {
+		expect(formatTokens(0)).toBe("0");
+		expect(formatTokens(42)).toBe("42");
+		expect(formatTokens(999)).toBe("999");
+		expect(formatTokens(1000)).toBe("1K");
+		expect(formatTokens(1536)).toBe("1.5K");
+		expect(formatTokens(10_400)).toBe("10.4K");
+		expect(formatTokens(99_999)).toBe("100K");
+		expect(formatTokens(999_949)).toBe("1M");
+		expect(formatTokens(999_950)).toBe("1M");
+		expect(formatTokens(2_500_000)).toBe("2.5M");
+		expect(formatTokens(1_000_000_000)).toBe("1B");
+		expect(formatTokens(-5)).toBe("0");
 	});
 
 	it("marks failed replies retryable and keeps the prompt", async () => {

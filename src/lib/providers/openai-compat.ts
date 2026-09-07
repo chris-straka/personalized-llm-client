@@ -120,6 +120,52 @@ export class OpenAICompatProvider implements ChatProvider {
 		}
 		return { content, usage };
 	}
+
+	/**
+	 * List model ids via `GET {baseUrl}/models` (the same endpoint Cline's
+	 * picker uses). Failures throw `ProviderError`; the Model field keeps
+	 * working as free text regardless.
+	 */
+	async listModels(): Promise<string[]> {
+		let res: Response;
+		try {
+			res = await fetch(this.url("/models"), { headers: this.headers() });
+		} catch (error) {
+			throw new ProviderError(`Network error listing ${this.id} models: ${messageOf(error)}`);
+		}
+		if (!res.ok) {
+			throw new ProviderError(
+				`${this.id} model list failed (HTTP ${res.status}): ${(await safeText(res)).slice(0, 300)}`,
+				res.status
+			);
+		}
+		let json: unknown;
+		try {
+			json = await res.json();
+		} catch {
+			throw new ProviderError(`${this.id} model list was not JSON`);
+		}
+		return parseModelIds(json);
+	}
+}
+
+/**
+ * Sorted, de-duplicated model ids from a `/models` payload. Tolerates the
+ * OpenAI `{ data: [{ id }] }` shape as well as bare id arrays; anything
+ * else yields an empty list instead of throwing. Exported for tests.
+ */
+export function parseModelIds(payload: unknown): string[] {
+	const ids = new Set<string>();
+	const candidates: unknown[] = Array.isArray(payload)
+		? payload
+		: payload && typeof payload === "object" && Array.isArray((payload as { data?: unknown }).data)
+			? ((payload as { data?: unknown }).data as unknown[])
+			: [];
+	for (const item of candidates) {
+		const id = typeof item === "string" ? item : (item as { id?: unknown } | null)?.id;
+		if (typeof id === "string" && id.trim()) ids.add(id.trim());
+	}
+	return [...ids].sort();
 }
 
 /** Split an SSE byte stream into `data:` payloads. Exported for tests. */

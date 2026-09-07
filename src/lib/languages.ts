@@ -43,21 +43,25 @@ export const EUROPEAN_LANGUAGES: ReplyLanguage[] = [
 	LANG("el", "Greek", "el-GR", "GR"),
 	LANG("ro", "Romanian", "ro-RO", "RO"),
 	LANG("bg", "Bulgarian", "bg-BG", "BG"),
-	LANG("hu", "Hungarian", "hu-HU", "HU")
+	LANG("hu", "Hungarian", "hu-HU", "HU"),
+	LANG("uk", "Ukrainian", "uk-UA", "UA"),
+	LANG("nl", "Dutch", "nl-NL", "NL")
 ];
 
 export const ASIAN_LANGUAGES: ReplyLanguage[] = [
 	LANG("zh", "Chinese", "zh-CN", "CN"),
 	LANG("ja", "Japanese", "ja-JP", "JP"),
 	LANG("ko", "Korean", "ko-KR", "KR"),
-	LANG("ar", "Modern Standard Arabic", "ar-SA", "SA", "Reply in Modern Standard Arabic."),
+	LANG("ar", "Arabic (MSA)", "ar-SA", "SA", "Reply in Modern Standard Arabic."),
 	LANG("hi", "Hindi", "hi-IN", "IN"),
 	LANG("id", "Indonesian", "id-ID", "ID"),
 	LANG("tr", "Turkish", "tr-TR", "TR"),
 	LANG("fa", "Persian", "fa-IR", "IR"),
 	LANG("th", "Thai", "th-TH", "TH"),
 	LANG("vi", "Vietnamese", "vi-VN", "VN"),
-	LANG("hy", "Armenian", "hy-AM", "AM")
+	LANG("hy", "Armenian", "hy-AM", "AM"),
+	LANG("ur", "Urdu", "ur-PK", "PK"),
+	LANG("he", "Hebrew", "he-IL", "IL")
 ];
 
 export const CLASSICAL_LANGUAGES: ReplyLanguage[] = [
@@ -87,4 +91,29 @@ for (const menu of LANGUAGE_MENUS) {
 export function replyLanguageFor(code: string | null): ReplyLanguage | null {
 	if (!code) return null;
 	return BY_CODE[code] ?? null;
+}
+
+/**
+ * Priority quick-switch order for ⌘1…⌘0. Flags in order: FR DE ES CN JP PT
+ * KR IQ IN RU. IQ maps to Modern Standard Arabic and IN to Hindi — the
+ * menus carry no closer Iraqi/Indian entries.
+ */
+export const QUICK_LANG_CODES: readonly string[] = [
+	"fr",
+	"de",
+	"es",
+	"zh",
+	"ja",
+	"pt",
+	"ko",
+	"ar",
+	"hi",
+	"ru"
+];
+
+/** "⌘1"… "⌘9", "⌘0" for a priority language, else null. */
+export function quickKeyFor(code: string): string | null {
+	const idx = QUICK_LANG_CODES.indexOf(code);
+	if (idx < 0) return null;
+	return idx === 9 ? "⌘0" : `⌘${idx + 1}`;
 }

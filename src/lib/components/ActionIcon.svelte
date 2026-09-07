@@ -1,0 +1,63 @@
+<script lang="ts">
+	/**
+	 * Line-icon set for the per-message actions, drawn in the trash/branch
+	 * style (1.6px rounded strokes, currentColor so light/dark/hover follow
+	 * the button color for free).
+	 */
+
+	export type ActionKind = "fold" | "copy" | "branch" | "speak" | "delete" | "rerun" | "close" | "mic";
+
+	interface Props {
+		kind: ActionKind;
+	}
+
+	let { kind }: Props = $props();
+</script>
+
+<svg
+	class="action-glyph"
+	viewBox="0 0 16 16"
+	fill="none"
+	stroke="currentColor"
+	stroke-width="1.6"
+	stroke-linecap="round"
+	stroke-linejoin="round"
+	aria-hidden="true"
+>
+	{#if kind === "fold"}
+		<path d="M4 6l4 4 4-4" />
+	{:else if kind === "copy"}
+		<rect x="6" y="6" width="7" height="7" rx="1.5" />
+		<path d="M9.5 6V4.2A1.2 1.2 0 0 0 8.3 3H4.2A1.2 1.2 0 0 0 3 4.2v4.1a1.2 1.2 0 0 0 1.2 1.2H6" />
+	{:else if kind === "branch"}
+		<path d="M2.5 12.5h7v-6" />
+		<path d="M6.8 6.7L9.5 4l2.7 2.7" />
+	{:else if kind === "speak"}
+		<path d="M2.5 6v4h2.3L9 13.3V2.7L4.8 6H2.5z" />
+		<path d="M11 6.2a3 3 0 0 1 0 3.6" />
+		<path d="M12.8 4.4a5.6 5.6 0 0 1 0 7.2" />
+	{:else if kind === "delete"}
+		<path d="M2.5 4.5h11" />
+		<path d="M6.5 4.5V2.8h3v1.7" />
+		<path d="M4 4.5l.75 7.9a1.5 1.5 0 0 0 1.5 1.3h3.5a1.5 1.5 0 0 0 1.5-1.3L12 4.5" />
+		<path d="M6.8 7.2v3.6M9.2 7.2v3.6" />
+	{:else if kind === "rerun"}
+		<path d="M13.5 8a5.5 5.5 0 1 1-1.7-4" />
+		<path d="M13.7 1.4v3.1h-3.1" />
+	{:else if kind === "close"}
+		<path d="M4 4l8 8M12 4l-8 8" />
+	{:else if kind === "mic"}
+		<rect x="6" y="1.5" width="4" height="7" rx="2" />
+		<path d="M4 8.5a4 4 0 0 0 8 0" />
+		<path d="M8 12.5v2" />
+		<path d="M6 14.5h4" />
+	{/if}
+</svg>
+
+<style>
+	.action-glyph {
+		display: block;
+		height: 1.05rem;
+		width: auto;
+	}
+</style>

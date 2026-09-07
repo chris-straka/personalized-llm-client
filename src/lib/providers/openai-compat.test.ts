@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { OpenAICompatProvider, readSse } from "./openai-compat";
+import { OpenAICompatProvider, parseModelIds, readSse } from "./openai-compat";
 import { ProviderError } from "./types";
 
 const CONFIG = { baseUrl: "https://example.test/v1/", apiKey: "k", model: "m" };
@@ -130,5 +130,53 @@ describe("readSse", () => {
 		const out: string[] = [];
 		for await (const event of readSse(stream)) out.push(event);
 		expect(out).toEqual(['{"a":1}', "[DONE]"]);
+	});
+});
+
+describe("listModels", () => {
+	it("reads sorted, de-duplicated ids from an OpenAI payload", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () =>
+				jsonResponse({
+					data: [{ id: "b-model" }, { id: "a-model" }, { id: "b-model" }, { id: "  " }, { id: 42 }]
+				})
+			)
+		);
+		const provider = new OpenAICompatProvider("probe", CONFIG);
+		await expect(provider.listModels()).resolves.toEqual(["a-model", "b-model"]);
+	});
+
+	it("sends the Bearer [REDACTED] to a trimmed /models URL", async () => {
+		const fetchMock = vi.fn(async () => jsonResponse({ data: [] }));
+		vi.stubGlobal("fetch", fetchMock);
+		const provider = new OpenAICompatProvider("probe", CONFIG);
+		await provider.listModels();
+		expect(fetchMock).toHaveBeenCalledOnce();
+		const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+		expect(url).toBe("https://example.test/v1/models");
+		expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer k");
+	});
+
+	it("throws ProviderError on HTTP and network failures", async () => {
+		vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ error: "nope" }, 401)));
+		const provider = new OpenAICompatProvider("probe", CONFIG);
+		await expect(provider.listModels()).rejects.toBeInstanceOf(ProviderError);
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => {
+				throw new TypeError("down");
+			})
+		);
+		await expect(provider.listModels()).rejects.toBeInstanceOf(ProviderError);
+	});
+});
+
+describe("parseModelIds", () => {
+	it("tolerates bare arrays, junk payloads, and empties", () => {
+		expect(parseModelIds(["x", { id: "y" }])).toEqual(["x", "y"]);
+		expect(parseModelIds({})).toEqual([]);
+		expect(parseModelIds(null)).toEqual([]);
+		expect(parseModelIds({ data: "nope" })).toEqual([]);
 	});
 });

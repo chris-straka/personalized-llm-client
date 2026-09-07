@@ -181,8 +181,9 @@ All S0–S7 shipped. These items came from using the installed app:
   code fold/copy/label, message fold, copy MD/text, paste-collapse markers,
   attachments (downscale + token estimates), thoughts details + ctrl+O,
   Sources stripped unless asked.
-- [x] **S4 annotation + translate helper**: select → Add to chat / More
-  details menu, numbered badges, review panel (edit/save/delete/delete-all),
+- [x] **S4 annotation + translate helper**: select → Annotate menu (Add to
+  chat removed), cursor-anchored pill (Enter saves, Esc cancels, 500ms
+  anti-double-send guard), numbered badges, review panel (edit/save/delete/delete-all),
   wrap into next query, drafts survive failed sends, Cmd+T lookup feeding
   annotation, translate-target setting.
 - [x] **S5 reading aids** (OFF default, A1): script detection + faint corner

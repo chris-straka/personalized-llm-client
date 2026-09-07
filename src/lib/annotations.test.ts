@@ -6,7 +6,8 @@ import {
 	clearAnnotations,
 	annotationNumber,
 	formatAnnotations,
-	withAnnotations
+	withAnnotations,
+	locateQuote
 } from "./annotations";
 import { buildTranslateMessages, translateSelection } from "./translate";
 import type { ChatProvider } from "./providers/types";
@@ -48,6 +49,50 @@ describe("annotations", () => {
 		);
 		expect(withAnnotations("", list)).toBe('Annotated selections:\n1. "langue" — meaning?');
 		expect(withAnnotations("explain", [])).toBe("explain");
+	});
+});
+
+describe("locateQuote", () => {
+	it("finds single-node quotes with offsets", () => {
+		expect(locateQuote(["hello world"], "world")).toEqual({
+			startNode: 0,
+			startOffset: 6,
+			endNode: 0,
+			endOffset: 11
+		});
+	});
+
+	it("spans element boundaries (inline markup splits nodes)", () => {
+		expect(locateQuote(["hello ", "world"], "hello world")).toEqual({
+			startNode: 0,
+			startOffset: 0,
+			endNode: 1,
+			endOffset: 5
+		});
+	});
+
+	it("ignores whitespace differences (multi-line selections)", () => {
+		expect(locateQuote(["first half", "second half"], "first half\n\nsecond half")).toEqual({
+			startNode: 0,
+			startOffset: 0,
+			endNode: 1,
+			endOffset: 11
+		});
+	});
+
+	it("folds typographic punctuation (rendered curly quotes)", () => {
+		expect(locateQuote(["say “hi” now"], 'say "hi" now')).toEqual({
+			startNode: 0,
+			startOffset: 0,
+			endNode: 0,
+			endOffset: 12
+		});
+	});
+
+	it("returns null for empty quotes and cross-message text", () => {
+		expect(locateQuote(["hello"], "")).toBeNull();
+		expect(locateQuote(["hello"], "bye")).toBeNull();
+		expect(locateQuote(["first message"], "first message second message")).toBeNull();
 	});
 });
 

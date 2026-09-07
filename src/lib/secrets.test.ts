@@ -21,6 +21,25 @@ describe("secrets fallback (no Tauri shell)", () => {
 		expect(tauriBackendAvailable()).toBe(false);
 	});
 
+	it("detects the v2 shell global (v1 name kept as fallback)", () => {
+		const w = window as unknown as Record<string, unknown>;
+		const prevInternals = w.__TAURI_INTERNALS__;
+		const prevV1 = w.__TAURI__;
+		try {
+			w.__TAURI_INTERNALS__ = {};
+			expect(tauriBackendAvailable()).toBe(true);
+			delete w.__TAURI_INTERNALS__;
+			w.__TAURI__ = {};
+			expect(tauriBackendAvailable()).toBe(true);
+		} finally {
+			if (prevInternals === undefined) delete w.__TAURI_INTERNALS__;
+			else w.__TAURI_INTERNALS__ = prevInternals;
+			if (prevV1 === undefined) delete w.__TAURI__;
+			else w.__TAURI__ = prevV1;
+		}
+		expect(tauriBackendAvailable()).toBe(false);
+	});
+
 	it("round-trips secrets through namespaced storage", async () => {
 		expect(await getSecret(secretAccount("deepseek"))).toBeNull();
 		await setSecret(secretAccount("deepseek"), "sk-test");

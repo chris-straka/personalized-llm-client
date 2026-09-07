@@ -1,0 +1,260 @@
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { ttsLangFor } from "./reading";
+import { splitSentences, type SpeakCallbacks } from "./voice";
+
+/**
+ * Native macOS voice engine (Stage 6 / A4): thin invoke wrapper over the
+ * Rust `AVSpeechSynthesizer` bridge (`src-tauri/src/tts.rs`). Same callback
+ * contract as web `speakText` — sentence progress is derived from native
+ * word-boundary events — so callers just pick an engine.
+ *
+ * Every function fails cleanly outside the Tauri shell (plain `vite dev`,
+ * Vitest): `invoke` rejects, support probes false, speech no-ops to onError.
+ */
+
+/** One installed macOS system voice (mirrors the Rust `NativeVoice`). */
+export interface NativeVoice {
+	id: string;
+	name: string;
+	lang: string;
+	/** 1 = default, 2 = enhanced, 3 = premium. */
+	quality: number;
+}
+
+interface WordPayload {
+	id: number;
+	location: number;
+	length: number;
+}
+
+interface DonePayload {
+	id: number;
+	finished: boolean;
+}
+
+let supportedCache: boolean | null = null;
+
+/**
+ * Last native-bridge failure message (probe or inventory), for UI that must
+ * tell "the bridge failed" apart from "no quality voices installed".
+ * Reset on every probe attempt; never throws.
+ */
+let lastNativeError: string | null = null;
+
+/** Last recorded native-bridge failure, or null when the last probe worked. */
+export function nativeTtsLastError(): string | null {
+	return lastNativeError;
+}
+
+function recordError(error: unknown): string {
+	const message = error instanceof Error ? error.message : String(error);
+	lastNativeError = message;
+	return message;
+}
+
+/**
+ * True only inside a Tauri shell on a build with the native engine. Never
+ * throws. Success caches; failure does NOT — a cold-start transient (the
+ * bridge worker still spinning up) must not hide System voices all session.
+ */
+export async function nativeTtsSupported(): Promise<boolean> {
+	if (supportedCache) return true;
+	lastNativeError = null;
+	try {
+		supportedCache = await invoke<boolean>("tts_supported");
+	} catch (error) {
+		recordError(error);
+		return false;
+	}
+	if (!supportedCache) lastNativeError = "Native speech is not available in this build.";
+	return supportedCache;
+}
+
+/**
+ * Installed system voices; empty outside the Tauri shell or when the probe
+ * fails (see `nativeTtsLastError()` to tell the two apart). Never throws.
+ */
+export async function nativeVoices(): Promise<NativeVoice[]> {
+	lastNativeError = null;
+	try {
+		return await invoke<NativeVoice[]>("tts_voices");
+	} catch (error) {
+		recordError(error);
+		return [];
+	}
+}
+
+/**
+ * Bundle id of the checked keyboard input-menu entry (macOS shell only),
+ * e.g. `com.apple.keylayout.US`. `null` outside the shell, on other
+ * platforms, or when the context cannot be read — the caller maps it with
+ * `voiceLocaleForInputSource` and leaves the language alone on `null`.
+ * Never throws.
+ */
+export async function currentKeyboardInputSource(): Promise<string | null> {
+	try {
+		const id = await invoke<string | null>("current_input_source");
+		return id?.trim() ? id.trim() : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Raw bridge/invoke errors translated into something actionable, mirroring
+ * the mic-error mapping in the page. Pure and unit-tested.
+ */
+export function friendlyNativeError(message: string): string {
+	if (/not allowed|capabilit|permission|denied/i.test(message)) {
+		return "System voices are blocked by the app's permissions — rebuild the app and try again.";
+	}
+	if (/timeout|timed out/i.test(message)) {
+		return "System voices timed out — try again.";
+	}
+	if (/requires macos/i.test(message)) {
+		return "System voices need the Mac app (this preview only has web voices).";
+	}
+	return message;
+}
+
+/**
+ * Language for a highlighted quote: script detection first (reliable for
+ * CJK/Arabic/…, needs no bridge), then Apple's language recognizer for
+ * Latin scripts (French vs English), else the fallback. Never throws.
+ */
+export async function quoteLangFor(quote: string, fallback: string): Promise<string> {
+	const scriptLang = ttsLangFor(quote, "");
+	if (scriptLang) return scriptLang;
+	try {
+		const tag = await invoke<string | null>("tts_identify_lang", { text: quote });
+		if (tag?.trim()) return tag.trim();
+	} catch {
+		// Bridge unavailable (browser preview, tests): Latin fallback below.
+	}
+	return fallback;
+}
+
+/** Open System Settings at the Accessibility pane (voice downloads). */
+export async function openVoiceSettings(): Promise<void> {
+	await invoke("open_voice_settings");
+}
+
+/**
+ * Map a UTF-16 offset in `utterance` to its sentence index. Pure and
+ * unit-tested; offsets come from native word-boundary events, which use the
+ * same units as the string we send.
+ */
+export function sentenceAtOffset(sentences: string[], utterance: string, offset: number): number {
+	let cursor = 0;
+	for (let i = 0; i < sentences.length; i++) {
+		const at = utterance.indexOf(sentences[i], cursor);
+		const start = at === -1 ? cursor : at;
+		if (offset < start + sentences[i].length) return i;
+		cursor = start + sentences[i].length;
+	}
+	return sentences.length - 1;
+}
+
+let unlisteners: UnlistenFn[] = [];
+/**
+ * Backend-assigned utterance id the listeners below accept events for. The
+ * match uses the id `tts_speak` returns — never a frontend counter, which
+ * would restart at 1 on every page reload while the backend keeps
+ * incrementing, so every later `tts-done` would be ignored and the UI would
+ * stay stuck "speaking".
+ */
+let expectedId: number | null = null;
+/** Bumps on every teardown so stale invokes can't arm or kill newer speech. */
+let generation = 0;
+
+function teardown(): void {
+	generation += 1;
+	expectedId = null;
+	const pending = unlisteners;
+	unlisteners = [];
+	for (const unlisten of pending) {
+		try {
+			unlisten();
+		} catch {
+			// Already torn down.
+		}
+	}
+}
+
+/**
+ * Speak `text` through `AVSpeechSynthesizer`. Returns false when there is
+ * nothing to say; invoke failures surface via `onError`. In-flight events
+ * from an older utterance are ignored via the backend-assigned id.
+ */
+export function speakNative(
+	text: string,
+	lang: string,
+	callbacks: SpeakCallbacks = {},
+	voiceId: string | null = null
+): boolean {
+	teardown();
+	const gen = generation;
+	const sentences = splitSentences(text);
+	if (sentences.length === 0) return false;
+	const utterance = sentences.join(" ");
+	let settled = false;
+	const fail = (error: unknown) => {
+		if (settled || gen !== generation) return;
+		settled = true;
+		teardown();
+		callbacks.onError?.(error instanceof Error ? error.message : String(error));
+	};
+	// Listeners first so nothing slips between invoke and registration; the
+	// backend id lands right after and arms the match below.
+	Promise.all([
+		listen<WordPayload>("tts-word", (event) => {
+			if (event.payload.id !== expectedId) return;
+			const index = sentenceAtOffset(sentences, utterance, event.payload.location);
+			callbacks.onProgress?.({
+				sentence: index + 1,
+				sentences: sentences.length,
+				current: sentences[index] ?? ""
+			});
+		}),
+		listen<DonePayload>("tts-done", (event) => {
+			if (event.payload.id !== expectedId) return;
+			teardown();
+			callbacks.onEnd?.();
+		})
+	])
+		.then(([unword, undone]) => {
+			unlisteners.push(unword, undone);
+			return invoke<number>("tts_speak", { text: utterance, lang, voice: voiceId });
+		})
+		.then((rustId) => {
+			if (gen === generation) expectedId = rustId;
+		})
+		.catch(fail);
+	return true;
+}
+
+/**
+ * One-shot word readback (hover / Option-click); no progress events needed.
+ * Deliberately leaves in-flight message listeners alone: the bridge
+ * serializes audio anyway, and the interrupted message clears its own UI
+ * through its cancel event. Never throws.
+ */
+export function speakNativeWord(
+	word: string,
+	lang: string,
+	onError?: (message: string) => void,
+	voiceId: string | null = null
+): void {
+	invoke<number>("tts_speak", { text: word, lang, voice: voiceId }).catch((error: unknown) => {
+		onError?.(error instanceof Error ? error.message : String(error));
+	});
+}
+
+/** Stop native speech and invalidate in-flight event listeners. Never throws. */
+export function stopNative(): void {
+	teardown();
+	invoke("tts_stop").catch(() => {
+		// Stopping must never throw from UI teardown paths.
+	});
+}

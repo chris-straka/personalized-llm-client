@@ -9,6 +9,7 @@ import {
 import {
 	EditorView,
 	keymap,
+	placeholder,
 	Decoration,
 	WidgetType,
 	type DecorationSet
@@ -48,6 +49,8 @@ export interface PromptEditor {
 
 export interface PromptEditorOptions {
 	initialDoc?: string;
+	/** Include vim motions. Defaults to true. */
+	vim?: boolean;
 	onSubmit: (kind: SubmitKind) => void;
 	/** Ctrl+G: leave the editor for J/K message-scroll mode. */
 	onHopOut: () => void;
@@ -262,6 +265,16 @@ function pastePlaceholders(): Extension {
 	return [field, clicks];
 }
 
+/**
+ * Strip trailing blank lines from pasted text. Block selections routinely
+ * drag extra newlines along, and the prompt must not grow empty lines for
+ * them. Pure and unit-tested. (Pasted-image markers are decoration-only
+ * widgets — they never pad the document, so this isn't that.)
+ */
+export function trimPasteTail(text: string): string {
+	return text.replace(/(\r\n|\r|\n)+$/, "");
+}
+
 /** Paste hook: images become attachments, long text collapses to a marker. */
 function pasteHandling(onImage: ((file: File) => void) | undefined): Extension {
 	return Prec.high(
@@ -275,8 +288,25 @@ function pasteHandling(onImage: ((file: File) => void) | undefined): Extension {
 					onImage(image);
 					return true;
 				}
-				const text = clipboard.getData("text/plain");
-				if (text.length <= PASTE_THRESHOLD) return false;
+				const raw = clipboard.getData("text/plain");
+				const text = trimPasteTail(raw);
+				// Nothing but newlines: swallow, don't insert an empty line.
+				if (!text) {
+					event.preventDefault();
+					return true;
+				}
+				if (text.length <= PASTE_THRESHOLD) {
+					// Untrimmed short paste: the default handler is exact.
+					// Trimmed: it would reinsert the raw tail, so insert here.
+					if (text === raw) return false;
+					event.preventDefault();
+					const { from, to } = view.state.selection.main;
+					view.dispatch({
+						changes: { from, to, insert: text },
+						selection: { anchor: from + text.length }
+					});
+					return true;
+				}
 				event.preventDefault();
 				const { from, to } = view.state.selection.main;
 				const id = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
@@ -356,9 +386,11 @@ export function createPromptEditor(
 		{
 			key: "Enter",
 			run: (view) => {
-				// AI Studio behavior: Enter is a newline; only ⌘+Enter sends.
+				// Enter sends (Shift+Enter stays a newline). The ```
+				// fence opener still takes precedence over sending.
 				if (fenceEnter(view)) return true;
-				return false;
+				options.onSubmit("send");
+				return true;
 			}
 		},
 		{
@@ -389,14 +421,16 @@ export function createPromptEditor(
 		}
 	]);
 
+	const vimEnabled = options.vim !== false;
 	const state = EditorState.create({
 		doc: options.initialDoc ?? "",
 		extensions: [
+			placeholder("ctrl+g message scroll"),
 			submitKeys,
 			EditorView.updateListener.of((update) => {
 				if (update.docChanged) options.onDocChange?.(update.state.doc.toString());
 			}),
-			vim(),
+			...(vimEnabled ? [vim()] : []),
 			history(),
 			keymap.of([...defaultKeymap, ...historyKeymap]),
 			markdown(),
@@ -409,7 +443,10 @@ export function createPromptEditor(
 		]
 	});
 	const view = new EditorView({ state, parent });
-	enterInsertMode(view);
+	// The prompt's buttons are absolutely positioned, so the editor node can
+	// lead in DOM order: Tab reaches the prompt before Voice/Send.
+	parent.prepend(view.dom);
+	if (vimEnabled) enterInsertMode(view);
 
 	return {
 		view,
@@ -426,7 +463,7 @@ export function createPromptEditor(
 		},
 		clear() {
 			this.setText("");
-			enterInsertMode(view);
+			if (vimEnabled) enterInsertMode(view);
 		},
 		focus: () => view.focus(),
 		destroy: () => view.destroy()

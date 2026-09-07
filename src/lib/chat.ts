@@ -200,6 +200,27 @@ export function tokenTotal(state: ChatState, chat?: Chat): number {
 	return target.messages.reduce((sum, m) => sum + (m.usage?.total ?? 0), 0);
 }
 
+/**
+ * Compact token count: full digits under 1000, then K/M/B with at most one
+ * decimal (100+ drops the fraction; anything rounding to 1000 rolls up to
+ * the next unit) so the header counter holds its width.
+ */
+export function formatTokens(n: number): string {
+	const count = Math.max(0, Math.floor(n));
+	if (count < 1000) return String(count);
+	let divisor = count < 1_000_000 ? 1_000 : count < 1_000_000_000 ? 1_000_000 : 1_000_000_000;
+	const suffix = (): string =>
+		divisor === 1_000 ? "K" : divisor === 1_000_000 ? "M" : "B";
+	const text = (): string => {
+		const rounded = Math.round((count / divisor) * 10) / 10;
+		return rounded >= 100 ? String(Math.round(rounded)) : String(rounded);
+	};
+	// Anything formatting as "1000" rolls up one unit (exact string check —
+	// no float-threshold gambling). Terminates: B never rolls up.
+	if (text() === "1000" && divisor < 1_000_000_000) divisor *= 1000;
+	return text() + suffix();
+}
+
 /** Message indices that start a user turn — the waypoint jump targets. */
 export function waypoints(state: ChatState, chat?: Chat): number[] {
 	const target = chat ?? activeChat(state);

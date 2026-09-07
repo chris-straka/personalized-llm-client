@@ -1,8 +1,8 @@
-import { getProviderDef } from "./providers/registry";
+import { getProviderDef, listProviders, type ProviderDef } from "./providers/registry";
 import { replyLanguageFor } from "./languages";
 
 export type ThinkingLevel = "low" | "medium" | "high";
-export type VoiceEngine = "web";
+export type VoiceEngine = "web" | "native";
 
 export const THINKING_LEVELS: ThinkingLevel[] = ["low", "medium", "high"];
 
@@ -24,12 +24,16 @@ export interface ProviderSettings {
 	baseUrl: string;
 	apiKey: string;
 	model: string;
+	/** Cached `/models` ids behind the Model picker's datalist. */
+	models: string[];
 }
 
 export interface AppSettings {
 	version: 1;
 	activeProviderId: string;
 	providers: Record<string, ProviderSettings>;
+	/** User-added provider defs (Cline-style); settings live in `providers`. */
+	customProviders: ProviderDef[];
 	systemPrompt: string;
 	thinkingLevel: ThinkingLevel;
 	/** Reading aids (pinyin / furigana / tashkeel). Off unless toggled. */
@@ -38,6 +42,11 @@ export interface AppSettings {
 	voice: boolean;
 	voiceEngine: VoiceEngine;
 	/**
+	 * Explicit native voice (registry identifier from the voice picker);
+	 * null = auto-pick the best installed voice per language.
+	 */
+	nativeVoiceId: string | null;
+	/**
 	 * Default voice locale for Latin-script text (French, German, English…),
 	 * which cannot self-identify by script. BCP-47, e.g. "fr-FR". Follows
 	 * the reply language when one is chosen.
@@ -45,8 +54,12 @@ export interface AppSettings {
 	voiceLang: string;
 	/** Reply-language code from the empty-state menus; null = default. */
 	replyLang: string | null;
+	/** Vim motions in the prompt box. On unless toggled. */
+	vim: boolean;
 	/** Left chat-list sidebar collapsed. */
 	sidebarCollapsed: boolean;
+	/** Text-size multiplier for messages and the prompt (1 = default). */
+	fontScale: number;
 }
 
 const STORAGE_KEY = "ccez-studio-settings-v1";
@@ -100,10 +113,27 @@ export function envProviderDefaults(
 		providers[id] = {
 			baseUrl: firstSet(env, BASE_URL_ALIASES[id]) || def.defaultBaseUrl,
 			apiKey: firstSet(env, ENV_ALIASES[id]),
-			model: def.defaultModel
+			model: def.defaultModel,
+			models: []
 		};
 	}
 	return providers;
+}
+
+/**
+ * Fresh-install voice locale from the OS locale (navigator.language tracks
+ * the system language/keyboard region). Browsers expose no keyboard-layout
+ * locale — key labels only — so this is the closest signal. Stored profiles
+ * keep their own value; this only shapes first boot.
+ */
+export function systemLocale(): string {
+	try {
+		const tag = typeof navigator !== "undefined" ? navigator.language : "";
+		if (/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?$/.test(tag.trim())) return tag.trim();
+	} catch {
+		// No DOM (SSR/tests without jsdom): fall through to en-US.
+	}
+	return "en-US";
 }
 
 export function defaultSettings(): AppSettings {
@@ -112,14 +142,20 @@ export function defaultSettings(): AppSettings {
 		version: 1,
 		activeProviderId: "muse",
 		providers,
+		customProviders: [],
 		systemPrompt: DEFAULT_SYSTEM_PROMPT,
 		thinkingLevel: "high",
 		readingAids: false,
 		voice: false,
-		voiceEngine: "web",
-		voiceLang: "en-US",
+		// Native first: this is a Mac-first app, and every runtime without
+		// system voices corrects itself back to web on the support probe.
+		voiceEngine: "native",
+		nativeVoiceId: null,
+		voiceLang: systemLocale(),
 		replyLang: null,
-		sidebarCollapsed: false
+		vim: true,
+		sidebarCollapsed: true,
+		fontScale: 1
 	};
 }
 
@@ -169,6 +205,22 @@ export function loadSettings(store?: KeyValueStore): AppSettings {
 		};
 		// Drop the removed translate-target setting from older saves.
 		delete (merged as unknown as Record<string, unknown>).translateTarget;
+		// Backfill user-added providers on older saves.
+		if (!Array.isArray(merged.customProviders)) merged.customProviders = [];
+		// An active provider that no longer exists (deleted custom) falls
+		// back to Muse rather than throwing in getProviderDef.
+		if (!listProviders(merged.customProviders).some((p) => p.id === merged.activeProviderId)) {
+			merged.activeProviderId = "muse";
+		}
+		// Backfill the model cache (provider entries from older saves
+		// replace the fresh ones wholesale, so the field is missing).
+		for (const id of Object.keys(merged.providers)) {
+			if (!Array.isArray(merged.providers[id].models)) merged.providers[id].models = [];
+		}
+		// Clamp the text-size multiplier (range inputs persist strings).
+		if (typeof merged.fontScale !== "number" || !(merged.fontScale >= 0.5 && merged.fontScale <= 2)) {
+			merged.fontScale = 1;
+		}
 		// Retire the old "Be brief, no summaries." default: profiles that
 		// never customized it inherit the new (empty) default instead.
 		if (merged.systemPrompt === "Be brief, no summaries.") {

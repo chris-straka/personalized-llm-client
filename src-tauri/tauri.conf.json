@@ -12,9 +12,9 @@
   "app": {
     "windows": [
       {
-        "title": "Ccez",
+        "title": "",
         "titleBarStyle": "Overlay",
-        "trafficLightPosition": { "x": 12, "y": 14 },
+        "trafficLightPosition": { "x": 20, "y": 26 },
         "width": 1280,
         "height": 860,
         "minWidth": 960,

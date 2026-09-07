@@ -4,6 +4,8 @@ import {
 	EUROPEAN_LANGUAGES,
 	ASIAN_LANGUAGES,
 	CLASSICAL_LANGUAGES,
+	QUICK_LANG_CODES,
+	quickKeyFor,
 	replyLanguageFor
 } from "./languages";
 
@@ -26,7 +28,9 @@ describe("reply languages", () => {
 			"el",
 			"ro",
 			"bg",
-			"hu"
+			"hu",
+			"uk",
+			"nl"
 		]);
 	});
 
@@ -42,8 +46,19 @@ describe("reply languages", () => {
 			"fa",
 			"th",
 			"vi",
-			"hy"
+			"hy",
+			"ur",
+			"he"
 		]);
+	});
+
+	it("labels Arabic short and resolves the new languages", () => {
+		expect(replyLanguageFor("ar")?.name).toBe("Arabic (MSA)");
+		expect(replyLanguageFor("ar")?.prompt).toBe("Reply in Modern Standard Arabic.");
+		for (const code of ["uk", "nl", "ur", "he"]) {
+			expect(replyLanguageFor(code)?.prompt).toBe(`Reply in ${replyLanguageFor(code)?.name}.`);
+		}
+		expect(quickKeyFor("ar")).toBe("⌘8");
 	});
 
 	it("lists Latin, Ancient Greek, Sanskrit", () => {
@@ -55,5 +70,32 @@ describe("reply languages", () => {
 		expect(replyLanguageFor("ja")?.voice).toBe("ja-JP");
 		expect(replyLanguageFor(null)).toBeNull();
 		expect(replyLanguageFor("xx")).toBeNull();
+	});
+
+	it("maps ⌘1…⌘0 to the priority flags in order", () => {
+		expect([...QUICK_LANG_CODES]).toEqual([
+			"fr",
+			"de",
+			"es",
+			"zh",
+			"ja",
+			"pt",
+			"ko",
+			"ar",
+			"hi",
+			"ru"
+		]);
+	});
+
+	it("resolves every quick code and labels its key", () => {
+		for (const code of QUICK_LANG_CODES) {
+			expect(replyLanguageFor(code)).not.toBeNull();
+		}
+		expect(quickKeyFor("fr")).toBe("⌘1");
+		expect(quickKeyFor("zh")).toBe("⌘4");
+		expect(quickKeyFor("hi")).toBe("⌘9");
+		expect(quickKeyFor("ru")).toBe("⌘0");
+		expect(quickKeyFor("it")).toBeNull();
+		expect(quickKeyFor("xx")).toBeNull();
 	});
 });
