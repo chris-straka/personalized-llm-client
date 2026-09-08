@@ -68,7 +68,11 @@ Spec: `README.md`. Full plan: `PLAN.md` (`AI.md`/`AI2.md` merged then deleted).
 - [ ] No cloud sync / sharing / plugins → non-goal
 
 ### Later (not this build)
-- [ ] Cloudflare-domain hosting, mobile UI, model-version bump, code Run button
+- [ ] Cloudflare-domain hosting, model-version bump, code Run button
+- [ ] Android phone build (S24): plan + UA-gated branches shipped (see
+  PLAN.md "Android milestone"); device-only work outstanding (tauri
+  android init, signing, share intent, Keystore, TTS inventory, touch
+  tuning)
 
 ## Architecture rules (learned Stage 2)
 
