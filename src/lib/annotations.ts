@@ -297,8 +297,15 @@ export function applyMarks(
 /**
  * Lock a live selection to the message holding its anchor: dragging
  * into another message pulls the focus end back to the anchor message's
- * edge instead of selecting across messages. Returns true when trimmed.
- * Never throws (selection APIs disagree across engines).
+ * edge instead of selecting across messages. A focus outside the
+ * anchor's prose trims the same way — double-clicking blank space
+ * past a line's end otherwise stretches the range into the prompt
+ * editor, and the action row caught inside reads back as a phantom
+ * quote whose menu lands under the cursor and eats the next click.
+ * The walk stays inside the anchor's rendered prose, never the whole
+ * article: the action row's text labels (aid names) must not become
+ * quote text. Returns true when trimmed. Never throws (selection
+ * APIs disagree across engines).
  */
 export function lockSelectionToMessage(
 	selection: Selection,
@@ -307,29 +314,39 @@ export function lockSelectionToMessage(
 	try {
 		if (selection.isCollapsed || selection.rangeCount === 0) return false;
 		const anchorNode = selection.anchorNode;
-		if (!anchorNode) return false;
+		const focusNode = selection.focusNode;
+		if (!anchorNode || !focusNode) return false;
 		const anchorEl = messageOf(anchorNode);
 		if (!anchorEl) return false;
-		const focusEl = messageOf(selection.focusNode);
-		if (!focusEl || focusEl === anchorEl) return false;
+		if (messageOf(focusNode) === anchorEl) return false;
 		const anchorOffset = selection.anchorOffset;
-		const walker = document.createTreeWalker(anchorEl, NodeFilter.SHOW_TEXT);
+		// Prose scope, not the article: trimming to the article's end
+		// would pin the focus past the action row, baking its button
+		// labels into the quote. Outside rendered prose (or tests with
+		// bare articles), the article itself stays the scope.
+		const prose = (
+			anchorNode instanceof Element ? anchorNode : anchorNode.parentElement
+		)?.closest(".rendered");
+		const walker = document.createTreeWalker(prose ?? anchorEl, NodeFilter.SHOW_TEXT);
 		const texts: Text[] = [];
 		while (walker.nextNode()) {
 			const node = walker.currentNode;
 			if (node instanceof Text && node.textContent) texts.push(node);
 		}
 		if (texts.length === 0) return false;
-		const order = anchorEl.compareDocumentPosition(focusEl);
+		// Sort by the focus node itself, not its message: a focus
+		// outside every message still sits before or after the anchor.
+		const order = anchorEl.compareDocumentPosition(focusNode);
 		if (order & Node.DOCUMENT_POSITION_FOLLOWING) {
-			// Focus ran into a later message: pin it to the anchor
-			// message's last text.
+			// Focus ran past the anchor message's end (a later message
+			// or the prompt below): pin it to the anchor message's
+			// last text.
 			const last = texts[texts.length - 1];
 			if (!last) return false;
 			selection.setBaseAndExtent(anchorNode, anchorOffset, last, last.length);
 		} else {
-			// Focus ran up into an earlier message: pin it to the
-			// anchor message's first text.
+			// Focus ran up past the anchor message's start: pin it to
+			// the anchor message's first text.
 			const first = texts[0];
 			if (!first) return false;
 			selection.setBaseAndExtent(anchorNode, anchorOffset, first, 0);

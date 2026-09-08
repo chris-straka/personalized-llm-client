@@ -250,6 +250,52 @@ describe("lockSelectionToMessage", () => {
 		}
 	});
 
+	it("trims a focus that escapes below every message (prompt editor)", () => {
+		const root = document.createElement("div");
+		root.innerHTML =
+			'<article id="msg-0"><div class="rendered"><p>first message here</p></div>' +
+			'<div class="actions"><button>読み仮名</button></div></article>' +
+			'<div id="composer" contenteditable="true"><p>prompt</p></div>';
+		document.body.append(root);
+		try {
+			const sel = document.getSelection();
+			if (!sel) throw new Error("no selection");
+			const first = root.querySelector("#msg-0 p")?.firstChild;
+			const outside = root.querySelector("#composer p")?.firstChild;
+			if (!first || !outside) throw new Error("no text nodes");
+			// Double-click past a line's end stretches into the editor;
+			// the trim must stop at the prose edge, never bake the aid
+			// button's label into the selection.
+			sel.setBaseAndExtent(first, 18, outside, 0);
+			expect(lockSelectionToMessage(sel, articleOf)).toBe(true);
+			expect(sel.focusNode === first || first.contains(sel.focusNode)).toBe(true);
+			expect(sel.toString()).toBe("");
+		} finally {
+			root.remove();
+			document.getSelection()?.removeAllRanges();
+		}
+	});
+
+	it("trims a focus that escapes above every message", () => {
+		const root = document.createElement("div");
+		root.innerHTML =
+			'<header>app header</header><article id="msg-0"><p>first message here</p></article>';
+		document.body.append(root);
+		try {
+			const sel = document.getSelection();
+			if (!sel) throw new Error("no selection");
+			const header = root.querySelector("header")?.firstChild;
+			const first = root.querySelector("#msg-0 p")?.firstChild;
+			if (!header || !first) throw new Error("no text nodes");
+			sel.setBaseAndExtent(first, 5, header, 0);
+			expect(lockSelectionToMessage(sel, articleOf)).toBe(true);
+			expect(sel.toString()).toBe("first");
+		} finally {
+			root.remove();
+			document.getSelection()?.removeAllRanges();
+		}
+	});
+
 	it("leaves collapsed and single-message selections alone", () => {
 		const root = twoArticles();
 		try {
