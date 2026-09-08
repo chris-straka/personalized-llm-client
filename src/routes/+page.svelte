@@ -1639,19 +1639,16 @@
 
 	/**
 	 * Reset the voice language to the checked keyboard input source
-	 * (⇧⌘Delete's second half). No source id means the bridge is down
-	 * (browser preview): nothing to reset from, so stay silent — routine
-	 * chat deletions must never toast. Only a positively unrecognized
-	 * layout toasts, since the language is then left untouched.
+	 * (⇧⌘Delete's second half). Anything unknown — no source id (the
+	 * bridge is down in browser preview) or an unrecognized layout —
+	 * stays silent and leaves the language untouched: routine chat
+	 * deletions must never toast.
 	 */
 	async function resetVoiceLangFromKeyboard(): Promise<void> {
 		const sourceId = await currentKeyboardInputSource();
 		if (!sourceId) return;
 		const locale = voiceLocaleForInputSource(sourceId);
-		if (!locale) {
-			flashToast("Couldn't tell the keyboard layout — voice language unchanged.");
-			return;
-		}
+		if (!locale) return;
 		settings.voiceLang = locale;
 		persistSettings();
 	}
@@ -2678,15 +2675,6 @@
 						<button
 							type="button"
 							class="icon-btn"
-							data-tip="Delete this message (⌘D)"
-							aria-label="Delete this message (⌘D)"
-							onclick={() => deleteMessage(chatState, i)}
-						>
-							<ActionIcon kind="delete" />
-						</button>
-						<button
-							type="button"
-							class="icon-btn"
 							class:active={speakingId === msg.id}
 							data-tip={speakTitle(msg)}
 							aria-label={speakTitle(msg)}
@@ -2697,6 +2685,15 @@
 							}}
 						>
 							<ActionIcon kind="speak" />
+						</button>
+						<button
+							type="button"
+							class="icon-btn"
+							data-tip="Delete this message (⌘D)"
+							aria-label="Delete this message (⌘D)"
+							onclick={() => deleteMessage(chatState, i)}
+						>
+							<ActionIcon kind="delete" />
 						</button>
 						{#if msg.role === "assistant" && !streamingThis}
 							<!-- Reading aids live here, right of speak: hover
@@ -3374,7 +3371,7 @@
 		gap: 0.4rem;
 		/* 0.8rem aside padding + 0.1rem here = the header's 0.9rem. */
 		margin-top: 0.1rem;
-		/* No controls left (single ⌘B toggle lives in the header): keep
+		/* No sidebar controls left (⌘B/⌘N live on keys only now): keep
 		a grabbable drag strip where the button row was. */
 		min-height: 1.25rem;
 	}
@@ -4132,7 +4129,7 @@
 	history. No circle, no border — just the number, quiet. */
 	.ann-refs {
 		position: absolute;
-		top: -1.05rem;
+		top: -1.2rem;
 		left: 0.8rem;
 		display: flex;
 		margin: 0;

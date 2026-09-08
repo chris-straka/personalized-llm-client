@@ -397,6 +397,14 @@
 		color: #6e6e73;
 		animation: rt-in 0.18s ease;
 	}
+	/* Readings (and their fallback parens) are overlay, never content:
+	they neither select nor highlight, and quote extraction already
+	strips them for the same reason. */
+	.rendered :global(rt),
+	.rendered :global(rp) {
+		user-select: none;
+		-webkit-user-select: none;
+	}
 	@keyframes rt-in {
 		from {
 			opacity: 0;
@@ -561,22 +569,22 @@
 		white-space: nowrap;
 		cursor: pointer;
 	}
-	/* Speech-bubble tail: a thin triangle leaning down-left toward the
-	quote it annotates, never straight down. Its wide top tucks 4px
+	/* Speech-bubble tail: a slim triangle leaning down-left toward the
+	quote it annotates, never straight down. Its wide top tucks 6px
 	under the badge (same color, so the join can never gap — the circle
 	curves away at the sides, which is why the tail seats left of
-	center instead of off the rim). Clip-path corners are sharp, so the
-	tip is a true point. Clicks land on the button, so the open still
-	works. */
+	center instead of off the rim). Slimmer and a touch longer than
+	before, so the tip reads as a true point. Clicks land on the
+	button, so the open still works. */
 	.rendered :global(button.ccez-ann-badge::after) {
 		content: "";
 		position: absolute;
-		top: calc(100% - 4px);
-		left: 20%;
-		width: 0.46rem;
-		height: 0.52rem;
+		top: calc(100% - 6px);
+		left: 26%;
+		width: 0.4rem;
+		height: 0.56rem;
 		background: inherit;
-		clip-path: polygon(0 0, 100% 0, 8% 100%);
+		clip-path: polygon(0 0, 100% 0, 15% 100%);
 	}
 	/* Newly stamped badges fade in; re-stamps skip the class so steady
 	marks never flicker on re-render. */
