@@ -3028,7 +3028,6 @@
 							title="Review annotations"
 							aria-label={annotations.length === 1 ? "1 annotation" : `${annotations.length} annotations`}
 							aria-expanded={reviewOpen}
-							onclick={() => (reviewOpen = !reviewOpen)}
 						>
 							{annotationCountLabel(annotations.length)}
 						</button>
@@ -4287,9 +4286,13 @@
 		padding: 0 0.1rem;
 		cursor: default;
 	}
+	/* Opens overlapping its number pill (flush with the row's bottom
+	edge): the cursor is already inside the card the moment it
+	appears, so hovering the number never needs a travel gap. The
+	invisible bridge below stays as backstop for the fade. */
 	.ann-refs-pop {
 		position: absolute;
-		bottom: calc(100% + 0.4rem);
+		bottom: 0;
 		left: 0;
 		z-index: 40;
 		min-width: 14rem;
@@ -4750,11 +4753,15 @@
 	from badge to popup without crossing dead hover space. */
 	/* The pill sits at the prompt's right edge, so the card anchors
 	right and grows up-and-left — growing right would run it off the
-	column (and over the send button's airspace). */
+	column (and over the send button's airspace). It opens overlapping
+	the pill itself (a hair past the wrap's bottom edge), so the cursor
+	is already inside the card the moment it appears — no travel gap,
+	no bridge to cross. Hover, keyboard focus, and touch-tap all open
+	it through CSS alone; the pill button has no click action. */
 	.ann-wrap .review {
 		display: none;
 		position: absolute;
-		bottom: 100%;
+		bottom: -0.1rem;
 		right: 0;
 		z-index: 60;
 		width: max-content;

@@ -166,26 +166,80 @@ test("annotating a repeated character anchors the selected repeat", async ({ pag
 });
 
 /** The prompt's review card grows up and to the left of its pill —
-never right over the send button's airspace. */
+never right over the send button's airspace — and opens covering the
+pill, so the cursor is already inside it. */
 test("prompt review card opens up and to the left", async ({ page }) => {
 	await openAnnotate(page, "確認しました");
 	await page.keyboard.press("Enter");
-	const pill = page.locator(".ann-pill");
-	await expect(pill).toBeVisible();
-	await pill.hover();
+	await hoverPromptPill(page);
 	const card = page.locator(".ann-wrap .review");
 	await expect(card).toBeVisible();
 	const boxes = await page.evaluate(() => {
 		const rect = (sel: string) => document.querySelector(sel)?.getBoundingClientRect();
 		const r = rect(".ann-wrap .review");
 		const w = rect(".ann-wrap");
-		if (!r || !w) return null;
-		return { cardRight: r.right, cardBottom: r.bottom, wrapRight: w.right, wrapTop: w.top };
+		const p = rect(".prompt-tools .ann-pill");
+		if (!r || !w || !p) return null;
+		return {
+			cardRight: r.right,
+			cardTop: r.y,
+			wrapRight: w.right,
+			wrapTop: w.top,
+			pillCX: p.x + p.width / 2,
+			pillCY: p.y + p.height / 2,
+			card: { x: r.x, y: r.y, w: r.width, h: r.height }
+		};
 	});
 	if (!boxes) throw new Error("review card missing boxes");
-	expect(boxes.cardBottom).toBeLessThanOrEqual(boxes.wrapTop + 1);
+	// Grows upward from the pill, right-aligned with it.
+	expect(boxes.cardTop).toBeLessThan(boxes.wrapTop);
 	expect(Math.abs(boxes.cardRight - boxes.wrapRight)).toBeLessThanOrEqual(2);
+	// The pill's center sits inside the open card (zero travel gap).
+	expect(boxes.pillCX).toBeGreaterThanOrEqual(boxes.card.x);
+	expect(boxes.pillCX).toBeLessThanOrEqual(boxes.card.x + boxes.card.w);
+	expect(boxes.pillCY).toBeGreaterThanOrEqual(boxes.card.y);
+	expect(boxes.pillCY).toBeLessThanOrEqual(boxes.card.y + boxes.card.h);
 });
+
+/** The sent message's refs card opens covering its number pill. */
+test("message refs card opens over its number", async ({ page }) => {
+	await openAnnotate(page, "確認しました");
+	await page.keyboard.type("meaning?");
+	await page.keyboard.press("Enter");
+	await expect(page.locator(".prompt-tools .ann-pill")).toHaveText("1");
+	await page.locator(".cm-content").click();
+	await page.keyboard.type("go");
+	await page.waitForTimeout(600);
+	await page.keyboard.press("Enter");
+	const pill = page.locator("article.user .ann-refs-pill");
+	await expect(pill).toHaveText("1");
+	const pillBox = await pill.boundingBox();
+	if (!pillBox) throw new Error("pill has no box");
+	await page.mouse.move(pillBox.x + pillBox.width / 2, pillBox.y + pillBox.height / 2);
+	const card = page.locator("article.user .ann-refs-pop");
+	await expect(card).toBeVisible();
+	const inside = await page.evaluate(() => {
+		const rect = (sel: string) => document.querySelector(sel)?.getBoundingClientRect();
+		const c = rect("article.user .ann-refs-pop");
+		const p = rect("article.user .ann-refs-pill");
+		if (!c || !p) return null;
+		const cx = p.x + p.width / 2;
+		const cy = p.y + p.height / 2;
+		return cx >= c.x && cx <= c.x + c.width && cy >= c.y && cy <= c.y + c.height;
+	});
+	expect(inside).toBe(true);
+});
+
+/** Hover the prompt pill via coordinates: the open card covers the
+pill by design, so locator.hover() can't hit-target it afterwards. */
+async function hoverPromptPill(page: Page): Promise<void> {
+	const pill = page.locator(".prompt-tools .ann-pill");
+	await expect(pill).toBeVisible();
+	const box = await pill.boundingBox();
+	if (!box) throw new Error("pill has no box");
+	await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+	await expect(page.locator(".prompt-tools .review")).toBeVisible();
+}
 
 /** Select a quote and open its comment box through the real UI. */
 async function openAnnotate(page: Page, quote: string): Promise<void> {
@@ -238,9 +292,8 @@ test("review popup uses note labels", async ({ page }) => {
 	await openAnnotate(page, "確認しました");
 	await page.keyboard.type("meaning?");
 	await submitAnnotation(page);
-	await page.locator(".prompt-tools .ann-pill").click();
+	await hoverPromptPill(page);
 	const review = page.locator(".prompt-tools .review");
-	await expect(review).toBeVisible();
 	await expect(review).toContainText("note:");
 	await expect(review).not.toContainText("Selected text");
 	await expect(review).not.toContainText("User comment");
@@ -350,9 +403,8 @@ test("E key edits the hovered own message", async ({ page }) => {
 test("clear-all lives at the bottom of the review", async ({ page }) => {
 	await openAnnotate(page, "確認しました");
 	await page.keyboard.press("Enter");
-	await page.locator(".prompt-tools .ann-pill").click();
+	await hoverPromptPill(page);
 	const review = page.locator(".prompt-tools .review");
-	await expect(review).toBeVisible();
 	const tools = review.locator(".review-tools");
 	await expect(tools).toContainText("Clear all");
 	const reviewBox = await review.boundingBox();
