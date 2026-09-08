@@ -1,5 +1,6 @@
-import { sanitize } from "./render";
-import { plainParagraphs } from "./pinyin";
+import { escapeHtml, sanitize } from "./render";
+import { pinyinRuby, plainParagraphs } from "./pinyin";
+import { classifyAidLine } from "./reading";
 
 /**
  * Japanese furigana via lindera (IPAdic) in a Web Worker. Conversion
@@ -127,6 +128,26 @@ export async function furiganaHtml(text: string): Promise<string> {
 	const lines = text.split("\n");
 	const converted = await Promise.all(
 		lines.map((line) => (line.trim() ? fragment(line) : Promise.resolve("")))
+	);
+	return sanitize(plainParagraphs(converted.join("\n")));
+}
+
+/**
+ * Dual-aid rendering for mixed messages: each line converts under the
+ * aid that owns it (kana lines furigana, Han-only lines pinyin, the
+ * rest plain), so both aids pin at once and neither touches the other's
+ * parts. Same paragraph shape as the single-aid paths.
+ */
+export async function dualAidHtml(text: string): Promise<string> {
+	const lines = text.split("\n");
+	const converted = await Promise.all(
+		lines.map((line) => {
+			if (!line.trim()) return Promise.resolve("");
+			const kind = classifyAidLine(line);
+			if (kind === "furigana") return fragment(line);
+			if (kind === "pinyin") return Promise.resolve(pinyinRuby(line));
+			return Promise.resolve(escapeHtml(line));
+		})
 	);
 	return sanitize(plainParagraphs(converted.join("\n")));
 }

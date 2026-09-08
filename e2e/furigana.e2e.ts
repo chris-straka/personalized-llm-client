@@ -59,6 +59,33 @@ test("pure Japanese offers no pinyin button", async ({ page }) => {
 	await expect(actions.locator('button:has-text("拼音")')).toHaveCount(0);
 });
 
+/** Both aids pin at once on a mixed message: each renders only its own
+lines, and each button swaps in place to its own show-original — the
+row never shuffles, and unpinning one keeps the other up. */
+test("pinning furigana and pinyin together renders each on its own lines", async ({ page }) => {
+	await seedChat(page, [{ role: "assistant", content: "漢字を読む\n你好世界" }]);
+	await page.goto("/");
+	const actions = page.locator("article.assistant .actions");
+	const body = page.locator("article.assistant .rendered");
+	await expect(actions).toBeVisible({ timeout: 60_000 });
+	await actions.locator('button:has-text("読み仮名")').click();
+	await expect(body).toContainText("かんじ");
+	await actions.locator('button:has-text("拼音")').click();
+	await expect(body).toContainText("nǐ");
+	// Both lines keep ruby: furigana on the Japanese line, pinyin on
+	// the Chinese line.
+	await expect(body.locator("ruby")).not.toHaveCount(0);
+	await expect(body).toContainText("かんじ");
+	// Both buttons swapped in place to their own show-originals.
+	await expect(actions.locator('button:has-text("オリジナルを表示")')).toBeVisible();
+	await expect(actions.locator('button:has-text("显示原件")')).toBeVisible();
+	// Unpinning furigana keeps pinyin up.
+	await actions.locator('button:has-text("オリジナルを表示")').click();
+	await expect(actions.locator('button:has-text("読み仮名")')).toBeVisible();
+	await expect(actions.locator('button:has-text("显示原件")')).toBeVisible();
+	await expect(body).toContainText("nǐ");
+});
+
 /** Clicking the pinyin aid pins Chinese readings (kana passes through). */
 test("clicking the pinyin aid pins Chinese readings", async ({ page }) => {
 	await seedChat(page, [{ role: "assistant", content: "こんにちは！\n你好！" }]);

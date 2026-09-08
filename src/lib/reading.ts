@@ -36,15 +36,28 @@ export type DetectedScript = AidScript;
  * `ja`, while a message with its own Chinese section reports both —
  * so the row can offer furigana and pinyin side by side.
  */
+const KANA_RE = /[\u3040-\u309F\u30A0-\u30FF]/;
+
 export function detectScripts(text: string): AidScript[] {
 	const scripts: AidScript[] = [];
 	if (/[\u0600-\u06FF\u0750-\u077F]/.test(text)) scripts.push("ar");
-	const kana = /[\u3040-\u309F\u30A0-\u30FF]/;
-	if (kana.test(text)) scripts.push("ja");
-	if (text.split("\n").some((line) => /\p{Script=Han}/u.test(line) && !kana.test(line))) {
+	if (KANA_RE.test(text)) scripts.push("ja");
+	if (text.split("\n").some((line) => /\p{Script=Han}/u.test(line) && !KANA_RE.test(line))) {
 		scripts.push("zh");
 	}
 	return scripts;
+}
+
+/**
+ * Which local aid owns one rendered line: kana lines read as Japanese,
+ * Han-only lines as Chinese, anything else converts nothing. Dual-aid
+ * rendering applies each aid only to its own lines, so pinning both
+ * reads a mixed message end to end.
+ */
+export function classifyAidLine(line: string): LocalAid | null {
+	if (KANA_RE.test(line)) return "furigana";
+	if (/\p{Script=Han}/u.test(line)) return "pinyin";
+	return null;
 }
 
 /** Arabic first (its block is distinct), then kana, then Han. */

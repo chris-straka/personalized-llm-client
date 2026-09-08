@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
 	detectScript,
 	detectScripts,
+	classifyAidLine,
 	extractWordAt,
 	ttsLangFor,
 	speakWord,
@@ -50,6 +51,16 @@ describe("script detection", () => {
 		expect(localAidsFor(detectScripts("漢字を読む"))).toEqual(["furigana"]);
 		expect(localAidsFor(detectScripts("hello world"))).toEqual([]);
 		expect(localAidsFor(detectScripts("مرحبا بالعالم"))).toEqual([]);
+	});
+
+	it("classifies rendered lines to their owning aid", () => {
+		expect(classifyAidLine("こんにちは！テストです。")).toBe("furigana");
+		expect(classifyAidLine("漢字を読む")).toBe("furigana");
+		expect(classifyAidLine("你好！测试。")).toBe("pinyin");
+		expect(classifyAidLine("Hello world")).toBeNull();
+		expect(classifyAidLine("")).toBeNull();
+		// Same-line mixing reads as Japanese (kana wins, as in detection).
+		expect(classifyAidLine("テストtest测试")).toBe("furigana");
 	});
 });
 

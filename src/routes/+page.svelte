@@ -338,8 +338,16 @@
 	let pendingPin = new SvelteSet<string>();
 	/** Messages whose aid is pinned on (model-aid text or local ruby). */
 	let aidPin = new SvelteSet<string>();
-	/** Which local aid a pinned message shows (model pins set no kind). */
-	let aidKindPin = new SvelteMap<string, LocalAid>();
+	/**
+	 * Local aids pinned per message (model pins set no kinds). Each kind
+	 * renders only its own lines, so furigana and pinyin pin
+	 * independently and both stay up together on mixed messages.
+	 */
+	let aidKindPin = new SvelteMap<string, LocalAid[]>();
+	/** Pinned local kinds for a message (never a live reference). */
+	function pinnedKinds(id: string): LocalAid[] {
+		return aidKindPin.get(id) ?? [];
+	}
 	/** Messages whose local aid (furigana dictionary) is loading right now. */
 	let aidBusy = new SvelteSet<string>();
 	/** Message currently hover-previewing its aid (null when none). */
@@ -956,9 +964,10 @@
 			const cached = vocalized[msg.id];
 			if (cached !== undefined) return cached;
 		}
-		// A pinned local aid wins over a pinned model aid: exactly one
-		// aid shows at a time, and switching never drops either cache.
-		if (aidPin.has(msg.id) && !aidKindPin.has(msg.id)) return vocalized[msg.id] ?? null;
+		// Pinned local kinds win over a pinned model aid: locals show
+		// (each on its own lines) while the model text stays cached for
+		// one click back.
+		if (aidPin.has(msg.id) && pinnedKinds(msg.id).length === 0) return vocalized[msg.id] ?? null;
 		return null;
 	}
 
@@ -969,16 +978,20 @@
 		return annRefsFor(msg.content)?.text ?? msg.content;
 	}
 
-	/** Local-aid override: a pinned or hover-peeked aid renders it,
-	otherwise the original stands (aids are per-message only). Mixed
-	scripts offer one button per aid; the pin and the peek each carry
-	their own kind, so furigana and pinyin never fight over a message. */
-	function localAidOverrideFor(msg: ChatMsg): LocalAid | null | undefined {
+	/**
+	 * Local-aid overrides: pinned kinds render (each on its own lines),
+	 * plus a hover-peeked kind previewed alongside them; empty renders
+	 * the original (aids are per-message only). Kinds the message no
+	 * longer offers (edited text) filter out instead of lingering.
+	 */
+	function localAidsOverrideFor(msg: ChatMsg): LocalAid[] {
 		const kinds = localAidsFor(detectScripts(aidDisplayText(msg)));
-		if (kinds.length === 0) return undefined;
-		if (aidPin.has(msg.id)) return aidKindPin.get(msg.id) ?? kinds[0];
-		if (aidPeek?.id === msg.id) return aidPeek.kind ?? kinds[0];
-		return undefined;
+		if (kinds.length === 0) return [];
+		const pinned = pinnedKinds(msg.id).filter((kind) => kinds.includes(kind));
+		if (aidPeek?.id === msg.id && aidPeek.kind && kinds.includes(aidPeek.kind) && !pinned.includes(aidPeek.kind)) {
+			return [...pinned, aidPeek.kind];
+		}
+		return pinned;
 	}
 
 	/**
@@ -1022,16 +1035,28 @@
 		}
 	}
 
-	/** Click on a local-aid button: pin its readings on this message. */
+	/** Click on a local-aid button: pin its kind (others stay as pinned). */
 	function pinLocalAid(msg: ChatMsg, kind: LocalAid): void {
+		const kinds = pinnedKinds(msg.id);
+		if (!kinds.includes(kind)) aidKindPin.set(msg.id, [...kinds, kind]);
 		aidPin.add(msg.id);
-		aidKindPin.set(msg.id, kind);
 		// A model run still in flight must not steal the pin back when
 		// it lands: the local click is the latest intent.
 		pendingPin.delete(msg.id);
 		if (aidPeek?.id === msg.id) aidPeek = null;
 		aidNoPeek.add(msg.id);
 		aidSeen.add(msg.id);
+	}
+
+	/** Per-kind "show original": unpin one kind, keep the other pinned. */
+	function unpinLocalAid(msg: ChatMsg, kind: LocalAid): void {
+		const kinds = pinnedKinds(msg.id).filter((pinned) => pinned !== kind);
+		if (kinds.length === 0) {
+			aidKindPin.delete(msg.id);
+			aidPin.delete(msg.id);
+		} else aidKindPin.set(msg.id, kinds);
+		if (aidPeek?.id === msg.id) aidPeek = null;
+		aidNoPeek.add(msg.id);
 	}
 
 	/**
@@ -1077,16 +1102,22 @@
 	}
 
 	/**
-	 * Aid load failed (furigana worker or dictionary): release the pin so
-	 * the button falls back to the aid name instead of a "show original"
-	 * with nothing applied. Only an explicit pin earns a toast.
+	 * Aid load failed (furigana worker or dictionary): only the furigana
+	 * conversion reports failure (pinyin renders synchronously), so drop
+	 * just that kind — a pinned pinyin stays up. The last kind out
+	 * releases the pin, falling back to the aid name instead of a "show
+	 * original" with nothing applied. Only an explicit pin earns a toast.
 	 */
 	function aidFailed(id: ChatMsgId): void {
-		const pinned = aidPin.has(id);
-		aidPin.delete(id);
-		aidKindPin.delete(id);
+		const kinds = pinnedKinds(id);
+		const had = kinds.includes("furigana");
+		const kept = kinds.filter((kind) => kind !== "furigana");
+		if (kept.length === 0) {
+			aidKindPin.delete(id);
+			aidPin.delete(id);
+		} else aidKindPin.set(id, kept);
 		if (aidPeek?.id === id) aidPeek = null;
-		if (pinned) flashToast("Couldn't load the readings for this message.");
+		if (had) flashToast("Couldn't load the readings for this message.");
 	}
 
 	async function runModelAidFor(msg: ChatMsg, aidId: string, pin: boolean): Promise<void> {
@@ -2602,7 +2633,7 @@
 							textOverride={aidedTextFor(msg)}
 							contentOverride={sentRefs ? (refsOnly && !isFolded ? null : sentRefs.text) : null}
 							aidPreview={aidPeek?.id === msg.id && !aidPin.has(msg.id)}
-							aidOverride={localAidOverrideFor(msg)}
+							aidKinds={localAidsOverrideFor(msg)}
 							onAidLoadingChange={(loading: boolean) => setAidBusy(msg.id, loading)}
 							onAidError={() => aidFailed(msg.id)}
 						/>
@@ -2671,10 +2702,11 @@
 							<!-- Reading aids live here, right of speak: hover
 							previews, click pins (show original unpins). Model
 							and local aids sit side by side on mixed messages;
-							exactly one shows at a time, last click wins. -->
+							a model pin and local pins are exclusive, while
+						furigana and pinyin pin independently. -->
 							{#if aidId || localKinds.length > 0}
 								{#if aidId}
-									{#if aidPin.has(msg.id) && !aidKindPin.has(msg.id)}
+									{#if aidPin.has(msg.id) && pinnedKinds(msg.id).length === 0}
 										<button
 											type="button"
 											data-tip="Show original"
@@ -2704,32 +2736,30 @@
 									{/if}
 								{/if}
 								{#if localKinds.length > 0}
-								<!-- Mixed scripts offer one button per aid;
-								each pins (and previews) its own kind. -->
-								{#if aidKindPin.has(msg.id)}
-									{@const pinnedKind = aidKindPin.get(msg.id)}
-									{#if pinnedKind}
-										{@const showOriginal = LOCAL_AID_SHOW_ORIGINAL[pinnedKind]}
+								<!-- One button per aid, pinned independently: each
+								swaps in place to its own show-original, so the
+								row never shuffles when the other pins. -->
+								{#each localKinds as localKind (localKind)}
+									{@const showOriginal = LOCAL_AID_SHOW_ORIGINAL[localKind]}
+									{#if pinnedKinds(msg.id).includes(localKind)}
 										{#if aidBusy.has(msg.id)}
 											<button
 												type="button"
-												data-tip="{LOCAL_AID_BUTTON[pinnedKind]}..."
-												onclick={() => unapplyAid(msg)}
+												data-tip="{LOCAL_AID_BUTTON[localKind]}..."
+												onclick={() => unpinLocalAid(msg, localKind)}
 											>
-												{LOCAL_AID_BUTTON[pinnedKind]}<span class="tdots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
+												{LOCAL_AID_BUTTON[localKind]}<span class="tdots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
 											</button>
 										{:else}
 											<button
 												type="button"
 												data-tip={showOriginal}
-												onclick={() => unapplyAid(msg)}
+												onclick={() => unpinLocalAid(msg, localKind)}
 											>
 												{showOriginal}
 											</button>
 										{/if}
-									{/if}
-								{:else}
-									{#each localKinds as localKind (localKind)}
+									{:else}
 										<button
 											type="button"
 											data-tip={LOCAL_AID_ADD_TITLE[localKind]}
@@ -2739,8 +2769,8 @@
 										>
 											{LOCAL_AID_BUTTON[localKind]}{#if aidBusy.has(msg.id)}<span class="tdots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>{/if}
 										</button>
-									{/each}
-								{/if}
+									{/if}
+								{/each}
 								{/if}
 							{/if}
 						{/if}

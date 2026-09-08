@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { tick, untrack } from "svelte";
 	import { createAidLoadingReporter, furiganaRequestKey } from "$lib/aidLoading";
-	import { detectScript, localAidFor, type LocalAid } from "$lib/reading";
+	import { detectScripts, localAidsFor, type LocalAid } from "$lib/reading";
 	import { pinyinRuby, plainParagraphs } from "$lib/pinyin";
-	import { furiganaHtml } from "$lib/furigana";
+	import { dualAidHtml, furiganaHtml } from "$lib/furigana";
 	import {
 		renderMessage,
 		renderMarkdown,
@@ -46,10 +46,11 @@
 	/** Badge hover (paints the quote wash while pointed at). Null on leave. */
 	onBadgeHover?: (id: string | null) => void;
 		/**
-		 * Per-message aid override: a pinned or hover-peeked aid renders it,
-		 * otherwise the original stands (aids are per-message only).
+		 * Per-message aid overrides: pinned or hover-peeked local aids
+		 * render them (both at once on mixed messages, each on its own
+		 * lines); empty renders the original (aids are per-message only).
 		 */
-		aidOverride?: LocalAid | null | undefined;
+		aidKinds?: LocalAid[] | undefined;
 		/** Reports furigana dictionary loads so the button can show it. */
 		onAidLoadingChange?: (loading: boolean) => void;
 		/**
@@ -89,7 +90,7 @@
 		textOverride = null,
 		contentOverride = null,
 		aidPreview = false,
-		aidOverride = undefined,
+		aidKinds = undefined,
 		onAidLoadingChange,
 		onAidError
 	}: Props = $props();
@@ -116,16 +117,14 @@
 		untrack(() => onAidLoadingChange)?.(loading);
 	});
 	/**
-	 * Aid mode drives the swap animation key: it changes only when the aid
-	 * turns on/off (never per token while streaming), so each transition
-	 * fades exactly once.
+	 * Aid mode drives the swap animation key: it changes only when aids
+	 * turn on/off (never per token while streaming), so each transition
+	 * fades exactly once. Local kinds render independently — one, the
+	 * other, or both on mixed messages.
 	 */
-	const aidMode = $derived<"model" | LocalAid | "none">(
-		textOverride
-			? "model"
-			: !streaming
-				? (aidOverride ?? "none")
-				: "none"
+	const aidKindList = $derived(aidKinds ?? []);
+	const aidMode = $derived<"model" | "local" | "none">(
+		textOverride ? "model" : !streaming && aidKindList.length > 0 ? "local" : "none"
 	);
 	/** Displayed text: contentOverride redacts baked annotation blocks,
 	which are metadata, never prose. Paste-fold offsets still apply —
@@ -137,9 +136,11 @@
 	the same redacted text). */
 	const aidBase = $derived(annRefsFor(displayBase)?.text ?? displayBase);
 	/** Scripts with a local aid always reserve ruby's vertical room, so
-	hovering or pinning it never shoves the message down. Keyed off the
-	aid-visible text, so hidden refs can't reserve room (or grow history). */
-	const aidSpace = $derived(localAidFor(detectScript(aidBase)) !== null);
+	hovering or pinning one never shoves the message down — any script
+	in the text counts, not just the first, since each kind renders its
+	own lines. Keyed off the aid-visible text, so hidden refs can't
+	reserve room (or grow history). */
+	const aidSpace = $derived(localAidsFor(detectScripts(aidBase)).length > 0);
 
 	$effect(() => {
 		// Paste folds splice before render (reading aids keep full text).
@@ -155,10 +156,12 @@
 		// (e.g. tashkeel) arrives via textOverride and takes the normal path.
 		// Arabic has no local aid: its model-aid button lives in the
 		// message actions, and the body renders identically either way.
-		const localAid = aidMode === "model" || aidMode === "none" ? null : aidMode;
+		const localAids = aidMode === "local" ? aidKindList : [];
+		const furigana = localAids.includes("furigana");
+		const pinyin = localAids.includes("pinyin");
 		// Marks apply after Svelte flushes the new HTML (see applyMarks).
 		const stamp = () => void tick().then(() => bodyEl && applyMarks(bodyEl, items, skipMarks, wash));
-		if (localAid === "pinyin") {
+		if (pinyin && !furigana) {
 			rendered = null;
 			furiganaKey = null;
 			reportAidLoading(false);
@@ -175,9 +178,12 @@
 			stamp();
 			return;
 		}
-		if (localAid === "furigana") {
+		if (furigana) {
 			rendered = null;
-			const key = furiganaRequestKey(aidBase, message.pasteFolds);
+			// The kinds join the key: furigana-only and dual share text
+			// and folds but render differently, so switching between them
+			// must reconvert, never replay the other's HTML.
+			const key = furiganaRequestKey(`${[...localAids].sort().join("+")}\n${aidBase}`, message.pasteFolds);
 			if (key === furiganaKey) {
 				// Same conversion already shown or loading: badges may
 				// have changed, so re-stamp, but never reconvert and
@@ -189,10 +195,12 @@
 			reportAidLoading(true);
 			const run = ++aidRun;
 			const segments = foldSegments(aidBase, message.pasteFolds);
+			const convert = (text: string): Promise<string> =>
+				pinyin && furigana ? dualAidHtml(text) : furiganaHtml(text);
 			void Promise.all(
 				segments.map((segment) =>
 					segment.kind === "text"
-						? furiganaHtml(segment.text)
+						? convert(segment.text)
 						: Promise.resolve(pasteFoldButton(segment.index, segment.chars))
 				)
 			)
