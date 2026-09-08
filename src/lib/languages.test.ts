@@ -84,6 +84,7 @@ describe("reply languages", () => {
 		for (const menu of LANGUAGE_MENUS) {
 			const badges = menu.languages.map((l) => l.badge);
 			for (const badge of badges) {
+				// eslint-disable-next-line no-control-regex -- the range *is* the assertion: badges must be non-ASCII.
 				expect(badge).toMatch(/[^\x00-\x7F]/);
 			}
 			expect(new Set(badges).size).toBe(badges.length);

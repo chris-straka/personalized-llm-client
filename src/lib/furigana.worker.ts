@@ -101,8 +101,9 @@ interface LinderaToken {
 
 function toRubyToken(token: LinderaToken): RubyToken {
 	const surface = typeof token.surface === "string" ? token.surface : "";
-	const details = Array.isArray(token.details) ? token.details : [];
-	const reading = typeof details[7] === "string" ? (details[7] as string) : null;
+	const details: unknown[] = Array.isArray(token.details) ? token.details : [];
+	const seventh = details[7];
+	const reading = typeof seventh === "string" ? seventh : null;
 	return { surface, reading };
 }
 

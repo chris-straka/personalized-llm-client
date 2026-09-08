@@ -43,11 +43,12 @@ test("clicking tashkeel pins it, and show-original restores the text", async ({
 
 	await aidBtn.hover();
 	await aidBtn.click();
-	// The mock provider resolves immediately: the aid pins.
+	// The mock provider resolves immediately: the aid pins, and the
+	// revert control reads in Arabic, not generic English.
 	const showOriginal = page.locator(
-		`${ARTICLE} .actions button[data-tip="Show original"]`
+		`${ARTICLE} .actions button[data-tip="Back to the original text"]`
 	);
-	await expect(showOriginal).toBeVisible();
+	await expect(showOriginal).toHaveText("إبداعي");
 	await expect(body).toContainText("Mock reply to:");
 
 	await showOriginal.click();

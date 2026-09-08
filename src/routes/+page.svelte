@@ -33,7 +33,8 @@
 		saveSettings,
 		effectiveSystemPrompt,
 		activeThinkingSupport,
-		activeThinkingId
+		activeThinkingId,
+		type AppSettings
 	} from "$lib/settings";
 	import { cycleThinkingId } from "$lib/providers/thinking";
 	import {
@@ -46,6 +47,7 @@
 	import { listProviders, createProvider } from "$lib/providers/registry";
 	import { MockProvider, mockProviderEnabled } from "$lib/providers/mock";
 	import { getCurrentWindow } from "@tauri-apps/api/window";
+	import { listen } from "@tauri-apps/api/event";
 	import {
 		createPromptEditor,
 		PROMPT_PLACEHOLDER,
@@ -70,6 +72,7 @@
 	} from "$lib/attachments";
 		import {
 		addAnnotation,
+		duplicateAnnotationId,
 		editAnnotationComment,
 		deleteAnnotation,
 		clearAnnotations,
@@ -121,6 +124,7 @@
 		stopNative,
 		friendlyNativeError,
 		quoteLangFor,
+		quoteLangForContext,
 		currentKeyboardInputSource
 	} from "$lib/nativeTts";
 	import { voiceLocaleForInputSource } from "$lib/keyboardLang";
@@ -147,10 +151,9 @@
 		if (saveTimer) clearTimeout(saveTimer);
 		saveTimer = setTimeout(() => {
 			saveTimer = null;
-			void (async () => {
-				await persistSecrets(snapshot);
-				saveSettings(tauriBackendAvailable() ? withBlankedKeys(snapshot) : snapshot);
-			})();
+			// The top-of-effect snapshot (a synchronous settings read, so
+			// the effect subscribes) freezes the debounced save.
+			saveSettingsNow(snapshot);
 		}, 400);
 		return () => {
 			if (saveTimer) {
@@ -363,10 +366,16 @@
 	 */
 	let aidNoPeek = new SvelteSet<string>();
 	/**
-	 * Local aids pinned at least once. The first hover of an aid button is
-	 * color-only; only after a first pin may hovers preview the readings.
+	 * Local aids clicked at least once, per message and kind. The first
+	 * hover of an aid button is color-only; only after that kind was
+	 * clicked (pinned) may its hovers preview the readings — pinning
+	 * furigana must never unlock pinyin's hover.
 	 */
 	let aidSeen = new SvelteSet<string>();
+	/** Preview-unlock key for one message's local-aid kind. */
+	function aidSeenKey(id: string, kind: LocalAid): string {
+		return `${id}:${kind}`;
+	}
 	let vocalizeError: string | null = $state(null);
 	let speakingId: string | null = $state(null);
 	/** Message a speak-aloud selection came from (tints its selection). */
@@ -432,26 +441,42 @@
 		persistSettings();
 	}
 
+	/** UI text scale in 10% steps (settings bounds are 50–200%). */
+	function adjustFontScale(delta: number): void {
+		const next = Math.min(2, Math.max(0.5, Math.round((settings.fontScale + delta) * 10) / 10));
+		if (next === settings.fontScale) return;
+		settings.fontScale = next;
+		persistSettings();
+		flashToast(`Text size ${Math.round(next * 100)}%`);
+	}
+
 	/** Pointer-down spot for click-off-to-close (select-drags must not count). */
 	let mainDown: { x: number; y: number } | null = null;
 	function noteMainDown(event: PointerEvent): void {
-		if (!settingsOpen) return;
 		mainDown = { x: event.screenX, y: event.screenY };
 	}
 	/**
-	 * Clicking off the settings panel into the main chat closes it.
-	 * Controls tagged data-settings-toggle manage the panel themselves
-	 * and are skipped; drags (text selection) are not plain clicks.
+	 * Clicking into the main chat closes the sidebars: the settings
+	 * panel and the chats list both collapse, so the click lands on a
+	 * full-width conversation. Controls tagged data-settings-toggle
+	 * manage the panel themselves and are skipped; drags (text
+	 * selection) are not plain clicks.
 	 */
 	function closeSettingsFromMain(event: MouseEvent): void {
-		if (!settingsOpen) return;
+		if (!settingsOpen && settings.sidebarCollapsed) return;
 		const down = mainDown;
 		mainDown = null;
 		if (down && Math.hypot(event.screenX - down.x, event.screenY - down.y) > 5) return;
-		if (event.target instanceof Element && event.target.closest("[data-settings-toggle]")) {
-			return;
+		if (settingsOpen) {
+			if (event.target instanceof Element && event.target.closest("[data-settings-toggle]")) {
+				return;
+			}
+			settingsOpen = false;
 		}
-		settingsOpen = false;
+		if (!settings.sidebarCollapsed) {
+			settings.sidebarCollapsed = true;
+			persistSettings();
+		}
 	}
 
 	/** Focus a sidebar chat button by list position (clamped). */
@@ -477,6 +502,7 @@
 	 * blanks.
 	 */
 	function stepChat(direction: 1 | -1): void {
+		previewChatId = null;
 		const chats = chatState.chats;
 		if (chats.length === 0) return;
 		const at = Math.max(
@@ -552,6 +578,7 @@
 	}
 
 	function doNewChat(): void {
+		previewChatId = null;
 		stopVoice();
 		resetDraftExtras();
 		newChat(chatState);
@@ -561,6 +588,21 @@
 
 	const useMock = mockProviderEnabled();
 	const chat = $derived(activeChat(chatState));
+	/**
+	 * Hover preview: the sidebar row under the cursor shows its chat in
+	 * the main column until the hover leaves. The composer, annotations,
+	 * and active chat never switch — the preview is read-only (its
+	 * action row and selection menu stay off) so every hovered index
+	 * still addresses the real chat.
+	 */
+	let previewChatId: ChatId | null = $state(null);
+	const previewChat = $derived(
+		previewChatId && previewChatId !== chatState.activeChatId
+			? (chatState.chats.find((c) => c.id === previewChatId) ?? null)
+			: null
+	);
+	const viewChat = $derived(previewChat ?? chat);
+	const previewing = $derived(previewChat !== null);
 	const total = $derived(tokenTotal(chatState));
 	const split = $derived(tokenSplit(chatState));
 	const points = $derived(waypoints(chatState));
@@ -603,12 +645,11 @@
 
 	function copyPlain(text: string, note: string): void {
 		const failed = "Couldn't copy to the clipboard.";
-		const done = navigator.clipboard?.writeText(text);
-		if (!done) {
+		if (!navigator.clipboard) {
 			flashToast(failed);
 			return;
 		}
-		void done.then(
+		void navigator.clipboard.writeText(text).then(
 			() => flashToast(note),
 			() => flashToast(failed)
 		);
@@ -618,6 +659,28 @@
 		copyPlain(plainBody(content, role, sourcesWanted), "Copied as plain text");
 	}
 
+	/**
+	 * Cut the hovered message: the clipboard write must land first —
+	 * deleting up front would strand the text when copying fails.
+	 */
+	function cutHoverMessage(index: number): void {
+		const target = chat.messages[index];
+		if (!target) return;
+		const text = plainBody(target.content, target.role, sourcesWanted);
+		const done = navigator.clipboard?.writeText(text);
+		if (done === undefined) {
+			flashToast("Couldn't copy to the clipboard.");
+			return;
+		}
+		void done.then(
+			() => {
+				deleteMessage(chatState, index);
+				flashToast("Cut to clipboard");
+			},
+			() => flashToast("Couldn't copy to the clipboard.")
+		);
+	}
+
 	/** Clicking the toast copies its text. Success stays silent by
 	design: flashing a confirmation would overwrite the very text being
 	copied. Failure still says so (guarded against clobbering a newer
@@ -625,12 +688,11 @@
 	function copyToast(): void {
 		if (!toast) return;
 		const text = toast;
-		const done = navigator.clipboard?.writeText(text);
-		if (!done) {
+		if (!navigator.clipboard) {
 			flashToast("Couldn't copy to the clipboard.");
 			return;
 		}
-		void done.catch(() => {
+		void navigator.clipboard.writeText(text).catch(() => {
 			if (toast === text) flashToast("Couldn't copy to the clipboard.");
 		});
 	}
@@ -766,16 +828,29 @@
 		// comments are never silently dropped.
 		if (pendingAnn) commitPending();
 		const quote = selMenu.quote.trim();
+		// Repeats disambiguate here, from the live selection: the
+		// last "c" in "ccc" records occurrence 2, so its badge
+		// lands where the highlight was. Anything unresolvable
+		// keeps 0 (first match, the old behavior).
+		const at = occurrenceFromSelection(selMenu.messageId, quote);
+		// Same span twice would stack two badges on one anchor (and
+		// hovering them oscillates): open the review on the existing
+		// one instead of filing a twin.
+		const dupe = duplicateAnnotationId(annotations, selMenu.messageId, quote, at);
+		if (dupe) {
+			clearSelection();
+			selMenu = null;
+			highlightAnnId = dupe;
+			reviewOpen = true;
+			flashToast("Already annotated");
+			return;
+		}
 		const pending: Annotation = {
 			id: newAnnotationId(),
 			messageId: selMenu.messageId,
 			quote,
 			comment: "",
-			// Repeats disambiguate here, from the live selection: the
-			// last "c" in "ccc" records occurrence 2, so its badge
-			// lands where the highlight was. Anything unresolvable
-			// keeps 0 (first match, the old behavior).
-			at: occurrenceFromSelection(selMenu.messageId, quote)
+			at
 		};
 		pendingAnn = pending;
 		clearSelection();
@@ -981,6 +1056,15 @@
 
 	function annotateTranslation(): void {
 		if (!translate?.result) return;
+		const dupe = duplicateAnnotationId(annotations, translate.messageId, translate.quote, 0);
+		if (dupe) {
+			highlightAnnId = dupe;
+			translate = null;
+			reviewOpen = true;
+			editingId = null;
+			flashToast("Already annotated");
+			return;
+		}
 		annotations = addAnnotation(annotations, translate.messageId, translate.quote, translate.result);
 		const createdAnn = annotations[annotations.length - 1];
 		if (createdAnn) highlightAnnId = createdAnn.id;
@@ -1053,7 +1137,7 @@
 
 	/**
 	 * Hover in: preview the aid, but only when it is already here (cached
-	 * model aid, cached furigana, pinned-before pinyin). Fetching happens
+	 * model aid, cached furigana, kind clicked before). Fetching happens
 	 * on click alone — hovering must never spend a model call or start
 	 * furigana's dictionary load (that work now runs in a worker, but the
 	 * rule stands: hover previews, click fetches). The swap lock wins over
@@ -1065,8 +1149,9 @@
 		if (aidId) {
 			if (vocalized[msg.id] === undefined) return;
 		} else {
-			// First hover is color-only: previews start after a first pin.
-			if (!aidSeen.has(msg.id)) return;
+			// First hover is color-only: previews start after that kind's
+			// first click (pin), never a sibling kind's.
+			if (kind === undefined || !aidSeen.has(aidSeenKey(msg.id, kind))) return;
 			if (kind === "furigana" && !isFuriganaCached(aidDisplayText(msg))) {
 				return;
 			}
@@ -1102,7 +1187,7 @@
 		pendingPin.delete(msg.id);
 		if (aidPeek?.id === msg.id) aidPeek = null;
 		aidNoPeek.add(msg.id);
-		aidSeen.add(msg.id);
+		aidSeen.add(aidSeenKey(msg.id, kind));
 	}
 
 	/** Per-kind "show original": unpin one kind, keep the other pinned. */
@@ -1353,7 +1438,12 @@
 		// selection it came from. Only the menu goes away.
 		selMenu = null;
 		speakingSelection = messageId;
-		startSpeech("selection", quote, speechLangsFor(await quoteLangFor(quote, latinFallback())));
+		// Two kanji identify nothing on their own (Han reads Chinese by
+		// default): the quote's sentence picks a Japanese voice when the
+		// highlight sits in one.
+		const context = speechText(chat.messages.find((m) => m.id === messageId)?.content ?? quote);
+		const lang = await quoteLangForContext(quote, context, latinFallback());
+		startSpeech("selection", quote, speechLangsFor(lang));
 	}
 
 	/** Pill-mic dictation into the annotation comment box. */
@@ -1419,8 +1509,22 @@
 		dictating = true;
 	}
 
+	/**
+	 * Immediate settings save. Keys mirror to secret storage first, then
+	 * the shell persists blanks (the browser keeps working as before).
+	 * Every save path must use this: a bare saveSettings(settings) would
+	 * write live in-memory keys to disk next to the Keychain copy.
+	 */
+	function saveSettingsNow(source?: AppSettings): void {
+		const snapshot = source ?? $state.snapshot(settings);
+		void (async () => {
+			await persistSecrets(snapshot);
+			saveSettings(tauriBackendAvailable() ? withBlankedKeys(snapshot) : snapshot);
+		})();
+	}
+
 	function persistSettings() {
-		saveSettings(settings);
+		saveSettingsNow();
 	}
 
 	function resolveProvider(): ChatProvider | null {
@@ -1763,6 +1867,8 @@
 	let dragWarned = false;
 	function dragWindow(event: MouseEvent): void {
 		if (event.button !== 0 || !tauriBackendAvailable()) return;
+		// The second press of a double-click zooms instead of dragging.
+		if (event.detail > 1) return;
 		const target = event.target;
 		if (
 			target instanceof HTMLElement &&
@@ -1789,6 +1895,110 @@
 				flashToast(`Window drag failed: ${message}`);
 			}
 		});
+	}
+
+	/**
+	 * Native menu bar clicks (desktop shell only): the Rust side emits
+	 * `menu-action` with the item id. The frontend keeps its own key
+	 * handlers for the browser runtime, where no menu exists — and on
+	 * macOS the menu consumes its accelerators before the webview ever
+	 * sees them, so the two paths don't double-fire.
+	 */
+	async function listenMenuActions(): Promise<void> {
+		if (!tauriBackendAvailable()) return;
+		try {
+			await listen<string>("menu-action", (event) => {
+				const action = event.payload;
+				if (action === "settings") {
+					settingsOpen = !settingsOpen;
+					if (!settingsOpen) pulseCursor();
+				} else if (action === "new-chat") {
+					doNewChat();
+				} else if (action === "delete-chat") {
+					dropChat(chat.id);
+					editor?.focus();
+				} else if (action === "toggle-sidebar") {
+					toggleSidebar();
+					if (!settings.sidebarCollapsed) focusFirstSideChat();
+				} else if (action === "next-chat") {
+					stepChat(1);
+				} else if (action === "prev-chat") {
+					stepChat(-1);
+				} else if (action === "shortcuts") {
+					shortcutsOpen = true;
+				} else if (action === "bigger-text") {
+					adjustFontScale(0.1);
+				} else if (action === "smaller-text") {
+					adjustFontScale(-0.1);
+				}
+			});
+		} catch (error) {
+			console.warn(
+				"Menu events unavailable:",
+				error instanceof Error ? error.message : String(error)
+			);
+		}
+	}
+
+	/**
+	 * Double-click the title strip zooms the window (fills the screen):
+	 * the macOS titlebar behavior, next to the green light that goes
+	 * fullscreen instead. Clicks on controls keep their own actions.
+	 */
+	/**
+	 * Double-click the empty gutters beside the centered column opens
+	 * the nearby sidebar: left gutter the chat list, right gutter
+	 * settings. Clicks on messages and controls keep their own
+	 * actions (double-click still selects words); clicks inside the
+	 * column but between messages do nothing.
+	 */
+	function gutterDoubleClick(event: MouseEvent): void {
+		const target = event.target;
+		if (!(target instanceof HTMLElement) || !scrollBox) return;
+		if (
+			target.closest(
+				"article, button, input, select, textarea, a, summary, details, .sel-menu, .translate-panel, .review, .ann-pop"
+			)
+		) {
+			return;
+		}
+		let left = Infinity;
+		let right = -Infinity;
+		scrollBox.querySelectorAll("article, .empty-state").forEach((el) => {
+			const box = el.getBoundingClientRect();
+			left = Math.min(left, box.x);
+			right = Math.max(right, box.x + box.width);
+		});
+		if (left === Infinity) return;
+		if (event.clientX < left) {
+			if (settings.sidebarCollapsed) {
+				settings.sidebarCollapsed = false;
+				persistSettings();
+			}
+		} else if (event.clientX > right) {
+			if (!settingsOpen) settingsOpen = true;
+		}
+	}
+
+	function zoomWindow(event: MouseEvent): void {
+		if (!tauriBackendAvailable()) return;
+		const target = event.target;
+		if (target instanceof HTMLElement && target.closest("button, input, select, textarea, a")) {
+			return;
+		}
+		try {
+			getCurrentWindow()
+				.toggleMaximize()
+				.catch((error: unknown) => {
+					const message = error instanceof Error ? error.message : String(error);
+					console.warn("Window zoom failed:", message);
+				});
+		} catch (error) {
+			console.warn(
+				"Window zoom failed:",
+				error instanceof Error ? error.message : String(error)
+			);
+		}
 	}
 
 	onMount(() => {
@@ -2053,7 +2263,35 @@
 					return;
 				}
 			}
-			if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey) {
+			if (
+			(event.metaKey || event.ctrlKey) &&
+			!event.altKey &&
+			(event.key === "=" ||
+				event.key === "+" ||
+				event.key === "-" ||
+				event.key === "_")
+		) {
+			// ⌘+ / ⌘- scales the whole UI (the app's own zoom — the
+			// shell has no browser-chrome zoom to fall back on).
+			event.preventDefault();
+			event.stopPropagation();
+			adjustFontScale(event.key === "-" || event.key === "_" ? -0.1 : 0.1);
+			return;
+		}
+		if (
+			(event.metaKey || event.ctrlKey) &&
+			!event.altKey &&
+			event.shiftKey &&
+			(event.key === "<" || event.key === ",")
+		) {
+			// ⇧⌘, mirrors ⌘, (Shift turns the comma key into "<" on US
+			// layouts, so both spellings count) — toggles the panel.
+			event.preventDefault();
+			event.stopPropagation();
+			settingsOpen = !settingsOpen;
+			return;
+		}
+		if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey) {
 				const combo = event.key.toLowerCase();
 				if (combo === "b") {
 					event.preventDefault();
@@ -2148,7 +2386,40 @@
 					return;
 				}
 			}
-			const inSidebar = (event.target as HTMLElement | null)?.closest("aside");
+		if (
+			(event.key === "x" || event.key === "X") &&
+			!inEditor &&
+			hoveredIdx >= 0 &&
+			!event.metaKey &&
+			!event.ctrlKey &&
+			!event.altKey &&
+			!event.shiftKey &&
+			!(event.target as HTMLElement | null)?.closest("input, textarea, select")
+		) {
+				// X cuts the hovered message (copies, then deletes): the
+				// Delete key below deletes without touching the clipboard.
+				event.preventDefault();
+				cutHoverMessage(hoveredIdx);
+				return;
+		}
+		if (
+			(event.key === "Delete" || event.key === "Backspace") &&
+			!inEditor &&
+			hoveredIdx >= 0 &&
+			!event.metaKey &&
+			!event.ctrlKey &&
+			!event.altKey &&
+			!event.shiftKey &&
+			!(event.target as HTMLElement | null)?.closest("input, textarea, select, button, a")
+		) {
+			// Bare Delete drops the hovered message and copies nothing
+			// (X is the cut key). Buttons and links keep their own
+			// keys — space and enter still activate a focused control.
+			event.preventDefault();
+			deleteMessage(chatState, hoveredIdx);
+			return;
+		}
+		const inSidebar = (event.target as HTMLElement | null)?.closest("aside");
 			if (!settings.sidebarCollapsed && inSidebar) {
 				// Open chat list owns its keys: j/k walks chats AND
 				// switches to each one (preview-as-you-go), space/l
@@ -2464,6 +2735,7 @@
 		// Mic buttons hide there instead of toasting an error.
 		canMic = micAvailable() && !tauriBackendAvailable();
 		window.addEventListener("focus", onWinFocus);
+		void listenMenuActions();
 		window.addEventListener("keydown", onKey, true);
 		window.addEventListener("keydown", onAlt);
 		window.addEventListener("keyup", onAlt);
@@ -2531,16 +2803,21 @@
 	style="--font-scale: {settings.fontScale}"
 >
 	<aside class:collapsed={settings.sidebarCollapsed} inert={settings.sidebarCollapsed} data-fade-scroll>
-		<div class="side-head" data-tauri-drag-region aria-hidden="true" onmousedown={dragWindow}>
+		<div class="side-head" data-tauri-drag-region aria-hidden="true" onmousedown={dragWindow} ondblclick={zoomWindow}>
 		</div>
-		<ul>
+		<ul onmouseleave={() => (previewChatId = null)}>
 			{#each chatState.chats as item (item.id)}
 				<li>
 					<button
 						type="button"
 						class="side-chat"
 						class:active={item.id === chatState.activeChatId}
+						onmouseenter={() => (previewChatId = item.id)}
+						onmouseleave={() => {
+							if (previewChatId === item.id) previewChatId = null;
+						}}
 						onclick={() => {
+							previewChatId = null;
 							sideIdx = chatState.chats.findIndex((c) => c.id === item.id);
 							selectChat(chatState, item.id);
 						}}
@@ -2573,7 +2850,7 @@
 	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
 	<!-- Click-off closes the settings panel (keyboard users get Esc and ⌘,). -->
 	<main
-		class:empty={chat.messages.length === 0}
+		class:empty={viewChat.messages.length === 0}
 		class:land={landTick}
 		class:plain-user={!settings.ownBubble}
 		class:hover-user={settings.hoverUserActions}
@@ -2585,9 +2862,11 @@
 		{#if toast}
 			<button type="button" class="toast" title="Click to copy" aria-live="polite" transition:fade={{ duration: 160 }} onclick={copyToast}>{toast}</button>
 		{/if}
-		<header role="toolbar" aria-label="App" tabindex="-1" onmousedown={dragWindow}>
+		<!-- Slim title strip: an empty drag surface with the reply-language
+		pill's anchor (token count lives in the settings panel now, and
+		Settings itself moved to the menu bar). Double-click zooms. -->
+		<header role="toolbar" aria-label="App" tabindex="-1" onmousedown={dragWindow} ondblclick={zoomWindow}>
 			<span class="tokens-wrap">
-				<span class="tokens selectable" title="{total} tokens total this chat">{formatTokens(split.prompt)} in / {formatTokens(split.completion)} out</span>
 				{#if activeReplyLang}
 					<span class="lang-chip-float" transition:fade={{ duration: 90 }}>
 						<button
@@ -2602,26 +2881,9 @@
 					</span>
 				{/if}
 			</span>
-			<span class="spacer"></span>
-			<div class="top-actions">
-				<button
-					type="button"
-					class="settings-btn"
-					data-settings-toggle
-					title="Toggle settings (⌘,)"
-					aria-label="Toggle settings"
-					aria-expanded={settingsOpen}
-					onclick={() => {
-						settingsOpen = !settingsOpen;
-						pulseCursor();
-					}}
-				>
-					<span class="key-hint" aria-hidden="true">⌘,</span>
-				</button>
-			</div>
 		</header>
 
-		{#if points.length > 3 && !settingsOpen}
+		{#if points.length > 3 && !settingsOpen && !previewing}
 			<nav aria-label="Waypoints">
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div
@@ -2665,8 +2927,8 @@
 			</nav>
 		{/if}
 
-		<div class="messages" bind:this={scrollBox} onscroll={noteScrolling}>
-			{#if chat.messages.length === 0}
+		<div class="messages" bind:this={scrollBox} onscroll={noteScrolling} ondblclick={gutterDoubleClick}>
+			{#if viewChat.messages.length === 0}
 				<div class="empty-state">
 					<h1 class="hero">What can I do for you?</h1>
 					{#if useMock}
@@ -2674,7 +2936,7 @@
 					{/if}
 				</div>
 			{/if}
-			{#each chat.messages as msg, i (msg.id)}
+			{#each viewChat.messages as msg, i (msg.id)}
 				{@const sentRefs = annRefsFor(msg.content)}
 				{@const refsOnly = sentRefs ? sentRefs.text.trim() === "" : false}
 				{@const isFolded = refsOnly ? !foldedIds.has(msg.id) : foldedIds.has(msg.id)}
@@ -2754,7 +3016,7 @@
 							{/each}
 						</div>
 					{/if}
-					{#if !(streamingThis && msg.content.trim() === "")}
+					{#if !(streamingThis && msg.content.trim() === "") && !previewing}
 					<div class="actions" role="group" aria-label="Message actions" onmouseleave={releaseRowFocus}>
 						<button
 							type="button"
@@ -2787,6 +3049,15 @@
 						<button
 							type="button"
 							class="icon-btn"
+							data-tip="Delete this message (⌘D)"
+							aria-label="Delete this message (⌘D)"
+							onclick={() => deleteMessage(chatState, i)}
+						>
+							<ActionIcon kind="delete" />
+						</button>
+						<button
+							type="button"
+							class="icon-btn"
 							class:active={speakingId === msg.id}
 							data-tip={speakTitle(msg)}
 							aria-label={speakTitle(msg)}
@@ -2797,15 +3068,6 @@
 							}}
 						>
 							<ActionIcon kind="speak" />
-						</button>
-						<button
-							type="button"
-							class="icon-btn"
-							data-tip="Delete this message (⌘D)"
-							aria-label="Delete this message (⌘D)"
-							onclick={() => deleteMessage(chatState, i)}
-						>
-							<ActionIcon kind="delete" />
 						</button>
 						{#if msg.role === "assistant" && !streamingThis}
 							<!-- Reading aids live here, right of speak: hover
@@ -2818,10 +3080,10 @@
 									{#if aidPin.has(msg.id) && pinnedKinds(msg.id).length === 0}
 										<button
 											type="button"
-											data-tip="Show original"
+											data-tip={MODEL_AIDS[aidId]?.revertTip ?? "Show original"}
 											onclick={() => unapplyAid(msg)}
 										>
-											show original
+											{MODEL_AIDS[aidId]?.revert ?? "show original"}
 										</button>
 									{:else}
 										{@const aid = MODEL_AIDS[aidId]}
@@ -2835,13 +3097,13 @@
 												onmouseleave={() => unpeekAid(msg)}
 												onclick={() => void runModelAidFor(msg, aidId, true)}
 											>
-												{#if vocalizing.has(msg.id)}
-													{aid.button}<span class="tdots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
-												{:else}
-													{aid.button}
-												{/if}
+													{#if vocalizing.has(msg.id)}
+												{aid.button}<span class="tdots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
+											{:else}
+												{aid.button}
+											{/if}
 											</button>
-										{/if}
+									{/if}
 									{/if}
 								{/if}
 								{#if localKinds.length > 0}
@@ -2851,23 +3113,14 @@
 								{#each localKinds as localKind (localKind)}
 									{@const showOriginal = LOCAL_AID_SHOW_ORIGINAL[localKind]}
 									{#if pinnedKinds(msg.id).includes(localKind)}
-										{#if aidBusy.has(msg.id)}
+											{@const furiganaBusy = localKind === "furigana" && aidBusy.has(msg.id)}
 											<button
 												type="button"
-												data-tip="{LOCAL_AID_BUTTON[localKind]}..."
+												data-tip={furiganaBusy ? `${LOCAL_AID_BUTTON[localKind]}...` : showOriginal}
 												onclick={() => unpinLocalAid(msg, localKind)}
 											>
-												{LOCAL_AID_BUTTON[localKind]}<span class="tdots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
+												{showOriginal}{#if furiganaBusy}<span class="tdots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>{/if}
 											</button>
-										{:else}
-											<button
-												type="button"
-												data-tip={showOriginal}
-												onclick={() => unpinLocalAid(msg, localKind)}
-											>
-												{showOriginal}
-											</button>
-										{/if}
 									{:else}
 										<button
 											type="button"
@@ -2876,7 +3129,7 @@
 											onmouseleave={() => unpeekAid(msg)}
 											onclick={() => pinLocalAid(msg, localKind)}
 										>
-											{LOCAL_AID_BUTTON[localKind]}{#if aidBusy.has(msg.id)}<span class="tdots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>{/if}
+											{LOCAL_AID_BUTTON[localKind]}{#if localKind === "furigana" && aidBusy.has(msg.id)}<span class="tdots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>{/if}
 										</button>
 									{/if}
 								{/each}
@@ -3215,7 +3468,7 @@
 		{/if}
 	</main>
 
-	{#if selMenu}
+	{#if selMenu && !previewing}
 		<div
 			class="sel-menu"
 			style="left: {selMenu.x}px; top: {selMenu.y}px"
@@ -3330,6 +3583,8 @@
 			pulseCursor();
 		}}
 			onShortcuts={() => (shortcutsOpen = true)}
+			tokensLabel="{formatTokens(split.prompt)} in / {formatTokens(split.completion)} out"
+			tokensTitle="{total} tokens total this chat"
 		/>
 		</div>
 	</aside>
@@ -3355,13 +3610,11 @@
 						×
 					</button>
 				</div>
-				<p class="modal-note">
 				{#if androidUI}
+				<p class="modal-note">
 					Every action here is a swipe, tap, or touch-hold — no keyboard needed.
-				{:else}
-					Settings (⌘,) is labeled on its button; chat list (⌘B), new chat (⌘N), and send (Enter) live below.
-				{/if}
-			</p>
+				</p>
+			{/if}
 				{#if androidUI}
 					<!-- Android milestone: key chords don't exist on a phone,
 					so the same modal teaches the touch equivalents. -->
@@ -3380,38 +3633,28 @@
 				{:else}
 				<dl class="keys">
 					<div><dt>New line</dt><dd>Shift+Enter</dd></div>
-					<div><dt>Stage message, no reply</dt><dd>⌥+Enter (seen at the next send, in order)</dd></div>
+					<div><dt>Stage message</dt><dd>⌥+Enter</dd></div>
 					<div><dt>Shortcuts show/hide</dt><dd>⇧⌘/</dd></div>
 					<div><dt>Switch model / key</dt><dd>Ctrl+⌥+← / →</dd></div>
-					<div><dt>Thinking level</dt><dd>Ctrl+⌥+↓ / ↑ (cycles this model's levels)</dd></div>
-					<div><dt>Hop out / back in</dt><dd>Ctrl+G or Space (there and back)</dd></div>
-					<div><dt>Scroll messages</dt><dd>J / K · gg top · G bottom · Ctrl+U / Ctrl+D skip · Space to write again</dd></div>
+					<div><dt>Thinking level</dt><dd>Ctrl+⌥+↓ / ↑ (cycles levels)</dd></div>
+					<div><dt>Scroll messages</dt><dd>J / K · gg top · G bottom · Ctrl+U / Ctrl+D skip</dd></div>
 					<div><dt>Chat list</dt><dd>⌘B, then J / K · Space or L enters its prompt</dd></div>
 					<div><dt>Newer / older chat</dt><dd>⇧⌘J / ⇧⌘K (J mints one past the newest)</dd></div>
 					<div><dt>Voice readback on/off</dt><dd>Ctrl+⌥+S</dd></div>
-					<div><dt>Speak hovered word</dt><dd>Right-click the word</dd></div>
-					<div><dt>Speak highlight</dt><dd>Select text, then right-click it</dd></div>
+					<div><dt>Speak hovered word</dt><dd>Right click word</dd></div>
+					<div><dt>Speak highlight</dt><dd>Select text, then right click</dd></div>
 					<div><dt>Thoughts show/hide</dt><dd>Ctrl+O</dd></div>
-					<div><dt>Translate selection</dt><dd>⌘+T (to English; feeds annotation)</dd></div>
+					<div><dt>Translate selection</dt><dd>⌘T (to English, feeds annotation)</dd></div>
 					<div><dt>Stop voice / close menus</dt><dd>Esc (outside the prompt)</dd></div>
-					<div><dt>Delete a message</dt><dd>⌘D (hover the message first) or its Delete button</dd></div>
-					<div><dt>Fold / unfold message</dt><dd>F or Option-click (hover the message first)</dd></div>
+					<div><dt>Delete a message</dt><dd>Hover the message, then ⌘D or Delete</dd></div>
+					<div><dt>Fold / unfold message</dt><dd>Hover the message, then F or Option-click</dd></div>
 					<div><dt>Rerun a prompt</dt><dd>Rerun button (deletes everything after; Branch keeps it)</dd></div>
 					<div><dt>Reply language</dt><dd>⌘1…⌘0 (repeat the key to clear)</dd></div>
-					<div><dt>Delete this chat</dt><dd>⌘+⇧+Delete</dd></div>
-					<div><dt>Delete every chat</dt><dd>⌥+⌘+⇧+Delete</dd></div>
+					<div><dt>Delete this chat</dt><dd>⇧⌘Delete</dd></div>
+					<div><dt>Delete every chat</dt><dd>⌥⇧⌘Delete</dd></div>
+					<div><dt>Cut / delete hovered message</dt><dd>X cuts (copies first) · Delete deletes</dd></div>
+					<div><dt>Text size up / down</dt><dd>⌘+ / ⌘−</dd></div>
 				</dl>
-				{/if}
-				{#if !androidUI}
-				<h3>Prompt and message scroll</h3>
-				<p class="modal-note">
-					The prompt is a plain insert box: type, Enter sends
-					(Shift+Enter is a newline; inside code both are newlines).
-					Ctrl+G (or Space, outside the prompt) hops out to message
-					scroll (J/K, gg top, G bottom); I, Enter, Space, or Ctrl+G
-					hops back in. J/K also walks the chat list after ⌘B, and
-					⇧⌘J / ⇧⌘K steps between chats.
-				</p>
 				{/if}
 			</div>
 		</div>
@@ -3452,10 +3695,36 @@
 	aside li {
 		display: flex;
 		gap: 0.25rem;
+		position: relative;
 	}
 	aside li button:first-child {
 		flex: 1;
 		text-align: left;
+	}
+	/* The row × overlays instead of reserving its slot, so the chat
+	pill spans the full row width flush with the + button below it.
+	Keyboard focus brings it back (focus-within); touch has no hover,
+	so the × stays in flow there. */
+	aside li .del {
+		position: absolute;
+		right: 0;
+		top: 50%;
+		transform: translateY(-50%);
+		opacity: 0;
+		pointer-events: none;
+	}
+	aside li:hover .del,
+	aside li:focus-within .del {
+		opacity: 1;
+		pointer-events: auto;
+	}
+	@media (hover: none) {
+		aside li .del {
+			position: static;
+			transform: none;
+			opacity: 1;
+			pointer-events: auto;
+		}
 	}
 	aside button {
 		font: inherit;
@@ -3510,19 +3779,6 @@
 		/* No sidebar controls left (⌘B/⌘N live on keys only now): keep
 		a grabbable drag strip where the button row was. */
 		min-height: 1.25rem;
-	}
-	/* Sidebar toggles mirror the header text buttons, with the shortcut
-	visible on the button itself. */
-	.key-hint {
-		font-size: 0.68rem;
-		opacity: 0.75;
-		border: 1px solid currentColor;
-		border-radius: 4px;
-		padding: 0 0.3rem;
-		margin-left: 0.35rem;
-		/* The inline-flex buttons center this; the old -0.1em lift sat
-		the kbd box visibly too high. */
-		white-space: nowrap;
 	}
 	aside {
 		transition:
@@ -3649,11 +3905,6 @@
 		color: #1c1c1e;
 		overflow-wrap: anywhere;
 	}
-	.modal h3 {
-		font-size: 0.88rem;
-		font-weight: 650;
-		margin: 1.1rem 0 0.4rem;
-	}
 	.modal-note {
 		font-size: 0.8rem;
 		color: #6e6e73;
@@ -3669,12 +3920,15 @@
 		flex-direction: column;
 		min-width: 0;
 	}
+	/* Slim title strip: an empty drag surface, no bar. Tall enough to
+	clear the traffic lights, borderless so it reads as window chrome
+	instead of UI. */
 	header {
 		display: flex;
 		align-items: center;
 		gap: 1rem;
-		padding: 0.9rem 1.4rem;
-		border-bottom: 1px solid #e5e5ea;
+		min-height: 1.75rem;
+		padding: 0 1.4rem;
 		font-size: 0.82rem;
 		/* Chrome, not content: no I-beam, no text selection for the
 		native window-drag region to fight over. Buttons keep their
@@ -3682,13 +3936,6 @@
 		user-select: none;
 		-webkit-user-select: none;
 		cursor: default;
-	}
-	/* The right-hand pair (new chat, settings) sits closer together
-	than the header's general 1rem rhythm. */
-	.top-actions {
-		display: flex;
-		align-items: center;
-		gap: 0.45rem;
 	}
 	/* Chrome recedes so the chat leads: the language pill and waypoint
 	ticks rest dimmed until hovered or focused. */
@@ -3705,14 +3952,9 @@
 	.lang-chip:focus-visible {
 		opacity: 1;
 	}
-	/* Copyable chrome: the model label and token count take the I-beam
-	and select like content, and never light up on hover. The header
-	stays a drag surface everywhere else (see dragWindow). */
-	.selectable {
-		user-select: text;
-		-webkit-user-select: text;
-		cursor: text;
-	}
+	/* The title strip stays a drag surface everywhere except controls
+	(see dragWindow); the token tally (now in the settings panel) and
+	the reply-language pill keep their own copyable treatment. */
 	/* Hidden until the pointer comes near (JS toggles .wp-near by
 	distance); nearness alone brings the stack to a dim rest.
 	Clickable only while visible. */
@@ -3747,13 +3989,9 @@
 			pointer-events: auto;
 		}
 	}
-	.tokens {
-		color: #6e6e73;
-		white-space: nowrap;
-	}
-	/* Anchor for the reply-language pill: the pill floats over the
-	spacer instead of sitting in flow, so popping it in never moves
-	the header. The float (not the button) carries the fade, leaving
+	/* Anchor for the reply-language pill: the pill floats beside the
+	anchor instead of sitting in flow, so popping it in never moves
+	the strip. The float (not the button) carries the fade, leaving
 	the button's own hover-dim opacity transition alone. */
 	.tokens-wrap {
 		position: relative;
@@ -3767,9 +4005,6 @@
 		top: 50%;
 		transform: translateY(-50%);
 		display: inline-flex;
-	}
-	.spacer {
-		flex: 1;
 	}
 	.lang-chip {
 		display: inline-flex;
@@ -3789,28 +4024,6 @@
 		height: 0.8rem;
 	}
 
-	/* Kbd-only chrome buttons: dim at rest, ease to ink on hover and
-	back on leave. No underline anywhere. */
-	.settings-btn {
-		display: inline-flex;
-		align-items: center;
-		line-height: 1;
-		font: inherit;
-		font-size: 0.82rem;
-		color: #6e6e73;
-		border: 0;
-		background: none;
-		cursor: pointer;
-		padding: 0;
-		white-space: nowrap;
-		transition: color 0.18s ease;
-	}
-	.settings-btn:hover {
-		color: #1c1c1e;
-	}
-	.settings-btn .key-hint {
-		margin-left: 0;
-	}
 	button.link {
 		font: inherit;
 		color: inherit;
@@ -4671,23 +4884,48 @@
 		box-sizing: border-box;
 		margin-top: 0.25rem;
 		font: inherit;
+		color: inherit;
+		background: #fff;
 		border: 1px solid #c7c7cc;
-		border-radius: 8px;
+		border-radius: 10px;
 		padding: 0.4rem 0.6rem;
 		resize: vertical;
 	}
+	.review textarea:focus {
+		outline: none;
+		border-color: #1c1c1e;
+	}
+	/* Save is the solid primary pill (same fill as the send button);
+	Cancel is quiet text — the two never look like twins. */
 	.review-edit-actions {
 		display: flex;
-		gap: 0.5rem;
+		align-items: center;
+		gap: 0.25rem;
 		margin-top: 0.35rem;
 	}
 	.review-edit-actions button {
 		font-size: 0.78rem;
-		border: 1px solid #c7c7cc;
-		border-radius: 999px;
-		background: #fff;
+		font-weight: 600;
 		cursor: pointer;
-		padding: 0.2rem 0.8rem;
+		border-radius: 999px;
+		padding: 0.28rem 0.9rem;
+		border: 1px solid #1c1c1e;
+		background: #1c1c1e;
+		color: #fff;
+	}
+	.review-edit-actions button:hover {
+		opacity: 0.8;
+	}
+	.review-edit-actions button:last-child {
+		border-color: transparent;
+		background: none;
+		color: #6e6e73;
+		font-weight: 400;
+	}
+	.review-edit-actions button:last-child:hover {
+		opacity: 1;
+		color: #1c1c1e;
+		text-decoration: underline;
 	}
 	/* Merged pill: the wrap carries the single border; the count and ×
 	buttons inside are bare segments. Later than the prompt tool buttons
@@ -4736,12 +4974,22 @@
 		color: #94250a;
 	}
 	/* Per-note edit is a pencil in the message-action style (same
-	stroke icon, same quiet gray) instead of a text button. */
+	stroke icon, same quiet gray) instead of a text button. It rides
+	right after the note text — not margin-left:auto at the card's far
+	edge, where the cursor overshoots the card reaching it and the
+	whole overlay drops. */
 	.review-head button.review-pencil {
 		display: inline-flex;
 		align-items: center;
+		align-self: center;
+		margin-left: 0;
+		flex-shrink: 0;
 		color: #6e6e73;
-		padding: 0.1rem;
+		padding: 0.15rem;
+		border-radius: 6px;
+	}
+	.review-head button.review-pencil :global(.action-glyph) {
+		height: 0.8rem;
 	}
 	.review-head button.review-pencil:hover {
 		color: #1c1c1e;
@@ -4759,7 +5007,6 @@
 	no bridge to cross. Hover, keyboard focus, and touch-tap all open
 	it through CSS alone; the pill button has no click action. */
 	.ann-wrap .review {
-		display: none;
 		position: absolute;
 		bottom: -0.1rem;
 		right: 0;
@@ -4771,6 +5018,14 @@
 		overflow-y: auto;
 		margin: 0;
 		box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+		/* display:none can't fade: the card always lays out but sits
+		invisible and untouchable until hover, focus, or pin. */
+		visibility: hidden;
+		opacity: 0;
+		pointer-events: none;
+		transition:
+			opacity 0.16s ease,
+			visibility 0.16s;
 	}
 	.ann-wrap .review-quote {
 		overflow-wrap: anywhere;
@@ -4778,7 +5033,9 @@
 	.ann-wrap:hover .review,
 	.ann-wrap:focus-within .review,
 	.ann-wrap.pinned .review {
-		display: flex;
+		visibility: visible;
+		opacity: 1;
+		pointer-events: auto;
 	}
 	.muted {
 		font-size: 0.82rem;
@@ -4955,6 +5212,9 @@
 		color: #6e6e73;
 		font-size: 0.85rem;
 	}
+	/* Loading dots exist only while busy, so an idle aid button is
+	exactly its visible label — hover and spacing never cover text
+	that isn't there. */
 	.tdots span {
 		display: inline-block;
 		animation: tdot-pulse 1.2s ease-in-out infinite;
@@ -4998,8 +5258,10 @@
 		border-radius: 12px;
 		padding: 0 0.8rem 2.3rem;
 		background: #fff;
-		/* Fixed floor so mounting the editor never shifts layout. */
-		min-height: 5.2rem;
+		/* Fixed floor so mounting the editor never shifts layout.
+		CodeMirror itself sets no minimum — this floor is ours, at
+		about three text lines plus the tools row. */
+		min-height: 6.4rem;
 		box-sizing: border-box;
 		/* Ease the outline both in and out of hover. */
 		transition: border-color 0.18s ease;
@@ -5219,12 +5481,6 @@
 		header {
 			border-color: #38383a;
 		}
-		.settings-btn {
-			color: #98989f;
-		}
-		.settings-btn:hover {
-			color: #f2f2f7;
-		}
 		.voice-float {
 			color: #98989f;
 		}
@@ -5384,9 +5640,22 @@
 			border-color: #48484a;
 			color: #f2f2f7;
 		}
+		.review textarea:focus {
+			border-color: #aeaeb2;
+		}
+		/* Dark primary: light pill, dark text (mirrors the send
+		button's inversion); Cancel stays quiet gray text. */
 		.review-edit-actions button {
-			background: #2c2c2e;
-			border-color: #48484a;
+			background: #f2f2f7;
+			border-color: #f2f2f7;
+			color: #1c1c1e;
+		}
+		.review-edit-actions button:last-child {
+			background: none;
+			border-color: transparent;
+			color: #98989f;
+		}
+		.review-edit-actions button:last-child:hover {
 			color: #f2f2f7;
 		}
 		.muted {

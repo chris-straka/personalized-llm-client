@@ -115,7 +115,8 @@ export async function persistSecrets(settings: AppSettings): Promise<void> {
 		try {
 			await setSecret(secretAccount(id), key);
 		} catch {
-			// Keychain locked: the settings save below still keeps the key.
+			// Keychain locked: nothing is stored, and the blanked settings
+			// save below drops it — the key stays session-only.
 		}
 	}
 }

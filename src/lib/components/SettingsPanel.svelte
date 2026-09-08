@@ -22,9 +22,13 @@
 		onClose: () => void;
 		/** Opens the shortcuts modal (owned by the page). */
 		onShortcuts: () => void;
+		/** Active-chat token tally shown right of the heading. */
+		tokensLabel?: string | null;
+		/** Tooltip for the tally (exact total). */
+		tokensTitle?: string | null;
 	}
 
-	let { settings, onClose, onShortcuts }: Props = $props();
+	let { settings, onClose, onShortcuts, tokensLabel = null, tokensTitle = null }: Props = $props();
 	let updateStatus = $state("");
 	let checkingUpdate = $state(false);
 	let modelLoading = $state(false);
@@ -78,11 +82,9 @@
 	/** The voice Auto would use next for the tag above (label only —
 	the bridge stays authoritative at speak time). */
 	const autoVoice = $derived(autoVoiceForLang(installedVoices, voiceLangTag, settings.nativeVoiceId));
-	const autoLabel = $derived(
-		autoVoice
-			? `Auto - ${autoVoice.name} (${autoVoice.tier.charAt(0).toUpperCase()}${autoVoice.tier.slice(1)})`
-			: "Auto"
-	);
+	/* No appended category: Apple's registry names already carry it
+	("Ava (Premium)"), and Siri's have none to repeat. */
+	const autoLabel = $derived(autoVoice ? `Auto - ${autoVoice.name}` : "Auto");
 	// A picked voice never reads another language: when the tag moves on
 	// from the saved pick, fall back to Auto instead of a blank field.
 	$effect(() => {
@@ -305,6 +307,16 @@
 	}}
 >
 	<h1>Settings</h1>
+	{#if tokensLabel}
+		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+		<span
+			class="head-tokens"
+			title={tokensTitle}
+			onclick={(event) => event.stopPropagation()}
+		>
+			{tokensLabel}
+		</span>
+	{/if}
 </div>
 
 <section aria-labelledby="provider-heading">
@@ -469,7 +481,7 @@
 	{/if}
 	<label class="check">
 		<input type="checkbox" bind:checked={settings.ownBubble} />
-		Background on my messages
+		enable bg on my msgs
 	</label>
 	<!-- One row for both hover toggles: the label names the behavior once,
 	each box names whose buttons it covers. -->
@@ -535,10 +547,9 @@
 							<option value="">{autoLabel}</option>
 							{#each voiceOptions as option (option.id)}
 								<option value={option.id}>
-									{option.name} ·
-									{option.lang.toLowerCase() === voiceLangTag.toLowerCase()
-										? option.tier
-										: `${option.lang} · ${option.tier}`}
+									{option.name}{option.lang.toLowerCase() === voiceLangTag.toLowerCase()
+										? ""
+										: ` · ${option.lang}`}
 								</option>
 							{/each}
 						</select>
@@ -643,6 +654,22 @@
 		font-size: 1.15rem;
 		font-weight: 700;
 		margin: 0;
+	}
+	/* Active-chat tally right of the heading: quiet and copyable, and
+	clicking it must not close the panel like the rest of the strip. */
+	.head-tokens {
+		margin-left: auto;
+		font-size: 0.75rem;
+		color: #6e6e73;
+		white-space: nowrap;
+		user-select: text;
+		-webkit-user-select: text;
+		cursor: text;
+	}
+	@media (prefers-color-scheme: dark) {
+		.head-tokens {
+			color: #98989f;
+		}
 	}
 	.panel-head:focus-visible {
 		outline: 2px solid #1c1c1e;
@@ -874,9 +901,10 @@
 	}
 	.provider-row button,
 	.segmented button {
-		padding: 0.45rem 0.9rem;
+		padding: 0.3rem 0.65rem;
 		font: inherit;
-		font-size: 0.83rem;
+		font-size: 0.78rem;
+		white-space: nowrap;
 		border: 1px solid #c7c7cc;
 		border-radius: 999px;
 		background: #fff;

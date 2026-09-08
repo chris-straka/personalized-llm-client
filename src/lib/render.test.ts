@@ -91,8 +91,16 @@ describe("markdown rendering", () => {
 
 	it("marks only ruby-capable paragraphs for aid room", () => {
 		const { html } = renderMarkdown("hello\n\n漢字を読む");
-		expect(html).toContain("<p>hello</p>");
-		expect(html).toContain('<p class="cjk">');
+		expect(html).toContain('<p dir="auto">hello</p>');
+		expect(html).toContain('<p dir="auto" class="cjk">');
+	});
+
+	it("directs every text block by its own content", () => {
+		const { html } = renderMarkdown("# Title\n\n- item\n\n> quote\n\nplain");
+		for (const tag of ["h1", "li", "blockquote", "p"]) {
+			expect(html).toContain(`<${tag} dir="auto"`);
+		}
+		expect(html).not.toContain("<pre dir=");
 	});
 
 	it("converts rendered html back to plain text", () => {

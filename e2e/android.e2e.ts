@@ -18,8 +18,29 @@ test.beforeEach(async ({ page }) => {
 	await expect(page.locator("article .rendered").first()).toBeVisible();
 });
 
+/** Synthetic right-edge swipe: the phone gesture that opens settings. */
+async function swipeFromRightEdge(page: Page): Promise<void> {
+	const width = await page.evaluate(() => window.innerWidth);
+	await page.evaluate((w: number) => {
+		const touch = (x: number, y: number) =>
+			new Touch({ identifier: 9, target: document.body, clientX: x, clientY: y });
+		window.dispatchEvent(
+			new TouchEvent("touchstart", { bubbles: true, cancelable: true, composed: true, touches: [touch(w - 4, 600)] })
+		);
+		window.dispatchEvent(
+			new TouchEvent("touchend", {
+				bubbles: true,
+				cancelable: true,
+				composed: true,
+				touches: [],
+				changedTouches: [touch(w - 140, 604)]
+			})
+		);
+	}, width);
+}
+
 test("shortcuts modal teaches touch gestures on Android", async ({ page }) => {
-	await page.locator("[data-settings-toggle]").click();
+	await swipeFromRightEdge(page);
 	await page.locator('button:has-text("Show all shortcuts")').click();
 	await expect(page.locator("#shortcuts-heading")).toBeVisible();
 	await expect(page.locator("#shortcuts-heading")).toHaveText("Touch gestures");

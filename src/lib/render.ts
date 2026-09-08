@@ -104,6 +104,15 @@ export function renderMessage(markdownText: string, sourcesWanted: boolean): Ren
  * Shared-code-array render so `data-code-index` attributes stay unique even
  * when thoughts and body are rendered separately.
  */
+/**
+ * Blocks whose base direction follows their own text: without this an
+ * Arabic paragraph inherits the app's LTR, so its first line starts at
+ * the left and a top-right drag begins mid-text instead of at the
+ * start. Code keeps its own direction (mixed-direction source must not
+ * reorder); thoughts chrome is app UI, not message text.
+ */
+const DIR_AUTO_BLOCKS = /<(p|li|h[1-6]|blockquote|td|th)(?=[\s>])/g;
+
 function renderInto(markdownText: string, codes: Array<{ lang: string; code: string }>): string {
 	const instance = new Marked({ breaks: true });
 	instance.use({
@@ -136,7 +145,8 @@ function renderInto(markdownText: string, codes: Array<{ lang: string; code: str
 			}
 		}
 	});
-	return instance.parse(markdownText) as string;
+	const html = instance.parse(markdownText) as string;
+	return html.replace(DIR_AUTO_BLOCKS, "<$1 dir=\"auto\"");
 }
 
 let purifier: ReturnType<typeof DOMPurify> | null = null;
@@ -144,12 +154,12 @@ let purifier: ReturnType<typeof DOMPurify> | null = null;
 export function sanitize(dirty: string): string {
 	if (typeof window === "undefined") {
 		// Non-DOM context (SSR/prerender): escape everything, no markup.
-		return `<p>${escapeHtml(dirty)}</p>`;
+		return `<p dir="auto">${escapeHtml(dirty)}</p>`;
 	}
 	purifier ??= DOMPurify(window);
 	return purifier.sanitize(dirty, {
 		ADD_TAGS: ["details", "summary", "button", "ruby", "rt", "rp"],
-		ADD_ATTR: ["open", "class", "style", "data-code-index", "data-code-action", "data-paste-fold", "type"]
+		ADD_ATTR: ["open", "class", "style", "data-code-index", "data-code-action", "data-paste-fold", "type", "dir"]
 	});
 }
 

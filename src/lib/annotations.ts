@@ -39,6 +39,27 @@ export function addAnnotation(
 	return [...list, { id: newAnnotationId(), messageId, quote: trimmed, comment }];
 }
 
+/**
+ * Id of the saved annotation already quoting the same span of the same
+ * message (same text, same repeat), if any: annotating it again would
+ * stack two badges on one anchor, and hovering them oscillates as the
+ * re-stamp swaps which badge sits under the cursor. Null when the
+ * quote is blank or unquoted yet.
+ */
+export function duplicateAnnotationId(
+	list: Annotation[],
+	messageId: ChatMsgId,
+	quote: string,
+	at = 0
+): AnnotationId | null {
+	const trimmed = quote.trim();
+	if (!trimmed) return null;
+	const found = list.find(
+		(a) => a.messageId === messageId && a.quote === trimmed && (a.at ?? 0) === at
+	);
+	return found ? found.id : null;
+}
+
 export function editAnnotationComment(
 	list: Annotation[],
 	id: string,
@@ -269,12 +290,102 @@ export function annotationCountLabel(count: number): string {
 /** Wash fade-out length in ms — mirrors the ann-wash-out keyframes. */
 export const WASH_FADE_MS = 180;
 
+/**
+ * A live selection as plain character offsets within a root, so a
+ * stamp's unwrap/re-wrap (which replaces every text node the range
+ * points at) can put the highlight back where it was. Null unless a
+ * non-collapsed selection sits fully inside the root — carets and
+ * outside selections restore nothing.
+ */
+export interface SavedSelection {
+	/** Anchor end (where the selection started), as a root offset. */
+	start: number;
+	/** Focus end (where it ended), as a root offset. */
+	end: number;
+	/** True when the anchor sits after the focus (right-to-left drag). */
+	backwards: boolean;
+}
+
+/** Snapshot the live selection's endpoints as root-relative offsets. */
+export function saveSelection(root: Node): SavedSelection | null {
+	try {
+		const sel = document.getSelection();
+		if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+		const anchorNode = sel.anchorNode;
+		const focusNode = sel.focusNode;
+		if (!anchorNode || !focusNode || !root.contains(anchorNode) || !root.contains(focusNode)) {
+			return null;
+		}
+		const toOffset = (node: Node, offset: number): number => {
+			const probe = document.createRange();
+			probe.selectNodeContents(root);
+			probe.setEnd(node, offset);
+			return probe.toString().length;
+		};
+		const start = toOffset(anchorNode, sel.anchorOffset);
+		const end = toOffset(focusNode, sel.focusOffset);
+		return { start, end, backwards: start > end };
+	} catch {
+		return null;
+	}
+}
+
+function nodeAtOffset(root: Node, target: number): { node: Text; offset: number } | null {
+	const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+	let chars = 0;
+	let last: Text | null = null;
+	while (walker.nextNode()) {
+		const text = walker.currentNode;
+		if (!(text instanceof Text)) continue;
+		last = text;
+		const length = text.textContent?.length ?? 0;
+		if (chars + length >= target) return { node: text, offset: Math.max(0, target - chars) };
+		chars += length;
+	}
+	if (!last) return null;
+	return { node: last, offset: last.textContent?.length ?? 0 };
+}
+
+/**
+ * Put back a snapshot taken by saveSelection, unconditionally: the
+ * only caller is the synchronous stamp (save, re-wrap, restore in one
+ * task), where no user redraw can land between snapshot and restore —
+ * so a disturbed highlight is always ours to fix. Never throws
+ * (selection APIs disagree across engines; paint must survive).
+ */
+export function restoreSelection(root: Node, saved: SavedSelection): void {
+	try {
+		const sel = document.getSelection();
+		if (!sel) return;
+		const lo = nodeAtOffset(root, Math.min(saved.start, saved.end));
+		const hi = nodeAtOffset(root, Math.max(saved.start, saved.end));
+		if (!lo || !hi) return;
+		const anchor = saved.backwards ? hi : lo;
+		const focus = saved.backwards ? lo : hi;
+		sel.setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset);
+	} catch {
+		// Selection restore is cosmetic: never break the stamp.
+	}
+}
+
 export function applyMarks(
 	root: Element,
 	items: AnnotationMark[],
 	skip: boolean,
 	wash: string | null
 ): void {
+	// Unwrap/re-wrap replaces the text nodes a live selection points
+	// at, collapsing it: snapshot first so hovering a badge can't eat
+	// the highlight the menu is about to annotate.
+	const saved = saveSelection(root);
+	try {
+		stampMarks(root, items, skip, wash);
+	} finally {
+		if (saved) restoreSelection(root, saved);
+	}
+}
+
+function stampMarks(root: Element, items: AnnotationMark[], skip: boolean, wash: string | null): void {
 	// Ids already on screen: re-stamping them (every render unwraps and
 	// re-locates) must not replay the mount fade — only new badges are fresh.
 	const settled = new Set(
@@ -282,7 +393,15 @@ export function applyMarks(
 			el instanceof HTMLElement ? (el.dataset.annBadge ?? "") : ""
 		)
 	);
-	for (const badge of root.querySelectorAll("[data-ann-badge]")) badge.remove();
+	// Badge buttons keep their DOM nodes across re-stamps: rebuilding
+	// them swaps which of two stacked badges sits under the cursor, and
+	// the hover oscillates between them. Re-appending the same node to
+	// the same anchor changes nothing hit-testable.
+	const live = new Map<string, HTMLButtonElement>();
+	for (const badge of root.querySelectorAll("[data-ann-badge]")) {
+		if (badge instanceof HTMLButtonElement) live.set(badge.dataset.annBadge ?? "", badge);
+		badge.remove();
+	}
 	// The wash whose marks are currently mounted ("" when none): a steady
 	// wash re-stamps without replaying its fade-in, like settled badges.
 	const prevWash = (root as HTMLElement).dataset.washStamped || null;
@@ -332,10 +451,14 @@ export function applyMarks(
 		if (!freshLoc) continue;
 		const anchor = anchorSpan(freshNodes, freshLoc);
 		if (!anchor) continue;
-		const badge = document.createElement("button");
+		// Reuse the live button when one is already on screen: same
+		// node, same anchor, same stacking — a hover can never catch
+		// the swap mid-flight and oscillate.
+		const badge = live.get(item.id) ?? document.createElement("button");
 		badge.type = "button";
 		badge.className = "ccez-ann-badge";
 		if (!settled.has(item.id)) badge.classList.add("fresh");
+		else badge.classList.remove("fresh");
 		badge.dataset.annBadge = item.id;
 		badge.textContent = String(item.number);
 		badge.title = "Open annotation";
@@ -359,6 +482,14 @@ export function applyMarks(
 				wrapRange(fnodes, floc, "leaving");
 				const doomed = [...root.querySelectorAll("mark.ccez-ann.leaving")];
 				setTimeout(() => {
+					// A live highlight owns the DOM under it: unwrapping
+					// now would pull the range's nodes out from under the
+					// cursor (and no post-hoc check can tell our disturbance
+					// from a redraw the user started in the meantime), so
+					// leave the transparent mark for the next stamp, which
+					// unwraps it under save/restore like any other mark.
+					const live = document.getSelection();
+					if (live && live.rangeCount > 0 && !live.isCollapsed) return;
 					for (const mark of doomed) {
 						if (mark.classList.contains("leaving")) {
 							mark.replaceWith(document.createTextNode(mark.textContent ?? ""));
@@ -492,6 +623,10 @@ function anchorSpan(nodes: Text[], loc: QuoteLocation): HTMLElement | null {
  * (sub-ranges stay inside single text nodes, so splitting is safe).
  * Returns the last mark for badge placement. Out-of-range offsets
  * (stale indices, partial overlaps) skip instead of throwing.
+ * Whitespace-only slices skip too: a multi-paragraph quote spans the
+ * formatting text between block elements, and wrapping that gap in a
+ * mark paints the paragraph break (and grows the message while the
+ * wash is on, flying the badge to a new line).
  */
 function wrapRange(nodes: Text[], loc: QuoteLocation, extraClass?: string): HTMLElement | null {
 	let last: HTMLElement | null = null;
@@ -502,6 +637,7 @@ function wrapRange(nodes: Text[], loc: QuoteLocation, extraClass?: string): HTML
 		const from = i === loc.startNode ? loc.startOffset : 0;
 		const to = i === loc.endNode ? loc.endOffset : length;
 		if (from >= to) continue;
+		if (!/\S/.test(node.textContent?.slice(from, to) ?? "")) continue;
 		try {
 			const range = document.createRange();
 			range.setStart(node, from);

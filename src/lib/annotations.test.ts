@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
 	addAnnotation,
+	duplicateAnnotationId,
 	editAnnotationComment,
 	deleteAnnotation,
 	clearAnnotations,
@@ -89,6 +90,23 @@ describe("annotations", () => {
 		const split = splitAnnotationBlock(withAnnotations("", list));
 		expect(split?.text).toBe("");
 		expect(split?.refs).toEqual([{ n: 1, quote: "風に舞う", comment: "What does this mean?" }]);
+	});
+});
+
+describe("duplicateAnnotationId", () => {
+	it("finds the same span and ignores neighbors", () => {
+		const msg = "m1" as ChatMsgId;
+		const list = addAnnotation(addAnnotation([], msg, "Kyoto", "old capital"), msg, "Osaka");
+		const kyoto = list[0];
+		if (!kyoto) throw new Error("no annotation");
+		// Same message, quote, and repeat: a twin.
+		expect(duplicateAnnotationId(list, msg, "  Kyoto ", 0)).toBe(kyoto.id);
+		// A different repeat of the same text is its own span.
+		expect(duplicateAnnotationId(list, msg, "Kyoto", 2)).toBeNull();
+		// Same quote in another message is unrelated.
+		expect(duplicateAnnotationId(list, "m2" as ChatMsgId, "Kyoto", 0)).toBeNull();
+		// Blank quotes never match.
+		expect(duplicateAnnotationId(list, msg, "   ", 0)).toBeNull();
 	});
 });
 

@@ -3,6 +3,8 @@
 #[cfg(all(target_os = "macos", debug_assertions))]
 mod dev_icon;
 mod keyboard;
+#[cfg(desktop)]
+mod menu;
 mod tts;
 
 /// macOS Keychain (via the `keyring` crate) backing for API keys.
@@ -81,13 +83,20 @@ pub fn run() {
             tts::tts_voices,
             tts::tts_identify_lang
         ])
-        .setup(|app| {
+        .setup(|_app| {
             // Dev-only: shrink the oversized runtime Dock tile (see dev_icon).
             #[cfg(all(target_os = "macos", debug_assertions))]
-            if let Some(window) = tauri::Manager::get_webview_window(app.handle(), "main") {
+            if let Some(window) = tauri::Manager::get_webview_window(_app.handle(), "main") {
                 dev_icon::watch(window);
             }
+            // Native menu bar (desktop only; mobile has no menu bar).
+            #[cfg(desktop)]
+            _app.set_menu(menu::build(_app.handle())?)?;
             Ok(())
+        })
+        .on_menu_event(|app, event| {
+            #[cfg(desktop)]
+            menu::forward(app, event.id().as_ref());
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -417,3 +417,115 @@ test("clear-all lives at the bottom of the review", async ({ page }) => {
 	await tools.locator("button").click();
 	await expect(page.locator(".prompt-tools .ann-pill")).toHaveCount(0);
 });
+
+/** Multi-paragraph quotes wash without painting the paragraph gaps: no
+whitespace-only marks, no layout growth while the wash is on, and a
+live highlight survives hovering the badge on and off. */
+test("multi-paragraph wash paints no gaps and keeps the highlight", async ({ page }) => {
+	await seedChat(page, [
+		{ role: "assistant", content: "First paragraph here.\n\nSecond paragraph here.\n\nThird paragraph here." }
+	]);
+	await page.goto("/");
+	const body = page.locator("article .rendered").first();
+	await expect(body).toBeVisible();
+	// Selectable text nodes: skip badge chrome and inter-block gaps.
+	const selectAcross = (from: number, to: number) =>
+		page.evaluate(
+			([a, b]: number[]) => {
+				const texts: Text[] = [];
+				const walker = document.createTreeWalker(
+					document.querySelector("article .rendered"),
+					NodeFilter.SHOW_TEXT
+				);
+				while (walker.nextNode()) {
+					const node = walker.currentNode;
+					const parent = node.parentNode;
+					if (parent instanceof Element && parent.closest("[data-ann-badge]")) continue;
+					if (node instanceof Text && /\S/.test(node.textContent ?? "")) texts.push(node);
+				}
+				const first = texts[0];
+				const last = texts[texts.length - 1];
+				if (!first || !last || a === undefined || b === undefined) throw new Error("no text");
+				window.getSelection()?.setBaseAndExtent(first, a, last, b);
+				return window.getSelection()?.toString() ?? "";
+			},
+			[from, to] as [number, number]
+		);
+	expect(await selectAcross(6, 5)).toBe("paragraph here.\n\nSecond paragraph here.\n\nThird");
+	await page.mouse.up();
+	await expect(page.locator(".sel-menu")).toBeVisible();
+	await page.locator('.sel-menu button:has-text("Annotate")').click();
+	await expect(page.locator(".ann-pop")).toBeVisible();
+	await page.keyboard.press("Enter");
+	const badge = page.locator("button.ccez-ann-badge");
+	await expect(badge).toHaveCount(1);
+	const snapshot = () =>
+		page.evaluate(() => {
+			const root = document.querySelector("article .rendered");
+			const marks = [...(root?.querySelectorAll("mark.ccez-ann") ?? [])].map((m) => m.textContent);
+			const box = root?.querySelector("button.ccez-ann-badge")?.getBoundingClientRect();
+			return {
+				blankMarks: marks.filter((text) => !/\S/.test(text ?? "")).length,
+				badgeY: box ? Math.round(box.y) : -1,
+				height: root?.getBoundingClientRect().height
+			};
+		});
+	const washed = await snapshot();
+	expect(washed.blankMarks).toBe(0);
+	// A live highlight inside the washed region survives hover on/off.
+	// (The preview wash split the paragraphs at the first selection's
+	// edges, so re-anchor by content, not by node order.)
+	const reselected = await page.evaluate(() => {
+		const texts: Text[] = [];
+		const walker = document.createTreeWalker(
+			document.querySelector("article .rendered"),
+			NodeFilter.SHOW_TEXT
+		);
+		while (walker.nextNode()) {
+			const node = walker.currentNode;
+			if (node instanceof Text && node.textContent === "paragraph here.") texts.push(node);
+		}
+		const target = texts[0];
+		if (!target) throw new Error("no target");
+		window.getSelection()?.setBaseAndExtent(target, 0, target, 9);
+		return window.getSelection()?.toString() ?? "";
+	});
+	expect(reselected).toBe("paragraph");
+	const box = await badge.boundingBox();
+	if (!box) throw new Error("badge has no box");
+	await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+	await page.waitForTimeout(300);
+	const hovered = await snapshot();
+	expect(hovered.blankMarks).toBe(0);
+	expect(hovered.height).toBe(washed.height);
+	expect(hovered.badgeY).toBe(washed.badgeY);
+	expect(await page.evaluate(() => window.getSelection()?.toString() ?? "")).toBe("paragraph");
+	await page.mouse.move(4, 4);
+	await page.waitForTimeout(400);
+	const left = await snapshot();
+	expect(left.height).toBe(washed.height);
+	expect(left.badgeY).toBe(washed.badgeY);
+	expect(await page.evaluate(() => window.getSelection()?.toString() ?? "")).toBe("paragraph");
+});
+
+/** RTL paragraphs lay out right-to-left (dir=auto), so a top-right to
+bottom drag starts at the text's start instead of mid-text. */
+test("rtl drag from the top-right selects the whole paragraph", async ({ page }) => {
+	const para =
+		"القط السمين يجلس على السجادة القديمة في غرفة المعيشة المشمسة. الكلب الصغير يركض بسرعة في الحديقة الخضراء الواسعة. الطائر الأزرق يغرد بصوت عال فوق الأشجار العالية.";
+	await seedChat(page, [{ role: "assistant", content: para }]);
+	await page.goto("/");
+	const body = page.locator("article .rendered").first();
+	await expect(body).toBeVisible();
+	await expect(body.locator("p").first()).toHaveAttribute("dir", "auto");
+	const box = await body.boundingBox();
+	if (!box) throw new Error("message has no box");
+	await page.mouse.move(box.x + box.width - 4, box.y + 8);
+	await page.mouse.down();
+	await page.mouse.move(box.x + 4, box.y + box.height - 4, { steps: 15 });
+	await page.mouse.up();
+	const sel = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+	// Was 47 of 162 before per-block direction: the first sentence dropped.
+	expect(sel.length).toBeGreaterThan(150);
+	await expect(page.locator(".sel-menu")).toBeVisible();
+});

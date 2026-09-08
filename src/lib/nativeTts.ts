@@ -135,6 +135,52 @@ export async function quoteLangFor(quote: string, fallback: string): Promise<str
 	return fallback;
 }
 
+/**
+ * Sentence holding a quote, for voice resolution below: the recognizer
+ * needs surrounding text (two kanji identify nothing), so a short
+ * highlight speaks with its sentence's voice. Null when the quote
+ * isn't found (rendered text and markdown differ).
+ */
+export function sentenceForQuote(context: string, quote: string): string | null {
+	const needle = contextQuoteKey(quote);
+	if (!needle) return null;
+	for (const sentence of splitSentences(context)) {
+		if (contextQuoteKey(sentence).includes(needle)) return sentence;
+	}
+	return null;
+}
+
+function contextQuoteKey(text: string): string {
+	return text.replace(/\s+/g, "");
+}
+
+/**
+ * Language for a highlighted quote with its message as context: Han
+ * without kana is Chinese/Japanese-ambiguous, so the surrounding
+ * sentence picks the voice (kana in it? Apple's recognizer on the full
+ * sentence?). Anything unambiguous takes today's path untouched, and a
+ * silent bridge still lands on Chinese, the old default. Never throws.
+ */
+export async function quoteLangForContext(
+	quote: string,
+	context: string,
+	fallback: string
+): Promise<string> {
+	const scriptLang = ttsLangFor(quote, "");
+	if (scriptLang && scriptLang !== "zh-CN") return scriptLang;
+	if (scriptLang !== "zh-CN") return quoteLangFor(quote, fallback);
+	const probe = sentenceForQuote(context, quote) ?? context;
+	const sentenceLang = ttsLangFor(probe, "");
+	if (sentenceLang && sentenceLang !== "zh-CN") return sentenceLang;
+	try {
+		const tag = await invoke<string | null>("tts_identify_lang", { text: probe });
+		if (tag?.trim()) return tag.trim();
+	} catch {
+		// Bridge unavailable (browser preview, tests): Chinese below.
+	}
+	return "zh-CN";
+}
+
 /** Open System Settings at the Accessibility pane (voice downloads). */
 export async function openVoiceSettings(): Promise<void> {
 	await invoke("open_voice_settings");

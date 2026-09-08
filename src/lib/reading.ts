@@ -154,6 +154,10 @@ export interface ModelAid {
 	label: string;
 	button: string;
 	title: string;
+	/** Revert control once applied, in the aid's own script. */
+	revert: string;
+	/** Tooltip for the revert control. */
+	revertTip: string;
 	instruction: string;
 }
 
@@ -163,6 +167,8 @@ export const MODEL_AIDS: Record<string, ModelAid> = {
 		label: "tashkeel",
 		button: "تشكيل",
 		title: "Add tashkeel (uses the active model)",
+		revert: "إبداعي",
+		revertTip: "Back to the original text",
 		instruction:
 			"Add full Arabic diacritics (tashkeel) to the following text. " +
 			"Reply with the vocalized text only, no explanations."

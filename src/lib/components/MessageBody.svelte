@@ -299,9 +299,8 @@
 				button.textContent = ok ? "Copied" : "Copy failed";
 				setTimeout(restore, 1500);
 			};
-			const done = navigator.clipboard?.writeText(entry.code);
-			if (!done) report(false);
-			else void done.then(
+			if (!navigator.clipboard) report(false);
+			else void navigator.clipboard.writeText(entry.code).then(
 				() => report(true),
 				() => report(false)
 			);
@@ -569,22 +568,21 @@
 		white-space: nowrap;
 		cursor: pointer;
 	}
-	/* Speech-bubble tail: a slim triangle leaning down-left toward the
-	quote it annotates, never straight down. Its wide top tucks 6px
+	/* Speech-bubble tail: a slash leaning down-left toward the quote
+	it annotates — tip at the bottom-left corner, wide top tucked 5px
 	under the badge (same color, so the join can never gap — the circle
 	curves away at the sides, which is why the tail seats left of
-	center instead of off the rim). Slimmer and a touch longer than
-	before, so the tip reads as a true point. Clicks land on the
-	button, so the open still works. */
+	center instead of off the rim). Clicks land on the button, so the
+	open still works. */
 	.rendered :global(button.ccez-ann-badge::after) {
 		content: "";
 		position: absolute;
-		top: calc(100% - 6px);
-		left: 26%;
-		width: 0.4rem;
-		height: 0.56rem;
+		top: calc(100% - 5px);
+		left: 14%;
+		width: 0.5rem;
+		height: 0.72rem;
 		background: inherit;
-		clip-path: polygon(0 0, 100% 0, 15% 100%);
+		clip-path: polygon(38% 0, 100% 0, 0 100%);
 	}
 	/* Newly stamped badges fade in; re-stamps skip the class so steady
 	marks never flicker on re-render. */

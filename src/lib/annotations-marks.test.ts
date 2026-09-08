@@ -4,6 +4,8 @@ import {
 	applyMarks,
 	annotationCountLabel,
 	lockSelectionToMessage,
+	saveSelection,
+	restoreSelection,
 	WASH_FADE_MS,
 	type AnnotationMark,
 	type AnnotationId
@@ -311,6 +313,130 @@ describe("lockSelectionToMessage", () => {
 		} finally {
 			root.remove();
 			document.getSelection()?.removeAllRanges();
+		}
+	});
+});
+
+describe("applyMarks wash over paragraphs", () => {
+	function twoParagraphs(): HTMLDivElement {
+		const root = document.createElement("div");
+		root.innerHTML = "<p>alpha here</p>\n<p>beta here</p>";
+		document.body.append(root);
+		return root;
+	}
+
+	it("never wraps the whitespace between block elements", () => {
+		const root = twoParagraphs();
+		try {
+			const marks: AnnotationMark[] = [{ id: "a1" as AnnotationId, number: 1, quote: "alpha here\n\nbeta here" }];
+			applyMarks(root, marks, false, "a1");
+			const wrapped = [...root.querySelectorAll("mark.ccez-ann")];
+			// One wash per paragraph: the "\n" gap stays unwrapped so no
+			// empty line box paints between the paragraphs.
+			expect(wrapped).toHaveLength(2);
+			for (const mark of wrapped) expect(mark.textContent).toMatch(/\S/);
+			// baseText, not raw textContent: the badge number is overlay.
+			expect(baseText(root)).toBe("alpha here\nbeta here");
+		} finally {
+			root.remove();
+		}
+	});
+
+	it("restores a highlight after its nodes are replaced", () => {
+		const root = twoParagraphs();
+		try {
+			const sel = document.getSelection();
+			if (!sel) throw new Error("no selection");
+			const first = root.querySelector("p")?.firstChild;
+			const last = root.querySelectorAll("p")[1]?.firstChild;
+			if (!(first instanceof Text) || !(last instanceof Text)) throw new Error("no text nodes");
+			// Right-to-left drag: direction must survive the round trip.
+			sel.setBaseAndExtent(last, 4, first, 6);
+			expect(sel.toString()).toBe("here\nbeta");
+			const saved = saveSelection(root);
+			if (!saved) throw new Error("no snapshot");
+			expect(saved.backwards).toBe(true);
+			// The wash-off unwrap swaps every text node for a fresh one
+			// with the same text: endpoints detach in every engine.
+			root.querySelectorAll("p").forEach((p) => {
+				p.replaceChildren(document.createTextNode(p.textContent ?? ""));
+			});
+			restoreSelection(root, saved);
+			expect(sel.toString()).toBe("here\nbeta");
+			// Anchor stays where the drag started (the later node).
+			const after = root.querySelectorAll("p")[1]?.firstChild;
+			expect(sel.anchorNode).toBe(after);
+			expect(sel.anchorOffset).toBe(4);
+		} finally {
+			root.remove();
+			document.getSelection()?.removeAllRanges();
+		}
+	});
+
+	it("reuses badge buttons across re-stamps", () => {
+		const marks: AnnotationMark[] = [{ id: "a1" as AnnotationId, number: 1, quote: "alpha" }];
+		const root = rootWith("alpha and beta");
+		applyMarks(root, marks, false, null);
+		const first = root.querySelector("[data-ann-badge]");
+		if (!(first instanceof HTMLButtonElement)) throw new Error("no badge");
+		// A wash re-stamp (hover on) must keep the very same node: a
+		// swapped node fires mouseout/mouseover under a still cursor
+		// and stacked badges oscillate.
+		applyMarks(root, marks, false, "a1");
+		expect(root.querySelector("[data-ann-badge]")).toBe(first);
+		applyMarks(root, marks, false, null);
+		expect(root.querySelector("[data-ann-badge]")).toBe(first);
+	});
+
+	it("snapshots nothing for carets and outside selections", () => {
+		const root = twoParagraphs();
+		const outsider = document.createElement("div");
+		outsider.textContent = "elsewhere";
+		document.body.append(outsider);
+		try {
+			const sel = document.getSelection();
+			if (!sel) throw new Error("no selection");
+			const first = root.querySelector("p")?.firstChild;
+			if (!(first instanceof Text)) throw new Error("no text nodes");
+			sel.setBaseAndExtent(first, 0, first, 0);
+			expect(saveSelection(root)).toBeNull();
+			const away = outsider.firstChild;
+			if (!(away instanceof Text)) throw new Error("no outsider text");
+			sel.setBaseAndExtent(away, 0, away, 4);
+			expect(saveSelection(root)).toBeNull();
+		} finally {
+			root.remove();
+			outsider.remove();
+			document.getSelection()?.removeAllRanges();
+		}
+	});
+
+	it("defers the fade-out unwrap while a highlight is live", () => {
+		vi.useFakeTimers();
+		const root = twoParagraphs();
+		try {
+			const marks: AnnotationMark[] = [{ id: "a1" as AnnotationId, number: 1, quote: "alpha here" }];
+			applyMarks(root, marks, false, "a1");
+			const sel = document.getSelection();
+			if (!sel) throw new Error("no selection");
+			const first = root.querySelector("p mark")?.firstChild;
+			if (!(first instanceof Text)) throw new Error("no text nodes");
+			sel.setBaseAndExtent(first, 0, first, 5);
+			applyMarks(root, marks, false, null);
+			// The fade timer must not pull the range's nodes out: the
+			// transparent mark stays until a later stamp cleans it up.
+			vi.advanceTimersByTime(WASH_FADE_MS);
+			expect(root.querySelector("mark.ccez-ann.leaving")).not.toBeNull();
+			expect(sel.toString()).toBe("alpha");
+			// Highlight gone: the next stamp unwraps it synchronously.
+			sel.removeAllRanges();
+			applyMarks(root, marks, false, null);
+			vi.advanceTimersByTime(WASH_FADE_MS);
+			expect(root.querySelector("mark.ccez-ann")).toBeNull();
+		} finally {
+			root.remove();
+			document.getSelection()?.removeAllRanges();
+			vi.useRealTimers();
 		}
 	});
 });

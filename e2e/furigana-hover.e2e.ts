@@ -19,12 +19,15 @@ test("hovering furigana fetches nothing; clicking fetches with dots", async ({
 	const furiganaBtn = page.locator(
 		`${ARTICLE} .actions button[data-tip="Add furigana"]`
 	);
-	const dots = page.locator(`${ARTICLE} .actions .tdots`);
+	// Dots mount only while busy: an idle aid button is exactly its
+	// visible label, so hover and spacing never cover text that isn't
+	// there. (The :not(.off) keeps matching — no button carries .off.)
+	const dots = page.locator(`${ARTICLE} .actions .tdots:not(.off)`);
 	const before = await rowBoxes(page, ARTICLE);
 	const beforeHtml = await body.innerHTML();
 
-	// Hover must not start the dictionary load: no dots, no ruby, the
-	// Japanese untouched, no button nudged.
+	// Hover must not start the dictionary load: no lit dots, no ruby,
+	// the Japanese untouched, no button nudged.
 	await furiganaBtn.hover();
 	await page.waitForTimeout(1500);
 	await expect(dots).toHaveCount(0);

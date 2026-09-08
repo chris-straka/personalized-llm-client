@@ -87,3 +87,30 @@ test("row stays visible while its button holds keyboard focus", async ({ page })
 	});
 	await expect(row).toHaveCSS("opacity", "0");
 });
+
+/** X cuts the hovered message (clipboard first, then delete); bare
+Delete drops it and copies nothing. */
+test("x cuts and Delete deletes the hovered message", async ({ page, context }) => {
+	await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+	await seedChat(page, [
+		{ role: "assistant", content: "cut me" },
+		{ role: "assistant", content: "drop me" }
+	]);
+	await page.goto("/");
+	const first = page.locator("article .rendered").first();
+	await expect(first).toBeVisible();
+	// The prompt autofocuses on load: click empty gutter first so the
+	// keystroke reaches the window handler, not the composer.
+	await page.mouse.click(8, 200);
+	await first.hover();
+	await page.keyboard.press("x");
+	await expect(page.locator(".toast")).toContainText("Cut to clipboard");
+	await expect(page.evaluate(() => navigator.clipboard.readText())).resolves.toBe("cut me");
+	await expect(page.locator("article .rendered")).toHaveCount(1);
+	const remaining = page.locator("article .rendered").first();
+	await expect(remaining).toContainText("drop me");
+	await remaining.hover();
+	await page.keyboard.press("Delete");
+	await expect(page.locator("article .rendered")).toHaveCount(0);
+	await expect(page.evaluate(() => navigator.clipboard.readText())).resolves.toBe("cut me");
+});

@@ -5,6 +5,8 @@ import {
 	sentenceAtOffset,
 	friendlyNativeError,
 	quoteLangFor,
+	quoteLangForContext,
+	sentenceForQuote,
 	speakNative,
 	speakNativeMulti,
 	stopNative
@@ -79,6 +81,45 @@ describe("quoteLangFor", () => {
 		await expect(
 			quoteLangFor("this is a fairly long english sentence for testing", "en-US")
 		).resolves.toBe("en-US");
+	});
+});
+
+describe("quoteLangForContext", () => {
+	const JA = "昨夜は星空がとても綺麗で、つい時間を忘れて眺めてしまいました。熊猫慢悠悠地吃着竹子。";
+	const ZH = "熊猫慢悠悠地吃着竹子，看起来很幸福。昨夜は星空がとても綺麗です。";
+
+	it("reads kanji with the sentence's voice when kana is near", async () => {
+		await expect(quoteLangForContext("眺め", JA, "en-US")).resolves.toBe("ja-JP");
+		expect(mockInvoke).not.toHaveBeenCalled();
+	});
+
+	it("keeps the Chinese default without a bridge", async () => {
+		await expect(quoteLangForContext("竹子", ZH, "en-US")).resolves.toBe("zh-CN");
+	});
+
+	it("asks the bridge for Han-only sentences", async () => {
+		mockInvoke.mockResolvedValueOnce("ja");
+		await expect(quoteLangForContext("竹子", "熊猫慢悠悠地吃着竹子。", "en-US")).resolves.toBe(
+			"ja"
+		);
+		expect(mockInvoke).toHaveBeenCalledWith("tts_identify_lang", {
+			text: "熊猫慢悠悠地吃着竹子。"
+		});
+	});
+
+	it("leaves unambiguous quotes on today's path", async () => {
+		await expect(quoteLangForContext("読む", JA, "en-US")).resolves.toBe("ja-JP");
+		await expect(
+			quoteLangForContext("this is a fairly long english sentence", JA, "en-US")
+		).resolves.toBe("en-US");
+	});
+});
+
+describe("sentenceForQuote", () => {
+	it("finds the holding sentence and misses cleanly", () => {
+		expect(sentenceForQuote("First. 眺めて here. Last.", "眺めて")).toBe("眺めて here.");
+		expect(sentenceForQuote("First. Second.", "missing")).toBeNull();
+		expect(sentenceForQuote("First. Second.", "  ")).toBeNull();
 	});
 });
 
