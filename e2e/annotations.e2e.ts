@@ -9,13 +9,13 @@ test.beforeEach(async ({ page }) => {
 	await expect(page.locator("article .rendered").first()).toBeVisible();
 });
 
-async function clickText(page: Page, count: 1 | 2 | 3): Promise<void> {
+async function clickText(page: Page, count: 1 | 2 | 3 | 4): Promise<void> {
 	const body = page.locator("article .rendered").first();
 	const box = await body.boundingBox();
 	if (!box) throw new Error("message has no box");
 	if (count === 1) await page.mouse.click(box.x + 20, box.y + box.height / 2);
 	else if (count === 2) await page.mouse.dblclick(box.x + 20, box.y + box.height / 2);
-	else await page.mouse.click(box.x + 20, box.y + box.height / 2, { clickCount: 3 });
+	else await page.mouse.click(box.x + 20, box.y + box.height / 2, { clickCount: count });
 }
 
 /** Spaceless scripts have no words to pick: double-click keeps the
@@ -53,6 +53,71 @@ test("clicking blank space deselects instead of reopening the menu", async ({ pa
 	await page.waitForTimeout(2700);
 	await expect(page.locator(".sel-menu")).toHaveCount(0);
 	await page.mouse.click(10, 300);
+	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+	expect(selected).toBe("");
+	await expect(page.locator(".sel-menu")).toHaveCount(0);
+});
+
+/** Right-click reads the highlight aloud but keeps it: the text and
+its highlight stay put (the menu itself may dismiss). */
+test("right-click keeps the highlighted text", async ({ page }) => {
+	const body = page.locator("article .rendered").first();
+	const box = await body.boundingBox();
+	if (!box) throw new Error("message has no box");
+	const y = box.y + box.height / 2;
+	await page.mouse.move(box.x + 10, y);
+	await page.mouse.down();
+	await page.mouse.move(box.x + 150, y, { steps: 5 });
+	await page.mouse.up();
+	await expect(page.locator(".sel-menu")).toBeVisible();
+	await page.mouse.click(box.x + 60, y, { button: "right" });
+	await page.waitForTimeout(400);
+	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+	expect(selected).not.toBe("");
+});
+
+/** Clicking inside a live highlight clears the highlight AND the menu —
+neither strands the other. */
+test("clicking inside the highlight clears it with the menu", async ({ page }) => {
+	const body = page.locator("article .rendered").first();
+	const box = await body.boundingBox();
+	if (!box) throw new Error("message has no box");
+	const y = box.y + box.height / 2;
+	await page.mouse.move(box.x + 10, y);
+	await page.mouse.down();
+	await page.mouse.move(box.x + 150, y, { steps: 5 });
+	await page.mouse.up();
+	await expect(page.locator(".sel-menu")).toBeVisible();
+	await page.mouse.click(box.x + 60, y);
+	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+	expect(selected).toBe("");
+	await expect(page.locator(".sel-menu")).toHaveCount(0);
+});
+
+/** Clicking a stale highlight (menu already faded) clears it without
+re-summoning the menu. */
+test("clicking a stale highlight never brings the menu back", async ({ page }) => {
+	const body = page.locator("article .rendered").first();
+	const box = await body.boundingBox();
+	if (!box) throw new Error("message has no box");
+	const y = box.y + box.height / 2;
+	await page.mouse.move(box.x + 170, y);
+	await page.mouse.down();
+	await page.mouse.move(box.x + 300, y, { steps: 5 });
+	await page.mouse.up();
+	await expect(page.locator(".sel-menu")).toBeVisible();
+	await page.waitForTimeout(2700);
+	await expect(page.locator(".sel-menu")).toHaveCount(0);
+	await page.mouse.click(box.x + 200, y);
+	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+	expect(selected).toBe("");
+	await expect(page.locator(".sel-menu")).toHaveCount(0);
+});
+
+/** Four clicks: the paragraph pick comes off again and the menu goes
+with it instead of stranding. */
+test("fourth click clears the paragraph pick and the menu", async ({ page }) => {
+	await clickText(page, 4);
 	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
 	expect(selected).toBe("");
 	await expect(page.locator(".sel-menu")).toHaveCount(0);
