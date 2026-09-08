@@ -15,6 +15,21 @@ function rootWith(text: string): HTMLDivElement {
 	return root;
 }
 
+/** Base text only: badges and readings are overlay, never content. */
+function baseText(root: Element): string {
+	const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+	const parts: string[] = [];
+	while (walker.nextNode()) {
+		const node = walker.currentNode;
+		const parent = node.parentNode;
+		if (parent instanceof Element && parent.closest("[data-ann-badge], rt, rp")) {
+			continue;
+		}
+		parts.push(node.textContent ?? "");
+	}
+	return parts.join("");
+}
+
 describe("applyMarks badges", () => {
 	it("fades only newly stamped badges", () => {
 		const marks: AnnotationMark[] = [{ id: "a1" as AnnotationId, number: 1, quote: "hello world" }];
@@ -73,14 +88,15 @@ describe("applyMarks wash fade", () => {
 			expect(root.querySelector("mark.ccez-ann")).not.toBeNull();
 
 			applyMarks(root, one, false, null);
-			// Still mounted (fading), text intact underneath.
+			// Still mounted (fading), text intact underneath (badges are
+			// overlay: baseText, not raw textContent, is the assertion).
 			const leaving = root.querySelector("mark.ccez-ann");
 			expect(leaving?.classList.contains("leaving")).toBe(true);
-			expect(root.textContent).toContain("hello world");
+			expect(baseText(root)).toContain("hello world");
 
 			vi.advanceTimersByTime(WASH_FADE_MS);
 			expect(root.querySelector("mark.ccez-ann")).toBeNull();
-			expect(root.textContent).toContain("hello world");
+			expect(baseText(root)).toContain("hello world");
 		} finally {
 			vi.useRealTimers();
 		}
@@ -119,24 +135,6 @@ describe("applyMarks badges over ruby", () => {
 		return root;
 	}
 
-	/** Base text only: badges and readings are overlay, never content. */
-	function baseText(root: Element): string {
-		const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-		const parts: string[] = [];
-		while (walker.nextNode()) {
-			const node = walker.currentNode;
-			const parent = node.parentNode;
-			if (
-				parent instanceof Element &&
-				parent.closest("[data-ann-badge], rt, rp")
-			) {
-				continue;
-			}
-			parts.push(node.textContent ?? "");
-		}
-		return parts.join("");
-	}
-
 	const one: AnnotationMark[] = [{ id: "a1" as AnnotationId, number: 1, quote: "漢字を読む" }];
 
 	it("floats the badge on an anchor instead of inline text", () => {
@@ -145,9 +143,12 @@ describe("applyMarks badges over ruby", () => {
 		const badge = root.querySelector("[data-ann-badge]");
 		expect(badge?.textContent).toBe("1");
 		// The badge never lands inside ruby (which shoved readings
-		// aside); it rides a positioned anchor at the quote's end.
+		// aside); it rides a positioned anchor at the quote's middle.
 		expect(badge?.closest("ruby")).toBeNull();
-		expect(badge?.parentElement?.classList.contains("ccez-ann-anchor")).toBe(true);
+		const anchor = badge?.parentElement;
+		expect(anchor?.classList.contains("ccez-ann-anchor")).toBe(true);
+		// 漢字を読む is five chars: the middle one (を) carries the badge.
+		expect(anchor?.textContent).toBe("を1");
 		// Stamping moved nothing: base text and readings intact.
 		expect(baseText(root)).toBe("漢字を読む");
 		expect(root.querySelector("rt")?.textContent).toBe("かんじ");
@@ -189,7 +190,7 @@ describe("applyMarks badges over ruby", () => {
 		const root = rubyBody();
 		applyMarks(root, one, false, "a1");
 		const badge = root.querySelector("[data-ann-badge]");
-		// Same end-char anchor as the unwashed state (hovering the wash
+		// Same mid-quote anchor as the unwashed state (hovering the wash
 		// on and off never moves the badge); nested in the wash marks.
 		expect(badge?.parentElement?.tagName).toBe("SPAN");
 		expect(badge?.parentElement?.classList.contains("ccez-ann-anchor")).toBe(true);

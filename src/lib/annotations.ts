@@ -341,27 +341,50 @@ export function lockSelectionToMessage(
 }
 
 /**
- * Positioned anchor for a badge at its quote's end: the quote's last
- * character wrapped in an unstyled span (reused when a shared end
- * character already has one, so duplicate quotes keep badge order).
- * Wash marks never double as anchors — the badge corner stays identical
- * whether the wash is on or off. The badge floats above-right of the
- * anchor in CSS — no text ever moves.
+ * Positioned anchor for a badge at its quote's middle: the middle
+ * character wrapped in an unstyled span (reused when it already has
+ * one, so duplicate quotes keep badge order). Middle placement keeps
+ * the badge over what it annotates on long wrapped quotes, where an
+ * end anchor can sit lines away from the start. Wash marks never double
+ * as anchors — the badge corner stays identical whether the wash is on
+ * or off. The badge floats above-right of the anchor in CSS — no text
+ * ever moves.
  */
 function anchorSpan(nodes: Text[], loc: QuoteLocation): HTMLElement | null {
-	const node = nodes[loc.endNode];
-	const end = loc.endOffset;
-	if (!node || end <= 0) return null;
-	const length = node.textContent?.length ?? 0;
-	if (end > length) return null;
-	const parent = node.parentElement;
+	// Flat characters of the quote across (possibly several) text nodes.
+	const chars: Array<{ node: Text; at: number; ch: string }> = [];
+	for (let i = loc.startNode; i <= loc.endNode; i++) {
+		const node = nodes[i];
+		if (!node) continue;
+		const text = node.textContent ?? "";
+		const from = i === loc.startNode ? loc.startOffset : 0;
+		const to = i === loc.endNode ? Math.min(loc.endOffset, text.length) : text.length;
+		for (let at = from; at < to; at++) chars.push({ node, at, ch: text[at] ?? "" });
+	}
+	if (chars.length === 0) return null;
+	// Nearest non-space character to the middle: middle placement keeps
+	// the badge over long wrapped quotes, and skipping whitespace never
+	// anchors the gap between two words.
+	const mid = Math.floor(chars.length / 2);
+	let pick: { node: Text; at: number } | null = null;
+	for (let d = 0; d < chars.length && !pick; d++) {
+		for (const i of [mid + d, mid - d]) {
+			const c = chars[i];
+			if (c && c.ch.trim() !== "") {
+				pick = c;
+				break;
+			}
+		}
+	}
+	if (!pick) return null;
+	const parent = pick.node.parentElement;
 	if (parent instanceof Element && parent.classList.contains("ccez-ann-anchor")) {
 		return parent;
 	}
 	try {
 		const range = document.createRange();
-		range.setStart(node, end - 1);
-		range.setEnd(node, end);
+		range.setStart(pick.node, pick.at);
+		range.setEnd(pick.node, pick.at + 1);
 		const anchor = document.createElement("span");
 		anchor.className = "ccez-ann-anchor";
 		range.surroundContents(anchor);

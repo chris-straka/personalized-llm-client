@@ -640,16 +640,16 @@
 		return { quote, messageId };
 	}
 
-	function onSelectEnd(event: MouseEvent): void {
+	function onSelectEnd(event: MouseEvent, cursorX?: number): void {
 		if (event.altKey) return; // Option-click folds; never a menu.
 		// Selections never span messages: a drag crossing into another
 		// article trims back to the anchor message's edge first.
 		const live = window.getSelection();
 		if (live) lockSelectionToMessage(live, articleOf);
-		placeSelMenu();
+		placeSelMenu(cursorX);
 	}
 
-	function placeSelMenu(): void {
+	function placeSelMenu(cursorX?: number): void {
 		const found = currentQuote();
 		if (!found) {
 			selMenu = null;
@@ -661,7 +661,11 @@
 			return;
 		}
 		const width = 220;
-		const x = Math.min(Math.max(8, rect.left), window.innerWidth - width - 8);
+		// The menu docks near the cursor that finished the gesture, not
+		// the selection's start — a full-sentence pick shouldn't strand
+		// it lines above where the pointer is.
+		const at = cursorX ?? rect.left;
+		const x = Math.min(Math.max(8, at), window.innerWidth - width - 8);
 		let y = rect.top - 47;
 		if (y < 8) y = rect.bottom + 8;
 		selMenu = { x, y, quote: found.quote, messageId: found.messageId };
@@ -1238,7 +1242,8 @@
 	 * the message around it is English.
 	 */
 	async function speakQuote(quote: string, messageId: ChatMsgId): Promise<void> {
-		clearSelection();
+		// The highlight stays: hearing the quote shouldn't clear the
+		// selection it came from. Only the menu goes away.
 		selMenu = null;
 		speakingSelection = messageId;
 		startSpeech("selection", quote, speechLangsFor(await quoteLangFor(quote, latinFallback())));
@@ -2121,7 +2126,7 @@
 			if (!clickGuardsPass(event)) return;
 			const live = window.getSelection();
 			if (live) lockSelectionToMessage(live, articleOf);
-			placeSelMenu();
+			placeSelMenu(event.clientX);
 		};
 		// No triple-click handler: native paragraph selection finalizes
 		// on the third mouseup, where onSelectEnd already locks it to the
@@ -2169,12 +2174,25 @@
 			}
 			const live = window.getSelection();
 			const liveText = live?.toString() ?? "";
+			if (liveText === downSel && (event.detail <= 1 || event.detail >= 4)) {
+				// A plain click changed nothing: blank space, a collapsed
+				// caret, or inside the old highlight (the engine collapses
+				// that only after mouseup dispatches, so the stale text
+				// still reads "selected" here — re-summoning off it is what
+				// stranded the menu on a cleared highlight). Drop any stale
+				// highlight and never re-summon. Multi-click sequences
+				// (detail 2–3) keep the old path: their picks finalize
+				// around these events.
+				if (liveText !== "") live?.removeAllRanges();
+				selMenu = null;
+				return;
+			}
 			if (!target?.closest(".rendered") && liveText !== "" && liveText === downSel) {
 				live?.removeAllRanges();
 				selMenu = null;
 				return;
 			}
-			onSelectEnd(event);
+			onSelectEnd(event, event.clientX);
 		};
 		// Right-click a word in a message to hear it — even with aids off.
 		// Capture phase + preventDefault pre-empts the native context menu.
