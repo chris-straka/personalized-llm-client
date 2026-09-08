@@ -43,6 +43,25 @@ export function replyLangFor(text: string, fallback: string): string {
 	return ttsLangFor(text.replace(/```[\s\S]*?```/g, " "), fallback);
 }
 
+/** One speakable sentence with its own voice locale. */
+export interface SpeechSegment {
+	text: string;
+	lang: string;
+}
+
+/**
+ * Split text into per-sentence voice runs: every sentence resolves its
+ * own locale (non-Latin scripts by Unicode, Latin by the shared
+ * `langForSentence` fallback), so a Japanese+Chinese+English reply reads
+ * each part in the right voice instead of the whole thing in one.
+ */
+export function splitSpeechSegments(
+	text: string,
+	langForSentence: (sentence: string) => string
+): SpeechSegment[] {
+	return splitSentences(text).map((sentence) => ({ text: sentence, lang: langForSentence(sentence) }));
+}
+
 export interface VoiceProgress {
 	sentence: number;
 	sentences: number;
@@ -71,52 +90,78 @@ function synthesis(): SpeechSynthesis | null {
 }
 
 /**
+ * Queue one utterance per segment (voice matched per segment locale).
+ * Single-lang input queues exactly what the old per-sentence loop did.
+ */
+function queueUtterances(
+	synth: SpeechSynthesis,
+	segments: SpeechSegment[],
+	callbacks: SpeakCallbacks
+): void {
+	let cancelled = false;
+	segments.forEach((segment, index) => {
+		const utterance = new SpeechSynthesisUtterance(segment.text);
+		utterance.lang = segment.lang;
+		try {
+			const voice = synth
+				.getVoices()
+				.find((v) => v.lang.toLowerCase().startsWith(segment.lang.slice(0, 2).toLowerCase()));
+			if (voice) utterance.voice = voice;
+		} catch {
+			// Voice matching is best-effort; lang still routes correctly.
+		}
+		utterance.onstart = () => {
+			if (!cancelled) {
+				callbacks.onProgress?.({
+					sentence: index + 1,
+					sentences: segments.length,
+					current: segment.text
+				});
+			}
+		};
+		utterance.onerror = (event) => {
+			if (!cancelled && event.error !== "canceled") {
+				cancelled = true;
+				callbacks.onError?.(String(event.error || "speech error"));
+			}
+		};
+		if (index === segments.length - 1) {
+			utterance.onend = () => {
+				if (!cancelled) {
+					callbacks.onEnd?.();
+					callbacks.onNaturalEnd?.();
+				}
+			};
+		}
+		synth.speak(utterance);
+	});
+}
+
+/**
  * Speak `text` sentence by sentence so skip lands between sentences and
  * progress stays live. Returns false when speech is unavailable.
  */
 export function speakText(text: string, lang: string, callbacks: SpeakCallbacks = {}): boolean {
+	return speakMultilingual(text, () => lang, callbacks);
+}
+
+/**
+ * Speak `text` with a voice locale per sentence (see
+ * splitSpeechSegments). Single-language input behaves exactly like
+ * speakText; mixed input switches voices mid-queue. Same contract and
+ * return: false when speech is unavailable.
+ */
+export function speakMultilingual(
+	text: string,
+	langForSentence: (sentence: string) => string,
+	callbacks: SpeakCallbacks = {}
+): boolean {
 	const synth = synthesis();
-	const sentences = splitSentences(text);
-	if (!synth || sentences.length === 0) return false;
+	const segments = splitSpeechSegments(text, langForSentence);
+	if (!synth || segments.length === 0) return false;
 	try {
 		synth.cancel();
-		let cancelled = false;
-		sentences.forEach((sentence, index) => {
-			const utterance = new SpeechSynthesisUtterance(sentence);
-			utterance.lang = lang;
-			try {
-				const voice = synth
-					.getVoices()
-					.find((v) => v.lang.toLowerCase().startsWith(lang.slice(0, 2).toLowerCase()));
-				if (voice) utterance.voice = voice;
-			} catch {
-				// Voice matching is best-effort; lang still routes correctly.
-			}
-			utterance.onstart = () => {
-				if (!cancelled) {
-					callbacks.onProgress?.({
-						sentence: index + 1,
-						sentences: sentences.length,
-						current: sentence
-					});
-				}
-			};
-			utterance.onerror = (event) => {
-				if (!cancelled && event.error !== "canceled") {
-					cancelled = true;
-					callbacks.onError?.(String(event.error || "speech error"));
-				}
-			};
-			if (index === sentences.length - 1) {
-				utterance.onend = () => {
-					if (!cancelled) {
-						callbacks.onEnd?.();
-						callbacks.onNaturalEnd?.();
-					}
-				};
-			}
-			synth.speak(utterance);
-		});
+		queueUtterances(synth, segments, callbacks);
 		return true;
 	} catch {
 		return false;

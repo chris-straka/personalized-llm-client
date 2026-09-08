@@ -4,12 +4,15 @@ import {
 	splitSentences,
 	speechText,
 	replyLangFor,
+	splitSpeechSegments,
 	speakText,
+	speakMultilingual,
 	stopSpeaking,
 	isSpeaking,
 	micAvailable,
 	dictateOnce
 } from "./voice";
+import { ttsLangFor } from "./reading";
 
 describe("splitSentences", () => {
 	it("splits on Latin and CJK terminators", () => {
@@ -56,9 +59,24 @@ describe("replyLangFor", () => {
 describe("speech unavailability", () => {
 	it("no-ops cleanly without throwing", () => {
 		expect(speakText("hello", "en-US")).toBe(false);
+		expect(speakMultilingual("hello", () => "en-US")).toBe(false);
 		expect(isSpeaking()).toBe(false);
 		expect(() => stopSpeaking()).not.toThrow();
 		expect(micAvailable()).toBe(false);
 		expect(dictateOnce("en-US", () => {}, () => {})).toBeNull();
+	});
+});
+
+describe("splitSpeechSegments", () => {
+	const langFor = (sentence: string): string => ttsLangFor(sentence, "en-US");
+	it("resolves a voice locale per sentence", () => {
+		expect(splitSpeechSegments("Hello world. 你好！こんにちは！", langFor)).toEqual([
+			{ text: "Hello world.", lang: "en-US" },
+			{ text: "你好！", lang: "zh-CN" },
+			{ text: "こんにちは！", lang: "ja-JP" }
+		]);
+	});
+	it("returns no segments for blank text", () => {
+		expect(splitSpeechSegments("   ", langFor)).toEqual([]);
 	});
 });

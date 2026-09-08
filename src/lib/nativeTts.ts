@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { ttsLangFor } from "./reading";
-import { splitSentences, type SpeakCallbacks } from "./voice";
+import { splitSentences, splitSpeechSegments, type SpeakCallbacks } from "./voice";
 
 /**
  * Native macOS voice engine (Stage 6 / A4): thin invoke wrapper over the
@@ -261,6 +261,65 @@ export function speakNative(
 			if (gen === generation) expectedId = rustId;
 		})
 		.catch(fail);
+	return true;
+}
+
+/**
+ * Speak `text` with a voice locale per sentence (see
+ * splitSpeechSegments): each sentence goes out as its own utterance with
+ * its own lang, chained through natural ends. The saved `voiceId` rides
+ * every segment — the bridge auto-picks the locale voice wherever the
+ * saved voice belongs to another language. Stopping mid-chain halts it
+ * (no natural end follows a cancel). Same contract as speakNative.
+ */
+export function speakNativeMulti(
+	text: string,
+	langForSentence: (sentence: string) => string,
+	callbacks: SpeakCallbacks = {},
+	voiceId: string | null = null
+): boolean {
+	const segments = splitSpeechSegments(text, langForSentence);
+	if (segments.length === 0) return false;
+	// Sentence counts up front so progress maps across segments.
+	const counts = segments.map((segment) => splitSentences(segment.text).length);
+	const total = counts.reduce((a, b) => a + b, 0);
+	let index = 0;
+	let offset = 0;
+	let stopped = false;
+	const step = (): void => {
+		const segment = segments[index];
+		if (segment === undefined || stopped) return;
+		const ok = speakNative(
+			segment.text,
+			segment.lang,
+			{
+				onProgress: (progress) =>
+					callbacks.onProgress?.({
+						sentence: offset + progress.sentence,
+						sentences: total,
+						current: progress.current
+					}),
+				onNaturalEnd: () => {
+					offset += counts[index] ?? 0;
+					index += 1;
+					if (index >= segments.length) {
+						callbacks.onEnd?.();
+						callbacks.onNaturalEnd?.();
+					} else step();
+				},
+				onError: (message) => {
+					stopped = true;
+					callbacks.onError?.(message);
+				}
+			},
+			voiceId
+		);
+		if (!ok) {
+			stopped = true;
+			callbacks.onError?.("Voice not available.");
+		}
+	};
+	step();
 	return true;
 }
 

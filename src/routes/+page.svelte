@@ -104,6 +104,7 @@
 	import { isFuriganaCached } from "$lib/furigana";
 	import {
 		speakText,
+		speakMultilingual,
 		speechText,
 		stopSpeaking,
 		micAvailable,
@@ -112,6 +113,7 @@
 	} from "$lib/voice";
 	import {
 		speakNative,
+		speakNativeMulti,
 		speakNativeWord,
 		stopNative,
 		friendlyNativeError,
@@ -1125,12 +1127,18 @@
 		setPasteFold(chatState, msg.id, index, !(msg.pasteFolds?.[index]?.open ?? false));
 	}
 
-	function startSpeech(id: string, text: string, lang: string): void {
+	function startSpeech(id: string, text: string, lang: string | ((sentence: string) => string)): void {
 		stopSpeaking();
 		stopNative();
 		voiceError = null;
 		speakingId = id;
 		const useNative = settings.voiceEngine === "native";
+		const speakWeb = (cb: SpeakCallbacks): boolean =>
+			typeof lang === "function" ? speakMultilingual(text, lang, cb) : speakText(text, lang, cb);
+		const speakNat = (cb: SpeakCallbacks): boolean =>
+			typeof lang === "function"
+				? speakNativeMulti(text, lang, cb, settings.nativeVoiceId)
+				: speakNative(text, lang, cb, settings.nativeVoiceId);
 		let fellBack = false;
 		const callbacks: SpeakCallbacks = {
 			onEnd: resetVoice,
@@ -1140,7 +1148,7 @@
 					// with web voices rather than leaving silence.
 					fellBack = true;
 					voiceError = `${friendlyNativeError(message)} Falling back to web voices.`;
-					const ok = speakText(text, lang, {
+					const ok = speakWeb({
 						onEnd: resetVoice,
 						onError: (webMessage) => {
 							voiceError = webMessage;
@@ -1154,9 +1162,7 @@
 				resetVoice();
 			}
 		};
-		const ok = useNative
-			? speakNative(text, lang, callbacks, settings.nativeVoiceId)
-			: speakText(text, lang, callbacks);
+		const ok = useNative ? speakNat(callbacks) : speakWeb(callbacks);
 		if (!ok) {
 			resetVoice();
 			voiceError = "Voice not available.";
@@ -1164,24 +1170,28 @@
 	}
 
 	/**
-	 * Voice locale for a whole message: script detection first (reliable
-	 * for non-Latin scripts, needs no bridge), then Apple's language
-	 * recognizer for Latin scripts (French vs English), else the
-	 * voice-language fallback. The reply pill's voice never leaks here:
-	 * an English message with the Chinese pill on reads English.
+	 * Voice locale per sentence: non-Latin scripts resolve sync from the
+	 * sentence itself (reliable, needs no bridge); Latin sentences share
+	 * one recognizer pass (`latinLang`), since French vs English look
+	 * alike. The reply pill's voice never leaks here: an English message
+	 * with the Chinese pill on reads English.
 	 */
-	async function messageSpeechLang(text: string): Promise<string> {
-		const stripped = text.replace(/```[\s\S]*?```/g, " ");
-		const scriptLang = ttsLangFor(stripped, "");
-		if (scriptLang) return scriptLang;
-		return quoteLangFor(stripped, latinFallback());
+	function speechLangsFor(latinLang: string): (sentence: string) => string {
+		const cache = new SvelteMap<string, string>();
+		return (sentence: string) => {
+			const hit = cache.get(sentence);
+			if (hit !== undefined) return hit;
+			const lang = ttsLangFor(sentence, "") || latinLang;
+			cache.set(sentence, lang);
+			return lang;
+		};
 	}
 
 	async function speakReply(msg: ChatMsg): Promise<void> {
 		const text = speechText(msg.content);
 		if (!text) return;
-		const lang = await messageSpeechLang(text);
-		startSpeech(msg.id, text, lang);
+		const stripped = text.replace(/```[\s\S]*?```/g, " ");
+		startSpeech(msg.id, text, speechLangsFor(await quoteLangFor(stripped, latinFallback())));
 	}
 
 	/** Speak-button label. */
@@ -1231,7 +1241,7 @@
 		clearSelection();
 		selMenu = null;
 		speakingSelection = messageId;
-		startSpeech("selection", quote, await quoteLangFor(quote, latinFallback()));
+		startSpeech("selection", quote, speechLangsFor(await quoteLangFor(quote, latinFallback())));
 	}
 
 	/** Pill-mic dictation into the annotation comment box. */

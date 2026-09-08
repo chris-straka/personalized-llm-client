@@ -6,8 +6,10 @@ import {
 	friendlyNativeError,
 	quoteLangFor,
 	speakNative,
+	speakNativeMulti,
 	stopNative
 } from "./nativeTts";
+import { ttsLangFor } from "./reading";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
@@ -105,6 +107,71 @@ describe("speakNative", () => {
 		expect(ok).toBe(true);
 		await new Promise((resolve) => setTimeout(resolve, 50));
 		expect(errors.length).toBe(1);
+	});
+});
+
+describe("speakNativeMulti", () => {
+	const langFor = (sentence: string): string => ttsLangFor(sentence, "en-US");
+	afterEach(() => {
+		stopNative();
+	});
+
+	it("returns false without touching the bridge for empty text", () => {
+		expect(
+			speakNativeMulti("   ", langFor, {
+				onError: () => {
+					throw new Error("onError must not fire when there is nothing to say");
+				}
+			})
+		).toBe(false);
+		expect(mockInvoke).not.toHaveBeenCalled();
+	});
+
+	it("stops the chain after a segment fails", async () => {
+		const errors: string[] = [];
+		const ended: string[] = [];
+		const ok = speakNativeMulti("Hello world. 你好世界。", langFor, {
+			onError: (message) => errors.push(message),
+			onEnd: () => ended.push("end")
+		});
+		expect(ok).toBe(true);
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(errors.length).toBe(1);
+		expect(ended).toEqual([]);
+		// The bridge rejects everything: only the first segment speaks.
+		expect(mockInvoke).toHaveBeenCalledTimes(1);
+		expect(mockInvoke.mock.calls[0]?.[1]).toMatchObject({ lang: "en-US" });
+	});
+
+	it("chains one utterance per segment with its own lang", async () => {
+		mockInvoke.mockResolvedValue(7);
+		const ended: string[] = [];
+		const natural: string[] = [];
+		const ok = speakNativeMulti("Hello world. 你好世界。", langFor, {
+			onEnd: () => ended.push("end"),
+			onNaturalEnd: () => natural.push("natural")
+		});
+		expect(ok).toBe(true);
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(mockInvoke).toHaveBeenCalledTimes(1);
+		// First segment ends naturally: the second goes out in Chinese.
+		const doneCalls = mockListen.mock.calls.filter((call) => call[0] === "tts-done");
+		expect(doneCalls.length).toBe(1);
+		const done = doneCalls[0]?.[1] as (event: { payload: { id: number; finished: boolean } }) => void;
+		done({ payload: { id: 7, finished: true } });
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(mockInvoke).toHaveBeenCalledTimes(2);
+		expect(mockInvoke.mock.calls[1]?.[1]).toMatchObject({ lang: "zh-CN" });
+		// Second segment ends: the chain settles exactly once.
+		const doneCalls2 = mockListen.mock.calls.filter((call) => call[0] === "tts-done");
+		const done2 = doneCalls2[doneCalls2.length - 1]?.[1] as (
+			event: { payload: { id: number; finished: boolean } }
+		) => void;
+		done2({ payload: { id: 7, finished: true } });
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(mockInvoke).toHaveBeenCalledTimes(2);
+		expect(ended).toEqual(["end"]);
+		expect(natural).toEqual(["natural"]);
 	});
 });
 

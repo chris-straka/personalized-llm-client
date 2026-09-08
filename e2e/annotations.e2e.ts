@@ -206,6 +206,8 @@ test("E key edits the hovered own message", async ({ page }) => {
 	await page.reload();
 	const article = page.locator("article.user");
 	await expect(article).toBeVisible();
+	// Click first: focus starts in the prompt, which owns keystrokes.
+	await article.locator(".rendered").click();
 	await article.hover();
 	await page.keyboard.press("e");
 	await expect(page.locator(".cm-content")).toContainText("helo world");
