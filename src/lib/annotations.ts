@@ -133,6 +133,11 @@ export interface AnnotationMark {
 	id: AnnotationId;
 	number: number;
 	quote: string;
+	/**
+	 * Preview (unsaved) annotation: washes like a real mark when it is
+	 * the open one, but stamps no badge — badges appear on submit only.
+	 */
+	preview?: boolean;
 }
 
 /**
@@ -160,7 +165,11 @@ export function quoteTextNodes(root: Node): Text[] {
 		const node = walker.currentNode;
 		if (!(node instanceof Text)) continue;
 		const parent = node.parentNode;
-		if (parent instanceof Element && parent.closest("[data-ann-badge]")) continue;
+		// Badge buttons are UI chrome, and ruby readings are overlay:
+		// neither is message text. A reading left in the haystack
+		// mis-anchors badges (or wraps the reading itself and corrupts
+		// the ruby), so both stay out.
+		if (parent instanceof Element && parent.closest("[data-ann-badge], rt, rp")) continue;
 		nodes.push(node);
 	}
 	return nodes;
@@ -176,8 +185,10 @@ export function annotationCountLabel(count: number): string {
 
 /**
  * Numbered badge on the first occurrence of each quoted span, plus the
- * yellow wash on the one annotation whose comment box is open. Old
- * marks unwrap first so re-renders never accumulate. Quotes that no
+ * yellow wash on the one annotation whose comment box is open. Badges
+ * float above-right of their quote on a positioned anchor (never inline,
+ * so stamping moves no text and overlays ruby instead of shoving it).
+ * Old marks unwrap first so re-renders never accumulate. Quotes that no
  * longer match (edited messages, cross-message selections) stay
  * listed in the review panel without a badge — never an error.
  */
@@ -208,6 +219,16 @@ export function applyMarks(
 	for (const mark of root.querySelectorAll("mark.ccez-ann")) {
 		mark.replaceWith(document.createTextNode(mark.textContent ?? ""));
 	}
+	// Badge anchors are unstyled inline spans: unwrap them with the
+	// marks so re-renders never nest or accumulate them. (Wash marks
+	// doubling as anchors are marks, unwrapped above.)
+	for (const anchor of root.querySelectorAll("span.ccez-ann-anchor")) {
+		anchor.replaceWith(document.createTextNode(anchor.textContent ?? ""));
+	}
+	// Wrapping splits text nodes and unwrapping never merges them back:
+	// without this, every re-stamp fragments the text further and later
+	// washes span (and count) fragments instead of quotes.
+	root.normalize();
 	(root as HTMLElement).dataset.washStamped = wash ?? "";
 	if (skip || items.length === 0) return;
 	// A newly arrived wash fades in; a steady one re-mounts silently.
@@ -220,8 +241,21 @@ export function applyMarks(
 		const texts = nodes.map((n) => n.textContent ?? "");
 		const loc = locateQuote(texts, item.quote);
 		if (!loc) continue;
-		const anchor =
-			item.id === wash ? wrapRange(nodes, loc, freshWash ? "fresh" : undefined) : endNodeOf(nodes, loc);
+		// Preview (unsaved) annotations wash when open but stamp no
+		// badge: badges appear on submit only.
+		const washed = item.id === wash;
+		if (washed) wrapRange(nodes, loc, freshWash ? "fresh" : undefined);
+		if (item.preview) continue;
+		// Fresh snapshot: the wash wrap above split text nodes, so the
+		// badge anchors on the current DOM (same quote, same corner —
+		// hovering the wash on and off can never move it).
+		const freshNodes = quoteTextNodes(root);
+		const freshLoc = locateQuote(
+			freshNodes.map((node) => node.textContent ?? ""),
+			item.quote
+		);
+		if (!freshLoc) continue;
+		const anchor = anchorSpan(freshNodes, freshLoc);
 		if (!anchor) continue;
 		const badge = document.createElement("button");
 		badge.type = "button";
@@ -230,7 +264,7 @@ export function applyMarks(
 		badge.dataset.annBadge = item.id;
 		badge.textContent = String(item.number);
 		badge.title = "Open annotation";
-		anchor.after(badge);
+		anchor.append(badge);
 	}
 	if (fading) {
 		// Re-wrap the cleared wash so CSS can ramp it to transparent;
@@ -260,9 +294,81 @@ export function applyMarks(
 	}
 }
 
-/** End node of a located quote (badge anchor when no wash is wanted). */
-function endNodeOf(nodes: Text[], loc: QuoteLocation): Text | null {
-	return nodes[loc.endNode] ?? null;
+/**
+ * Lock a live selection to the message holding its anchor: dragging
+ * into another message pulls the focus end back to the anchor message's
+ * edge instead of selecting across messages. Returns true when trimmed.
+ * Never throws (selection APIs disagree across engines).
+ */
+export function lockSelectionToMessage(
+	selection: Selection,
+	messageOf: (node: Node | null) => Element | null
+): boolean {
+	try {
+		if (selection.isCollapsed || selection.rangeCount === 0) return false;
+		const anchorNode = selection.anchorNode;
+		if (!anchorNode) return false;
+		const anchorEl = messageOf(anchorNode);
+		if (!anchorEl) return false;
+		const focusEl = messageOf(selection.focusNode);
+		if (!focusEl || focusEl === anchorEl) return false;
+		const anchorOffset = selection.anchorOffset;
+		const walker = document.createTreeWalker(anchorEl, NodeFilter.SHOW_TEXT);
+		const texts: Text[] = [];
+		while (walker.nextNode()) {
+			const node = walker.currentNode;
+			if (node instanceof Text && node.textContent) texts.push(node);
+		}
+		if (texts.length === 0) return false;
+		const order = anchorEl.compareDocumentPosition(focusEl);
+		if (order & Node.DOCUMENT_POSITION_FOLLOWING) {
+			// Focus ran into a later message: pin it to the anchor
+			// message's last text.
+			const last = texts[texts.length - 1];
+			if (!last) return false;
+			selection.setBaseAndExtent(anchorNode, anchorOffset, last, last.length);
+		} else {
+			// Focus ran up into an earlier message: pin it to the
+			// anchor message's first text.
+			const first = texts[0];
+			if (!first) return false;
+			selection.setBaseAndExtent(anchorNode, anchorOffset, first, 0);
+		}
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Positioned anchor for a badge at its quote's end: the quote's last
+ * character wrapped in an unstyled span (reused when a shared end
+ * character already has one, so duplicate quotes keep badge order).
+ * Wash marks never double as anchors — the badge corner stays identical
+ * whether the wash is on or off. The badge floats above-right of the
+ * anchor in CSS — no text ever moves.
+ */
+function anchorSpan(nodes: Text[], loc: QuoteLocation): HTMLElement | null {
+	const node = nodes[loc.endNode];
+	const end = loc.endOffset;
+	if (!node || end <= 0) return null;
+	const length = node.textContent?.length ?? 0;
+	if (end > length) return null;
+	const parent = node.parentElement;
+	if (parent instanceof Element && parent.classList.contains("ccez-ann-anchor")) {
+		return parent;
+	}
+	try {
+		const range = document.createRange();
+		range.setStart(node, end - 1);
+		range.setEnd(node, end);
+		const anchor = document.createElement("span");
+		anchor.className = "ccez-ann-anchor";
+		range.surroundContents(anchor);
+		return anchor;
+	} catch {
+		return null;
+	}
 }
 
 /**
@@ -313,4 +419,70 @@ export function withAnnotations(prompt: string, list: Annotation[]): string {
 	if (list.length === 0) return prompt;
 	const block = `Annotated selections:\n${formatAnnotations(list)}`;
 	return prompt ? `${prompt}\n\n${block}` : block;
+}
+
+/** One baked annotation reference, as displayed under its message. */
+export interface AnnotationRef {
+	n: number;
+	quote: string;
+	comment: string;
+}
+
+/**
+ * Split a sent message into display text plus its baked annotation
+ * block (see withAnnotations). The chat renders the text with a count
+ * pill instead of the full block; hovering the pill reveals these refs.
+ * Returns null when no clean trailing block is present — the message
+ * then renders untouched (including user-typed lookalikes).
+ */
+export function splitAnnotationBlock(
+	content: string
+): { text: string; refs: AnnotationRef[] } | null {
+	const marker = "\n\nAnnotated selections:\n";
+	const head = "Annotated selections:\n";
+	const at = content.lastIndexOf(marker);
+	let text: string;
+	let body: string;
+	if (at !== -1) {
+		text = content.slice(0, at);
+		body = content.slice(at + marker.length);
+	} else if (content.startsWith(head)) {
+		// Annotations-only message: no prompt text ahead of the block.
+		text = "";
+		body = content.slice(head.length);
+	} else return null;
+	const refs: AnnotationRef[] = [];
+	const entry = /(\d+)\.\s+"([\s\S]*?)"(?:\s+—\s+([^\n]*))?(?=\n\d+\.\s+"|$)/g;
+	let m: RegExpExecArray | null;
+	let covered = 0;
+	while ((m = entry.exec(body)) !== null) {
+		covered = m.index + m[0].length;
+		refs.push({
+			n: Number(m[1] ?? 0),
+			quote: m[2] ?? "",
+			comment: (m[3] ?? "").trim()
+		});
+	}
+	if (refs.length === 0) return null;
+	// Trailing garbage means this isn't our block (or a comment broke
+	// the shape): fall back to full text rather than half a list.
+	if (body.slice(covered).trim() !== "") return null;
+	return { text, refs };
+}
+
+/**
+ * Baked annotation refs by exact message content, memoized: sent
+ * messages render redacted (count pill instead of the full block), so
+ * this runs per render and must never re-parse. Display-only — results
+ * are never fed back into reactive effects.
+ */
+const refsCache = new Map<string, { text: string; refs: AnnotationRef[] } | null>();
+export function annRefsFor(content: string): { text: string; refs: AnnotationRef[] } | null {
+	if (!content.includes("Annotated selections:")) return null;
+	const hit = refsCache.get(content);
+	if (hit !== undefined) return hit;
+	const split = splitAnnotationBlock(content);
+	if (refsCache.size > 200) refsCache.clear();
+	refsCache.set(content, split);
+	return split;
 }

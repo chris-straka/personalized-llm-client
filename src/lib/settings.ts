@@ -68,7 +68,8 @@ export interface AppSettings {
 	voiceLang: string;
 	/** Reply-language code from the empty-state menus; null = default. */
 	replyLang: string | null;
-	/** Vim motions in the prompt box. On unless toggled. */
+	/** Retired: vim motions left the prompt box. Kept so old profiles
+	load unchanged; nothing reads it. */
 	vim: boolean;
 	/** Left chat-list sidebar collapsed. */
 	sidebarCollapsed: boolean;

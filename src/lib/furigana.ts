@@ -96,12 +96,14 @@ function convertInWorker(text: string): Promise<string> {
  * pinyin path — the reserved ruby room keys off `p`.
  */
 /**
- * True when the furigana HTML for this exact text is already computed.
- * Hover previews consult this so hovering never starts the dictionary
- * fetch — fetching happens on click alone.
+ * True when the furigana for every non-blank line of this text is already
+ * computed. Hover previews consult this so hovering never starts the
+ * dictionary fetch — fetching happens on click alone.
  */
 export function isFuriganaCached(text: string): boolean {
-	return cache.has(text);
+	return text
+		.split("\n")
+		.every((line) => !line.trim() || cache.has(line));
 }
 
 /**
@@ -109,11 +111,22 @@ export function isFuriganaCached(text: string): boolean {
  * convert. Unit coverage lives in furiganaRuby.test.ts (pure builder)
  * and the browser e2e spec (real engine end to end).
  */
-export async function furiganaHtml(text: string): Promise<string> {
-	const cached = cache.get(text);
+async function fragment(line: string): Promise<string> {
+	const cached = cache.get(line);
 	if (cached !== undefined) return cached;
-	const raw = await convertInWorker(text);
-	const html = sanitize(plainParagraphs(raw));
-	cache.set(text, html);
-	return html;
+	const raw = await convertInWorker(line);
+	cache.set(line, raw);
+	return raw;
+}
+
+export async function furiganaHtml(text: string): Promise<string> {
+	// Line by line: tokenization must never see (or eat) a newline, so
+	// multi-line messages keep their line structure no matter what the
+	// tokenizer does with whitespace. Blank lines convert to nothing;
+	// plainParagraphs turns them into paragraph breaks like markdown.
+	const lines = text.split("\n");
+	const converted = await Promise.all(
+		lines.map((line) => (line.trim() ? fragment(line) : Promise.resolve("")))
+	);
+	return sanitize(plainParagraphs(converted.join("\n")));
 }

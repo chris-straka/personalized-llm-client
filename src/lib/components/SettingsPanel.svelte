@@ -20,15 +20,13 @@
 	interface Props {
 		settings: AppSettings;
 		onClose: () => void;
-		/** Rebuilds the prompt editor (vim is a build-time extension set). */
-		onVimChange: (on: boolean) => void;
 		/** Opens the shortcuts modal (owned by the page). */
 		onShortcuts: () => void;
 		/** Flips voice readback (stops in-flight speech when turning off). */
 		onVoiceChange: (on: boolean) => void;
 	}
 
-	let { settings, onClose, onVimChange, onShortcuts, onVoiceChange }: Props = $props();
+	let { settings, onClose, onShortcuts, onVoiceChange }: Props = $props();
 	let updateStatus = $state("");
 	let checkingUpdate = $state(false);
 	let modelLoading = $state(false);
@@ -466,15 +464,6 @@
 	<label class="check">
 		<input
 			type="checkbox"
-			checked={settings.vim}
-			onchange={(e) => onVimChange(e.currentTarget.checked)}
-		/>
-		Vim motions in the prompt box
-		<span class="key-hint" aria-hidden="true">Ctrl+⌥+V</span>
-	</label>
-	<label class="check">
-		<input
-			type="checkbox"
 			checked={settings.voice}
 			onchange={(e) => onVoiceChange(e.currentTarget.checked)}
 		/>
@@ -740,9 +729,6 @@
 	}
 	details.note {
 		margin-top: 0.55rem;
-	}
-	details.note p {
-		margin: 0.35rem 0 0;
 	}
 	/* Element-qualified: the `.note` margin shorthand below ties at
 	   class specificity but comes later, so a bare class loses and the

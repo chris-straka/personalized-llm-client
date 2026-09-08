@@ -73,6 +73,13 @@ privileged (Keychain, updater, native TTS).
   bundles are unaffected (IconServices picks the right rep).
 - Tests live next to code (`foo.test.ts`); pure logic must be importable without
   Tauri or DOM (extract `sentenceAtOffset`-style pure helpers to test them).
+- Two runners, no more: colocated Vitest (`bun run test`) and Playwright
+  (`bun run test:e2e`, specs in `e2e/*.e2e.ts`, seeded via `e2e/helpers.ts`,
+  invisible to Vitest by extension). No Testing Library, no other frameworks.
+- Vitest environment is node by default; files needing DOM opt in with a
+  `// @vitest-environment jsdom` first line. What jsdom can't see (layout,
+  layers), assert on source instead (see `actions-reveal.test.ts`, which
+  reads `+page.svelte`'s `<style>`).
 - Agent-captured verification screenshots go in `.screenshots/` (gitignored),
   never the repo root.
 - UI copy: plain prose, no emojis. Enter sends, Shift+Enter newline.

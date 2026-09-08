@@ -21,10 +21,28 @@ export function pinyinRuby(text: string): string {
 		.join("");
 }
 
-/** Plain-text paragraphs (for aids mode, where markdown is set aside). */
+/**
+ * Plain-text paragraphs (for aids mode, where markdown is set aside).
+ * Mirrors the markdown renderer (`breaks: true`): blank lines separate
+ * paragraphs, single newlines are soft breaks (`<br>`) inside one
+ * paragraph. Per-line `<p>`s would add a paragraph margin per line and
+ * grow the message when an aid pins — the exact shift this avoids.
+ * Callers pass converter output whose only `\n` are line separators
+ * (converter tags never span lines), so splitting here is safe.
+ */
 export function plainParagraphs(htmlInner: string): string {
-	return htmlInner
-		.split("\n")
-		.map((line) => (line.trim() ? `<p>${line}</p>` : ""))
-		.join("");
+	const blocks: string[][] = [];
+	let current: string[] = [];
+	for (const line of htmlInner.split("\n")) {
+		if (!line.trim()) {
+			if (current.length) {
+				blocks.push(current);
+				current = [];
+			}
+		} else {
+			current.push(line);
+		}
+	}
+	if (current.length) blocks.push(current);
+	return blocks.map((lines) => `<p>${lines.join("<br>")}</p>`).join("");
 }

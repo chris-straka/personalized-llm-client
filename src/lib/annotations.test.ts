@@ -7,6 +7,7 @@ import {
 	annotationNumber,
 	formatAnnotations,
 	withAnnotations,
+	splitAnnotationBlock,
 	locateQuote
 } from "./annotations";
 import { buildTranslateMessages, translateSelection } from "./translate";
@@ -55,6 +56,38 @@ describe("annotations", () => {
 		);
 		expect(withAnnotations("", list)).toBe('Annotated selections:\n1. "langue" — meaning?');
 		expect(withAnnotations("explain", [])).toBe("explain");
+	});
+
+	it("round-trips baked blocks back into text plus refs", () => {
+		const list = addAnnotation([], "m1" as ChatMsgId, "langue", "meaning?");
+		const withTwo: typeof list = [
+			...list,
+			{
+				id: "a2" as AnnotationId,
+				messageId: "m1" as ChatMsgId,
+				quote: "alphabet",
+				comment: ""
+			}
+		];
+		const split = splitAnnotationBlock(withAnnotations("explain", withTwo));
+		expect(split?.text).toBe("explain");
+		expect(split?.refs).toEqual([
+			{ n: 1, quote: "langue", comment: "meaning?" },
+			{ n: 2, quote: "alphabet", comment: "" }
+		]);
+	});
+
+	it("leaves normal messages and lookalikes untouched", () => {
+		expect(splitAnnotationBlock("just a prompt")).toBeNull();
+		expect(splitAnnotationBlock("explain\n\nAnnotated selections:\n")).toBeNull();
+		expect(splitAnnotationBlock("I typed\n\nAnnotated selections:\nnot a list")).toBeNull();
+	});
+
+	it("parses an annotations-only message to empty text plus refs", () => {
+		const list = addAnnotation([], "m1" as ChatMsgId, "風に舞う", "What does this mean?");
+		const split = splitAnnotationBlock(withAnnotations("", list));
+		expect(split?.text).toBe("");
+		expect(split?.refs).toEqual([{ n: 1, quote: "風に舞う", comment: "What does this mean?" }]);
 	});
 });
 

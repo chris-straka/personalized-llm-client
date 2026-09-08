@@ -11,7 +11,9 @@ test.beforeEach(async ({ page }) => {
 
 /** Select a word and save it as an annotation; resolves with the badge. */
 async function addAnnotation(page: Page) {
-	await page.locator("article.assistant .rendered").dblclick();
+	// Click on the text itself: the container's center is empty space
+	// for short left-aligned messages and selects nothing.
+	await page.locator("article.assistant .rendered p").dblclick({ position: { x: 10, y: 10 } });
 	await expect(page.locator(".sel-menu")).toBeVisible();
 	await page.locator('.sel-menu button:has-text("Annotate")').click();
 	await page.keyboard.press("Enter");

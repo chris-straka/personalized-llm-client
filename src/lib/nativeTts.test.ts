@@ -6,10 +6,7 @@ import {
 	friendlyNativeError,
 	quoteLangFor,
 	speakNative,
-	stopNative,
-	audioFileNameFor,
-	renderNativeSpeech,
-	saveNativeAudio
+	stopNative
 } from "./nativeTts";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -144,46 +141,5 @@ describe("speakNative watchdog", () => {
 		stopNative();
 		await vi.advanceTimersByTimeAsync(60_000);
 		expect(errors).toEqual([]);
-	});
-});
-
-describe("audioFileNameFor", () => {
-	it("slugs the first words with a ccez prefix and wav suffix", () => {
-		expect(audioFileNameFor("Bonjour tout le monde, comment ça va?")).toBe(
-			"ccez-bonjour-tout-le-monde-comment-ça.wav"
-		);
-	});
-
-	it("keeps non-Latin scripts instead of falling back", () => {
-		expect(audioFileNameFor("你好世界这是一个测试消息啊")).toBe("ccez-你好世界这是一个测试消息啊.wav");
-	});
-
-	it("falls back for empty or punctuation-only text", () => {
-		expect(audioFileNameFor("   ")).toBe("ccez-message.wav");
-		expect(audioFileNameFor("…?!")).toBe("ccez-message.wav");
-	});
-
-	it("caps length and strips trailing dashes", () => {
-		const name = audioFileNameFor(
-			"supercalifragilisticexpialidocious antidisestablishmentarianism pneumonoultramicroscopicsilicovolcanoconiosis"
-		);
-		expect(name.endsWith(".wav")).toBe(true);
-		expect(name.length).toBeLessThanOrEqual("ccez-".length + 48 + ".wav".length);
-		expect(name).not.toMatch(/-\.wav$/);
-	});
-});
-
-describe("renderNativeSpeech", () => {
-	it("returns null without a bridge instead of throwing", async () => {
-		await expect(renderNativeSpeech("Hello", "en-US")).resolves.toBeNull();
-		await expect(renderNativeSpeech("   ", "en-US")).resolves.toBeNull();
-	});
-});
-
-describe("saveNativeAudio", () => {
-	it("returns null without a bridge instead of throwing", async () => {
-		await expect(saveNativeAudio("ccez-hello.wav", "UklGRg==")).resolves.toBeNull();
-		await expect(saveNativeAudio("  ", "UklGRg==")).resolves.toBeNull();
-		await expect(saveNativeAudio("ccez-hello.wav", "")).resolves.toBeNull();
 	});
 });

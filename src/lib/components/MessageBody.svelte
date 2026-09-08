@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { tick } from "svelte";
+	import { tick, untrack } from "svelte";
+	import { createAidLoadingReporter, furiganaRequestKey } from "$lib/aidLoading";
 	import { detectScript, localAidFor, type LocalAid } from "$lib/reading";
 	import { pinyinRuby, plainParagraphs } from "$lib/pinyin";
 	import { furiganaHtml } from "$lib/furigana";
@@ -13,7 +14,7 @@
 		type RenderedMessage
 	} from "$lib/render";
 	import type { ChatMsg, ChatMsgId } from "$lib/chat";
-	import { applyMarks, type AnnotationMark, type AnnotationId } from "$lib/annotations";
+	import { applyMarks, annRefsFor, type AnnotationMark, type AnnotationId } from "$lib/annotations";
 
 	interface Props {
 		message: ChatMsg;
@@ -23,6 +24,12 @@
 		sourcesWanted: boolean;
 		/** Whole-message fold state (owned by the parent). */
 		folded: boolean;
+		/**
+		 * Folded-preview text override: refs-only messages preview their
+		 * quotes (the stored content is just the baked block). Null keeps
+		 * the content's first line.
+		 */
+		foldPreview?: string | null;
 		/** Annotation badges to stamp onto this message's quoted spans. */
 		marks?: AnnotationMark[];
 		/**
@@ -54,6 +61,12 @@
 		/** Model-aid text replacing the message body when present. */
 		textOverride?: string | null;
 		/**
+		 * Pre-redacted body (sent-message annotation blocks collapsed to
+		 * a count pill by the parent): renders instead of the stored
+		 * content, paste folds included. Never affects aid mode.
+		 */
+		contentOverride?: string | null;
+		/**
 		 * True when textOverride is a hover preview rather than a pin:
 		 * render it in place with no remount, so peeking can't flash the
 		 * body or shift the row out from under a stationary cursor (which
@@ -67,12 +80,14 @@
 		streaming,
 		sourcesWanted,
 		folded,
+		foldPreview = null,
 		marks = [],
 		washId = null,
 		onBadgeClick,
 		onFoldToggle,
 		onBadgeHover,
 		textOverride = null,
+		contentOverride = null,
 		aidPreview = false,
 		aidOverride = undefined,
 		onAidLoadingChange,
@@ -85,6 +100,22 @@
 	let highlightRun = 0;
 	let aidRun = 0;
 	/**
+	 * Key of the furigana conversion whose ruby is shown (or loading).
+	 * Spurious re-runs (new marks array, new callback identity from the
+	 * parent) carry the same key: they re-stamp, never reconvert, so
+	 * completion's busy-false can't restart the work it just finished.
+	 */
+	let furiganaKey: string | null = null;
+	/**
+	 * Parent busy reports, deduplicated: completion must not bounce the
+	 * parent when nothing changed, or its re-render restarts this effect.
+	 * Callbacks go through untrack so their per-render identities never
+	 * subscribe the effect either.
+	 */
+	const reportAidLoading = createAidLoadingReporter((loading: boolean) => {
+		untrack(() => onAidLoadingChange)?.(loading);
+	});
+	/**
 	 * Aid mode drives the swap animation key: it changes only when the aid
 	 * turns on/off (never per token while streaming), so each transition
 	 * fades exactly once.
@@ -96,13 +127,26 @@
 				? (aidOverride ?? "none")
 				: "none"
 	);
+	/** Displayed text: contentOverride redacts baked annotation blocks,
+	which are metadata, never prose. Paste-fold offsets still apply —
+	redaction only ever trims the trailing block, so prefix offsets hold. */
+	const displayBase = $derived(contentOverride ?? message.content);
+	/** Aid-visible text: the baked block stripped even when unfolded for
+	reading (an unfolded refs-only message shows its block, but aids
+	still ignore metadata — matching the row's buttons, which key off
+	the same redacted text). */
+	const aidBase = $derived(annRefsFor(displayBase)?.text ?? displayBase);
 	/** Scripts with a local aid always reserve ruby's vertical room, so
-	hovering or pinning it never shoves the message down. */
-	const aidSpace = $derived(localAidFor(detectScript(message.content)) !== null);
+	hovering or pinning it never shoves the message down. Keyed off the
+	aid-visible text, so hidden refs can't reserve room (or grow history). */
+	const aidSpace = $derived(localAidFor(detectScript(aidBase)) !== null);
 
 	$effect(() => {
 		// Paste folds splice before render (reading aids keep full text).
-		const content = textOverride ?? applyPasteFolds(message.content, message.pasteFolds);
+		// A redacted body renders with folds like the stored one: fold
+		// ranges only ever shrink, and out-of-range folds are ignored.
+		const plainBase = displayBase;
+		const content = textOverride ?? applyPasteFolds(plainBase, message.pasteFolds);
 		// Read synchronously so the effect re-runs when badges change.
 		const items = marks;
 		const wash = washId;
@@ -116,9 +160,12 @@
 		const stamp = () => void tick().then(() => bodyEl && applyMarks(bodyEl, items, skipMarks, wash));
 		if (localAid === "pinyin") {
 			rendered = null;
-			onAidLoadingChange?.(false);
+			furiganaKey = null;
+			reportAidLoading(false);
 			// Ruby lands on visible runs only; folded-away text stays bare.
-			html = foldSegments(message.content, message.pasteFolds)
+			// Aid-visible text only, so a pinned aid can't resurrect the
+			// redacted refs block.
+			html = foldSegments(aidBase, message.pasteFolds)
 				.map((segment) =>
 					segment.kind === "text"
 						? plainParagraphs(pinyinRuby(segment.text))
@@ -130,9 +177,18 @@
 		}
 		if (localAid === "furigana") {
 			rendered = null;
-			onAidLoadingChange?.(true);
+			const key = furiganaRequestKey(aidBase, message.pasteFolds);
+			if (key === furiganaKey) {
+				// Same conversion already shown or loading: badges may
+				// have changed, so re-stamp, but never reconvert and
+				// never touch parent busy state.
+				stamp();
+				return;
+			}
+			furiganaKey = key;
+			reportAidLoading(true);
 			const run = ++aidRun;
-			const segments = foldSegments(message.content, message.pasteFolds);
+			const segments = foldSegments(aidBase, message.pasteFolds);
 			void Promise.all(
 				segments.map((segment) =>
 					segment.kind === "text"
@@ -146,18 +202,23 @@
 						html = parts.join("");
 						stamp();
 					},
-					() => {
+					(error: unknown) => {
 						// Conversion failed: unpin via the caller. The
 						// two-arg form keeps stamp() errors out of here.
-						if (run === aidRun) onAidError?.(message.id);
+						// Async reads never subscribe the effect, so the
+						// callback identity is safe to touch here.
+						if (run !== aidRun) return;
+						console.warn("[furigana] conversion failed:", error);
+						onAidError?.(message.id);
 					}
 				)
 				.finally(() => {
-					if (run === aidRun) onAidLoadingChange?.(false);
+					if (run === aidRun) reportAidLoading(false);
 				});
 			return;
 		}
-		onAidLoadingChange?.(false);
+		if (furiganaKey !== null) furiganaKey = null;
+		reportAidLoading(false);
 		aidRun++; // invalidate any in-flight furigana conversion
 		const snapshot: RenderedMessage =
 			message.role === "assistant"
@@ -247,14 +308,15 @@
 </script>
 
 {#if folded}
-	<div class="folded-preview">{(message.content.split("\n")[0] ?? "").slice(0, 140)}</div>
+	<div class="folded-preview">{foldPreview ?? (message.content.split("\n")[0] ?? "").slice(0, 140)}</div>
 {:else}
 	<!-- Delegated code fold/copy buttons live inside the sanitized HTML. -->
 	<!-- The key swaps only for pinned model-aid text: previews and local
 	ruby render in place (readings fading in) so hovering never flashes
 	the body or moves the row. -->
 	{#key textOverride && !aidPreview ? "model" : "plain"}
-		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_mouse_events_have_key_events -->
+		<!-- Badge wash is hover-only by decision (see onBadgeOver): Tab reaches markers, never highlights. -->
 		<!-- eslint-disable-next-line svelte/no-at-html-tags -- html is DOMPurify-sanitized in render.ts -->
 		<div class="rendered aid-swap" class:aid-space={aidSpace} bind:this={bodyEl} onclick={onBodyClick} onmouseover={onBadgeOver} onmouseout={onBadgeOut}>{@html html}</div>
 	{/key}
@@ -265,6 +327,11 @@
 		word-break: break-word;
 		font-size: calc(0.92rem * var(--font-scale, 1));
 		line-height: 1.5;
+		/* The one selectable surface in the article (see article's
+		user-select: none): I-beam lives here and only here. */
+		user-select: text;
+		-webkit-user-select: text;
+		cursor: text;
 	}
 	.folded-preview {
 		color: #6e6e73;
@@ -298,20 +365,22 @@
 		animation: aid-swap 0.18s ease;
 	}
 	/* Ruby's vertical room is always reserved where a local aid exists,
-	so previewing or pinning it never reflows the message. The 2.3
-	covers the base line plus the ruby overhang with headroom: 2.25
-	left a ~0.5px leak on some font stacks. */
+	so previewing or pinning it never reflows the message. WebKit sizes
+	in-flow ruby annotations by glyphs (no line-height trick contains
+	them), so the reservation itself must cover base plus annotation:
+	2.7 swallows the measured overhang with headroom for other stacks. */
 	.rendered.aid-space :global(p) {
-		line-height: 2.3;
+		line-height: 2.7;
 	}
 	.rendered :global(ruby) {
 		ruby-align: center;
 	}
 	.rendered :global(rt) {
 		font-size: 0.62em;
-		/* Unit line-height: the annotation must fit inside the reserved
-		leading or ruby grows the line box and shoves the message down. */
-		line-height: 1;
+		/* Zero strut: the annotation's line box contributes nothing, so
+		WebKit can't grow the line for it — glyphs still paint (visible
+		overflow) into the aid-space leading reserved above. */
+		line-height: 0;
 		color: #6e6e73;
 		animation: rt-in 0.18s ease;
 	}
@@ -430,7 +499,7 @@
 		}
 	}
 	.rendered :global(mark.ccez-ann.fresh) {
-		animation: ann-wash-in 0.18s ease;
+		animation: ann-wash-in 0.12s ease;
 	}
 	@keyframes ann-wash-out {
 		from {
@@ -450,22 +519,51 @@
 		user-select: none;
 		-webkit-user-select: none;
 	}
+	/* Badge anchors ride on the quote's last character (or its wash
+	mark): unstyled inline wrappers, so stamping never reflows text. */
+	.rendered :global(.ccez-ann-anchor) {
+		position: relative;
+	}
+	/* Numbered badges float above-right of their quote, overlaying ruby
+	readings instead of shoving them: zero layout in every mode. */
 	.rendered :global(button.ccez-ann-badge) {
-		display: inline-block;
+		position: absolute;
+		bottom: 100%;
+		left: 100%;
+		transform: translate(-40%, 10%);
+		z-index: 2;
+		user-select: none;
+		-webkit-user-select: none;
 		min-width: 1.15rem;
 		height: 1.15rem;
-		margin-left: 0.15rem;
 		padding: 0 0.25rem;
 		border: 0;
 		border-radius: 999px;
-		background: #0a84ff;
+		background: #5a9bf7;
 		color: #fff;
 		font-size: 0.7rem;
 		font-weight: 700;
 		line-height: 1.15rem;
 		text-align: center;
-		vertical-align: super;
+		white-space: nowrap;
 		cursor: pointer;
+	}
+	/* Speech-bubble tail: a rounded stub off the badge's lower-left,
+	leaning down-left toward the quote it annotates. Never a point.
+	Overlaps the badge edge by 2px so no gap ever shows (the circle
+	curves away at the sides). Clicks land on the button, so the open
+	still works. */
+	.rendered :global(button.ccez-ann-badge::after) {
+		content: "";
+		position: absolute;
+		top: calc(100% - 2px);
+		left: 18%;
+		transform: translateX(-50%) rotate(28deg);
+		transform-origin: top center;
+		width: 0.34rem;
+		height: 0.38rem;
+		border-radius: 0.12rem;
+		background: inherit;
 	}
 	/* Newly stamped badges fade in; re-stamps skip the class so steady
 	marks never flicker on re-render. */

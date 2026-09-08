@@ -14,7 +14,7 @@ test("hovering the action row moves no button and leaves no stuck hover", async 
 	page
 }) => {
 	const row = page.locator(`${ARTICLE} .actions`);
-	const aidBtn = page.locator(`${ARTICLE} .actions button[title="${AID_TITLE}"]`);
+	const aidBtn = page.locator(`${ARTICLE} .actions button[data-tip="${AID_TITLE}"]`);
 
 	// Hover-reveal is on: the row starts hidden.
 	await expect(row).toHaveCSS("opacity", "0");
@@ -39,13 +39,13 @@ test("clicking tashkeel pins it, and show-original restores the text", async ({
 	page
 }) => {
 	const body = page.locator(`${ARTICLE} .rendered`);
-	const aidBtn = page.locator(`${ARTICLE} .actions button[title="${AID_TITLE}"]`);
+	const aidBtn = page.locator(`${ARTICLE} .actions button[data-tip="${AID_TITLE}"]`);
 
 	await aidBtn.hover();
 	await aidBtn.click();
 	// The mock provider resolves immediately: the aid pins.
 	const showOriginal = page.locator(
-		`${ARTICLE} .actions button[title="Show original"]`
+		`${ARTICLE} .actions button[data-tip="Show original"]`
 	);
 	await expect(showOriginal).toBeVisible();
 	await expect(body).toContainText("Mock reply to:");

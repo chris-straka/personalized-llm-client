@@ -26,6 +26,12 @@ describe("hover-only message actions", () => {
 		expect(css).toContain("article.assistant:hover .actions");
 	});
 
+	it("keeps the row up while its message is speaking", () => {
+		const css = pageStyle();
+		expect(css).toContain("article.user.speaking .actions");
+		expect(css).toContain("article.assistant.speaking .actions");
+	});
+
 	it("keeps will-change on the hover-hidden rows", () => {
 		const css = pageStyle();
 		const block = css.match(

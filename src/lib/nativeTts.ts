@@ -281,59 +281,6 @@ export function speakNativeWord(
 	});
 }
 
-/**
- * Render `text` to a WAV file through the native synthesizer (same voice
- * pick and rate as live speech) and return it base64-encoded, or null when
- * the bridge is unavailable. Never throws. Web `speechSynthesis` cannot
- * produce audio, so downloads only exist on the native engine.
- */
-export async function renderNativeSpeech(
-	text: string,
-	lang: string,
-	voiceId: string | null = null
-): Promise<string | null> {
-	if (!text.trim()) return null;
-	try {
-		return await invoke<string>("tts_render", { text, lang, voice: voiceId });
-	} catch {
-		return null;
-	}
-}
-
-/**
- * Save rendered WAV bytes (base64) through the shell into Downloads.
- * Returns the saved file name, or null when the bridge is unavailable.
- * Never throws. Browser previews use the blob anchor instead — a WebView
- * blob download is cancelled when no download handler is registered.
- */
-export async function saveNativeAudio(
-	name: string,
-	wavBase64: string
-): Promise<string | null> {
-	if (!name.trim() || !wavBase64) return null;
-	try {
-		return await invoke<string>("tts_save_audio", { name, wavBase64 });
-	} catch {
-		return null;
-	}
-}
-
-/**
- * Download filename for a message's rendered audio: first words slugged,
- * always a `.wav`. Pure (unit-tested).
- */
-export function audioFileNameFor(text: string): string {
-	const slug = text
-		.toLowerCase()
-		.split(/[^\p{L}\p{N}]+/u)
-		.filter(Boolean)
-		.slice(0, 6)
-		.join("-")
-		.slice(0, 48)
-		.replace(/-+$/, "");
-	return `ccez-${slug || "message"}.wav`;
-}
-
 /** Stop native speech and invalidate in-flight event listeners. Never throws. */
 export function stopNative(): void {
 	teardown();

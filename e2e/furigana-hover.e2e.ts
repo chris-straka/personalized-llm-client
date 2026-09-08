@@ -3,6 +3,9 @@ import { seedChat, rowBoxes, expectBoxesStable } from "./helpers";
 
 const ARTICLE = "article.assistant";
 
+// First run pays the dictionary build (tens of seconds), like furigana.e2e.ts.
+test.setTimeout(90_000);
+
 test.beforeEach(async ({ page }) => {
 	await seedChat(page, [{ role: "assistant", content: "漢字を読むテスト" }]);
 	await page.goto("/");
@@ -14,7 +17,7 @@ test("hovering furigana fetches nothing; clicking fetches with dots", async ({
 }) => {
 	const body = page.locator(`${ARTICLE} .rendered`);
 	const furiganaBtn = page.locator(
-		`${ARTICLE} .actions button[title="Add furigana"]`
+		`${ARTICLE} .actions button[data-tip="Add furigana"]`
 	);
 	const dots = page.locator(`${ARTICLE} .actions .tdots`);
 	const before = await rowBoxes(page, ARTICLE);
@@ -32,8 +35,8 @@ test("hovering furigana fetches nothing; clicking fetches with dots", async ({
 	// Click pins (and fetches): dots while loading, then the pinned
 	// button. Conversion itself is unit-tested; e2e stays fast.
 	await furiganaBtn.click();
-	await expect(
-		page.locator(`${ARTICLE} .actions button[title="Show original"]`)
-	).toBeVisible();
 	await expect(dots).toBeVisible({ timeout: 30_000 });
+	await expect(
+		page.locator(`${ARTICLE} .actions button[data-tip="オリジナルを表示"]`)
+	).toBeVisible({ timeout: 60_000 });
 });

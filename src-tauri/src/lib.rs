@@ -79,8 +79,6 @@ pub fn run() {
             tts::tts_speak,
             tts::tts_stop,
             tts::tts_voices,
-            tts::tts_render,
-            tts::tts_save_audio,
             tts::tts_identify_lang
         ])
         .setup(|app| {

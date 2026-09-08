@@ -192,11 +192,29 @@ are tiny mock replies + TTS starting at completion by design.
 ## Things I'm thinking about but are undecided on
 
 - [ ] For new chats, it'd be cool if it would show me one thing that I have previously annotated and the answer that the AI chatbot gave for it, with the option to delete it and remove it from my history by clicking a trash can icon right beside. After the first msg in a new chat, this should disappear. It should not show me things that contain an expletive. It should say the usual "What can I do for you?" and then after a 3s pause it should 
-- [ ] Fenced-code composer in the prompt input box: shelved Sep 2026 to keep
-  focus on language learning. Design notes for revival: ```lang +
-  Shift+Enter auto-closes, backticks hidden behind a language bar with
-  Collapse/Copy icon buttons (match message-button glyphs), per-language
-  highlighting, triple-Shift+Enter exits (plain Enter never exits).
-  Parked on WebKit bugs: the empty body row renders no div (caret nowhere
-  to land, cursor invisible, typing unreliable) and block-widget adjacency
-  drops rows — decorations need a rethink before revival.
+- [ ] (moved to ## Shelved: code editor / code blocks in the prompt)
+
+## Shelved: code editor / code blocks in the prompt
+
+Shelved Sep 2026 to keep focus on language learning. The base auto-close +
+language bar were also removed, so ``` in the prompt is plain text again.
+Rendered message code blocks (fold, copy, highlight) are a separate shipped
+feature and stay.
+
+Revival spec for the prompt composer:
+
+- ```lang + Shift+Enter auto-closes the fence.
+- Backticks hidden behind a language bar with Collapse/Copy icon buttons
+  (reuse the message-button glyphs, not text buttons).
+- Per-language syntax highlighting inside the block.
+- Triple-Shift+Enter exits the block; plain Enter inside code is always a
+  newline, never an exit and never a send (⌘+Enter sends from anywhere).
+- Cursor and typed text must stay visible in the block on all engines.
+
+Parked bugs (WebKit/Tauri): the empty body row renders no div (caret has
+nowhere to land, cursor invisible, typing unreliable) and block-widget
+adjacency drops rows — the decoration approach needs a rethink before
+revival. Bisect notes: only ONE block widget per fence survives; any
+replace starting where the body mark ends drops the body row; an empty
+line after a bar block renders only when its break carries a decoration
+boundary.

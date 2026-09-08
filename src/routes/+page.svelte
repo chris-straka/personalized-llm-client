@@ -67,7 +67,7 @@
 		IMAGE_MARKER,
 		type Attachment
 	} from "$lib/attachments";
-	import {
+		import {
 		addAnnotation,
 		editAnnotationComment,
 		deleteAnnotation,
@@ -76,10 +76,14 @@
 		annotationCountLabel,
 		withAnnotations,
 		quoteFragmentText,
+		newAnnotationId,
+		annRefsFor,
+		lockSelectionToMessage,
 		type Annotation,
 		type AnnotationId,
 		type AnnotationMark
 	} from "$lib/annotations";
+	import { createRefMemo } from "$lib/aidLoading";
 	import { translateSelection } from "$lib/translate";
 	import {
 		detectScript,
@@ -99,7 +103,6 @@
 	import {
 		speakText,
 		speechText,
-		replyLangFor,
 		stopSpeaking,
 		micAvailable,
 		dictateOnce,
@@ -109,9 +112,6 @@
 		speakNative,
 		speakNativeWord,
 		stopNative,
-		renderNativeSpeech,
-		saveNativeAudio,
-		audioFileNameFor,
 		friendlyNativeError,
 		quoteLangFor,
 		currentKeyboardInputSource
@@ -178,6 +178,13 @@
 	let foldedIds = new SvelteSet<string>();
 	let previewId: string | null = $state(null);
 	let annotations = $state<Annotation[]>([]);
+	/**
+	 * Annotation being composed (comment pill open, not yet submitted):
+	 * held out of `annotations` so no badge stamps and no count moves
+	 * until submit. The id is minted up front so the wash and the pill
+	 * already address the annotation it will become.
+	 */
+	let pendingAnn = $state<Annotation | null>(null);
 	let reviewOpen = $state(false);
 	/** Waypoint menu pinned open (hover/focus reveal it without pinning). */
 	let wpOpen = $state(false);
@@ -283,21 +290,6 @@
 		hydrated = true;
 		wasEmpty = empty;
 	});
-	// Drop rendered-audio entries whose message is gone from every chat
-	// (deletes, reruns, truncation), revoking their blob URLs.
-	$effect(() => {
-		const live = new SvelteSet<string>();
-		for (const c of chatState.chats) for (const m of c.messages) live.add(m.id);
-		const dead = Object.keys(audioFor).filter((id) => !live.has(id));
-		if (dead.length === 0) return;
-		const rest = { ...audioFor };
-		for (const id of dead) {
-			const entry = rest[id];
-			if (entry) URL.revokeObjectURL(entry.url);
-			delete rest[id];
-		}
-		audioFor = rest;
-	});
 	/** The Enter that saves an annotation must never double as a send. */
 	let sendGuardUntil = 0;
 	let selMenu = $state<{
@@ -306,6 +298,25 @@
 		quote: string;
 		messageId: ChatMsgId;
 	} | null>(null);
+	/**
+	 * An unanswered selection menu never lingers: it fades out two
+	 * seconds after opening (clicking away still dismisses instantly).
+	 */
+	let selMenuTimer: ReturnType<typeof setTimeout> | null = null;
+	$effect(() => {
+		if (!selMenu) return;
+		if (selMenuTimer) clearTimeout(selMenuTimer);
+		selMenuTimer = setTimeout(() => {
+			selMenuTimer = null;
+			selMenu = null;
+		}, 2000);
+		return () => {
+			if (selMenuTimer) {
+				clearTimeout(selMenuTimer);
+				selMenuTimer = null;
+			}
+		};
+	});
 	let translate = $state<{
 		quote: string;
 		messageId: ChatMsgId;
@@ -337,18 +348,6 @@
 	let aidSeen = new SvelteSet<string>();
 	let vocalizeError: string | null = $state(null);
 	let speakingId: string | null = $state(null);
-	/** Rendered-audio downloads, keyed by message id. An entry appears
-	after the download button renders that message on demand. */
-	let audioFor = $state<Record<string, { url: string; name: string }>>({});
-	/** Message id whose downloaded file is currently replaying. */
-	let playingAudioId: string | null = $state(null);
-	let audioEl: HTMLAudioElement | null = null;
-	/** Render jobs in flight (invoke has no cancel; this just avoids
-	stacking duplicates when a message is re-read mid-render). */
-	const renderingAudio = new SvelteSet<string>();
-	/** Messages that played to their natural end at least once. The
-	download button only appears for these (or for rendered entries). */
-	const heardIds = new SvelteSet<string>();
 	/** Message a speak-aloud selection came from (tints its selection). */
 	let speakingSelection: string | null = $state(null);
 	let voiceError: string | null = $state(null);
@@ -379,6 +378,20 @@
 		activeReplyCode ? replyLanguageFor(activeReplyCode) : null
 	);
 	let settingsOpen = $state(false);
+	/**
+	 * Opening/closing settings shifts layout under a stationary cursor,
+	 * leaving a stale pointer behind (browsers refresh the cursor on
+	 * mousemove, not on our width transition). A one-frame
+	 * pointer-events pulse forces a re-hit-test so the cursor matches
+	 * whatever is actually underneath now.
+	 */
+	function pulseCursor(): void {
+		const root = document.documentElement;
+		root.style.pointerEvents = "none";
+		requestAnimationFrame(() => {
+			root.style.pointerEvents = "";
+		});
+	}
 	let shortcutsOpen = $state(false);
 	let hasText = $state(false);
 	let altHeld = $state(false);
@@ -582,11 +595,15 @@
 		});
 	}
 
+	/** Article element owning a DOM node, or null outside messages. */
+	function articleOf(node: Node | null): Element | null {
+		const element = node instanceof Element ? node : node?.parentElement;
+		return element?.closest('article[id^="msg-"]') ?? null;
+	}
+
 	/** Message id owning the selection anchor, or null outside messages. */
 	function selectedMessageId(selection: Selection): ChatMsgId | null {
-		const node = selection.anchorNode;
-		const element = node instanceof Element ? node : node?.parentElement;
-		const article = element?.closest('article[id^="msg-"]');
+		const article = articleOf(selection.anchorNode);
 		if (!article) return null;
 		const index = Number(article.id.slice(4));
 		return chat.messages[index]?.id ?? null;
@@ -613,6 +630,14 @@
 
 	function onSelectEnd(event: MouseEvent): void {
 		if (event.altKey) return; // Option-click folds; never a menu.
+		// Selections never span messages: a drag crossing into another
+		// article trims back to the anchor message's edge first.
+		const live = window.getSelection();
+		if (live) lockSelectionToMessage(live, articleOf);
+		placeSelMenu();
+	}
+
+	function placeSelMenu(): void {
 		const found = currentQuote();
 		if (!found) {
 			selMenu = null;
@@ -625,9 +650,73 @@
 		}
 		const width = 220;
 		const x = Math.min(Math.max(8, rect.left), window.innerWidth - width - 8);
-		let y = rect.top - 48;
+		let y = rect.top - 47;
 		if (y < 8) y = rect.bottom + 8;
 		selMenu = { x, y, quote: found.quote, messageId: found.messageId };
+	}
+
+	/** Kanji + kana (same ranges as furiganaRuby): spaceless scripts
+	where a native double-click word pick is a meaningless fragment. */
+	const CJKISH = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\u3040-\u309F\u30A0-\u30FF\u3005]/;
+
+	/** Non-standard engine API (WebKit + Chromium): sentence breaks. */
+	interface SelectionModify {
+		modify(action: string, direction: string, granularity: string): void;
+	}
+
+	/** Triple-clicked CJK text selects its sentence, using the engine's
+	own breaks: native word picks stop after a few characters and snag
+	on mark/badge element edges, so "select the sentence" never works.
+	Spaced scripts keep native word/paragraph selection. The span never
+	leaves its article; engines without Selection.modify keep native
+	behavior. */
+	/** Text position under a click, or null over void (or where the
+	engine has no caret API): callers fall back to the selection start. */
+	function pointRange(x: number, y: number): { node: Node; offset: number } | null {
+		try {
+			const at = document.caretRangeFromPoint?.bind(document);
+			const range = typeof at === "function" ? at(x, y) : null;
+			if (!range) return null;
+			return { node: range.startContainer, offset: range.startOffset };
+		} catch {
+			return null;
+		}
+	}
+
+	function expandToSentence(from?: { node: Node; offset: number }): boolean {
+		const live = window.getSelection();
+		if (!live || live.rangeCount === 0 || live.isCollapsed) return false;
+		if (!CJKISH.test(live.toString())) return false;
+		const range = live.getRangeAt(0);
+		const node = from?.node ?? range.startContainer;
+		const offset = from?.offset ?? range.startOffset;
+		const article = articleOf(node);
+		if (!article) return false;
+		try {
+			const sel = live as unknown as SelectionModify;
+			if (typeof sel.modify !== "function") return false;
+			live.collapse(node, offset);
+			sel.modify("extend", "backward", "sentence");
+			const startNode = live.focusNode ?? node;
+			const startOffset = live.focusOffset;
+			live.collapse(node, offset);
+			sel.modify("extend", "forward", "sentence");
+			const endNode = live.focusNode ?? node;
+			const endOffset = live.focusOffset;
+			if (articleOf(startNode) !== article || articleOf(endNode) !== article) {
+				live.collapse(node, offset);
+				return false;
+			}
+			live.setBaseAndExtent(startNode, startOffset, endNode, endOffset);
+			return true;
+		} catch {
+			try {
+				live.collapse(node, offset);
+			} catch {
+				// Collapsing back failed: leave the native selection alone.
+			}
+			return false;
+		}
 	}
 
 	function clearSelection(): void {
@@ -635,25 +724,46 @@
 	}
 
 	/** Annotate at the cursor: the comment pill opens where the selection
-	was — never down in the composer. Enter saves, Escape cancels. */
+	was — never down in the composer. Enter saves, Escape cancels. The
+	annotation stays pending (no badge, no count) until submit. */
 	function annotate(): void {
 		if (!selMenu) return;
-		annotations = addAnnotation(annotations, selMenu.messageId, selMenu.quote);
-		const created = annotations[annotations.length - 1];
-		if (!created) {
+		if (!selMenu.quote.trim()) {
 			clearSelection();
 			selMenu = null;
 			return;
 		}
+		// Starting over submits whatever is being composed first: typed
+		// comments are never silently dropped.
+		if (pendingAnn) commitPending();
+		const pending: Annotation = {
+			id: newAnnotationId(),
+			messageId: selMenu.messageId,
+			quote: selMenu.quote.trim(),
+			comment: ""
+		};
+		pendingAnn = pending;
 		clearSelection();
 		const width = 384;
 		const x = Math.min(Math.max(8, selMenu.x), window.innerWidth - width - 8);
-		const y = Math.min(Math.max(8, selMenu.y), window.innerHeight - 72);
+		// The comment box sits a breath below the Annotate menu's
+		// anchor: sharing selMenu.y leaves it floating high above tall
+		// CJK lines.
+		const y = Math.min(Math.max(8, selMenu.y + 2), window.innerHeight - 72);
 		selMenu = null;
-		highlightAnnId = created.id;
+		highlightAnnId = pending.id;
 		annDraft = "";
 		settleAnnPop();
-		annPop = { id: created.id, x, y, fresh: true };
+		annPop = { id: pending.id, x, y, fresh: true };
+	}
+
+	/** Submit the annotation being composed (Enter or Save). The id is
+	kept from composition so wash, pill, and badge address one thing. */
+	function commitPending(): void {
+		const pending = pendingAnn;
+		if (!pending) return;
+		annotations = [...annotations, { ...pending, comment: annDraft }];
+		pendingAnn = null;
 	}
 
 	/** Fade the pill out, then unmount it. Data writes stay synchronous
@@ -681,12 +791,22 @@
 	function saveAnnPop(fromEnter = false): void {
 		if (!annPop || annPopClosing) return;
 		stopPillMic();
-		annotations = editAnnotationComment(annotations, annPop.id, annDraft);
+		if (pendingAnn && annPop.id === pendingAnn.id) commitPending();
+		else annotations = editAnnotationComment(annotations, annPop.id, annDraft);
 		hideAnnPop();
 		// Only the Enter key needs the anti-double-send guard: a click-away
-		// or ✓-click save involves no Enter that could leak into a send.
+		// save involves no Enter that could leak into a send.
 		if (fromEnter) sendGuardUntil = Date.now() + 500;
 		editor?.focus();
+	}
+
+	/** Clicking off the pill: an empty draft cancels (no ghost empty
+	annotations), a typed draft still saves — typed comments are never
+	silently dropped. Enter with no text is the way to file an empty one. */
+	function blurAnnPop(): void {
+		if (!annPop || annPopClosing) return;
+		if (annDraft.trim() === "") cancelAnnPop();
+		else saveAnnPop();
 	}
 
 	function cancelAnnPop(): void {
@@ -694,10 +814,13 @@
 		const { id, fresh } = annPop;
 		stopPillMic();
 		hideAnnPop();
-		// Cancel means "as it was": a fresh annotation never existed, so
-		// it goes no matter what was typed; an existing one keeps its
-		// saved comment (nothing is written until Save).
-		if (fresh) {
+		if (pendingAnn && id === pendingAnn.id) {
+			// Never submitted: it never existed.
+			pendingAnn = null;
+		} else if (fresh) {
+			// Cancel means "as it was": a fresh annotation never
+			// existed, so it goes no matter what was typed; an existing
+			// one keeps its saved comment (nothing is written until Save).
 			annotations = deleteAnnotation(annotations, id);
 		}
 		editor?.focus();
@@ -736,6 +859,12 @@
 	 * the same highlight as a fresh annotation).
 	 */
 	function openBadge(id: AnnotationId, anchor: { x: number; y: number }): void {
+		// Re-pressing the open badge closes it, like cancel: the edit
+		// menu toggles instead of reopening under the cursor.
+		if (annPop && !annPopClosing && annPop.id === id) {
+			cancelAnnPop();
+			return;
+		}
 		const current = annotations.find((a) => a.id === id);
 		if (!current) return;
 		stopPillMic();
@@ -769,6 +898,7 @@
 
 	function clearAllAnnotations(): void {
 		annotations = clearAnnotations();
+		pendingAnn = null;
 		reviewOpen = false;
 		editingId = null;
 		highlightAnnId = null;
@@ -824,10 +954,29 @@
 		editingId = null;
 	}
 
+	/**
+	 * Badge arrays by message, memoized by content: the render effect
+	 * subscribes to the array identity, so a freshly built array per
+	 * render would re-run every message body on any parent change.
+	 */
+	const memoMarks = createRefMemo<AnnotationMark>(
+		(m) => `${m.id}:${m.number}:${m.quote}:${m.preview === true ? "preview" : "saved"}`
+	);
 	function marksFor(messageId: ChatMsgId): AnnotationMark[] {
-		return annotations
+		const saved: AnnotationMark[] = annotations
 			.filter((a) => a.messageId === messageId)
 			.map((a) => ({ id: a.id, number: annotationNumber(annotations, a.id), quote: a.quote }));
+		// A composed-but-unsubmitted annotation washes while its pill is
+		// open, but stamps no badge (badges appear on submit only).
+		if (pendingAnn && pendingAnn.messageId === messageId) {
+			saved.push({
+				id: pendingAnn.id,
+				number: annotations.length + 1,
+				quote: pendingAnn.quote,
+				preview: true
+			});
+		}
+		return memoMarks(messageId, saved);
 	}
 
 	/** Pinned or hover-peeked model-aid text for a message (tashkeel). */
@@ -840,10 +989,17 @@
 		return null;
 	}
 
+	/** Text the reading aids see: baked annotation blocks are metadata,
+	not prose — detecting or converting them would reserve ruby's room
+	for hidden text and grow annotated history. */
+	function aidDisplayText(msg: ChatMsg): string {
+		return annRefsFor(msg.content)?.text ?? msg.content;
+	}
+
 	/** Local-aid override: a pinned or hover-peeked aid renders it,
 	otherwise the original stands (aids are per-message only). */
 	function localAidOverrideFor(msg: ChatMsg): LocalAid | null | undefined {
-		const kind = localAidFor(detectScript(msg.content));
+		const kind = localAidFor(detectScript(aidDisplayText(msg)));
 		if (!kind) return undefined;
 		if (aidPin.has(msg.id)) return kind;
 		if (aidPeek?.id === msg.id) return kind;
@@ -866,10 +1022,8 @@
 		} else {
 			// First hover is color-only: previews start after a first pin.
 			if (!aidSeen.has(msg.id)) return;
-			if (
-				localAidFor(detectScript(msg.content)) === "furigana" &&
-				!isFuriganaCached(msg.content)
-			) {
+			const display = aidDisplayText(msg);
+			if (localAidFor(detectScript(display)) === "furigana" && !isFuriganaCached(display)) {
 				return;
 			}
 		}
@@ -976,7 +1130,7 @@
 		vocalizeError = null;
 		vocalizing.add(msg.id);
 		try {
-			const text = await runModelAid(provider, aidId, msg.content);
+			const text = await runModelAid(provider, aidId, aidDisplayText(msg));
 			vocalized = { ...vocalized, [msg.id]: text };
 			const wantPin = pin || pendingPin.has(msg.id);
 			pendingPin.delete(msg.id);
@@ -1004,132 +1158,7 @@
 	function stopVoice(): void {
 		stopSpeaking();
 		stopNative();
-		stopAudio();
 		resetVoice();
-	}
-
-	/** Stop a replaying download (never touches TTS state). */
-	function stopAudio(): void {
-		audioEl?.pause();
-		audioEl = null;
-		playingAudioId = null;
-	}
-
-	/** Replay a message's downloaded file instead of re-synthesizing. */
-	function playAudioFile(id: string): void {
-		const entry = audioFor[id];
-		if (!entry) return;
-		stopSpeaking();
-		stopNative();
-		resetVoice();
-		stopAudio();
-		try {
-			const el = new Audio(entry.url);
-			audioEl = el;
-			playingAudioId = id;
-			el.onended = () => {
-				if (audioEl === el) stopAudio();
-			};
-			el.onerror = () => {
-				if (audioEl === el) stopAudio();
-			};
-			void el.play().catch(() => {
-				if (audioEl === el) stopAudio();
-			});
-		} catch {
-			stopAudio();
-		}
-	}
-
-	/**
-	 * Render a finished native readback to a WAV download in the
-	 * background. Silent on every failure path: no bridge, no icon.
-	 * The message must still hold the exact spoken text when the bytes
-	 * land, or the entry is dropped.
-	 */
-	async function renderMessageAudio(
-		id: string,
-		text: string,
-		lang: string,
-		voiceId: string | null
-	): Promise<void> {
-		if (audioFor[id] || renderingAudio.has(id)) return;
-		renderingAudio.add(id);
-		try {
-			const base64 = await renderNativeSpeech(text, lang, voiceId);
-			// A pathological render (tens of MB of base64) would wedge the
-			// WebView in the decode below: drop it before touching it.
-			if (!base64 || base64.length > 64_000_000) return;
-			const live = chat.messages.some((m) => m.id === id && speechText(m.content) === text);
-			if (!live) return;
-			// Decode off the main thread: atob + Uint8Array.from on a long
-			// render blocks the UI for seconds (the freeze at natural end).
-			// A data-URL fetch lets the network stack produce the Blob.
-			const bytes = await (await fetch(`data:audio/wav;base64,${base64}`)).arrayBuffer();
-			const url = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
-			audioFor = { ...audioFor, [id]: { url, name: audioFileNameFor(text) } };
-		} catch {
-			// Silent by contract (see docstring): no toast, no icon.
-		} finally {
-			renderingAudio.delete(id);
-		}
-	}
-
-	/**
-	 * Shell download: the blob anchor is cancelled in a WebView without
-	 * a download handler, so the bytes go through the backend save
-	 * command into Downloads. Browsers use the anchor itself.
-	 */
-	async function saveAudioFile(id: string): Promise<void> {
-		const entry = audioFor[id];
-		if (!entry) return;
-		try {
-			// Blob -> base64 via FileReader: async, so a long render never
-			// blocks the UI the way the chunked btoa loop did.
-			const buf = await (await fetch(entry.url)).arrayBuffer();
-			const dataUrl = await new Promise<string>((resolve, reject) => {
-				const reader = new FileReader();
-				reader.onerror = () => reject(reader.error ?? new Error("audio read failed"));
-				// readAsDataURL always yields a string, but the type is a
-				// union — narrow instead of String()ing an ArrayBuffer.
-				reader.onload = () =>
-					typeof reader.result === "string"
-						? resolve(reader.result)
-						: reject(new Error("audio read failed"));
-				reader.readAsDataURL(new Blob([buf], { type: "audio/wav" }));
-			});
-			const comma = dataUrl.indexOf(",");
-			if (comma < 0) throw new Error("bad data URL");
-			const saved = await saveNativeAudio(entry.name, dataUrl.slice(comma + 1));
-			flashToast(saved ? `Saved to Downloads as ${saved}` : "Couldn't save the audio file.");
-		} catch {
-			flashToast("Couldn't save the audio file.");
-		}
-	}
-
-	/**
-	 * Download button: render the message's audio on demand, then save
-	 * it. One click end to end; a second click while rendering is a
-	 * no-op, and a failed render toasts instead of failing silently.
-	 * Native engine only — web speech cannot produce audio.
-	 */
-	async function downloadAudio(msg: ChatMsg): Promise<void> {
-		if (renderingAudio.has(msg.id)) return;
-		const text = speechText(msg.content);
-		if (!text) {
-			flashToast("Nothing readable to download.");
-			return;
-		}
-		if (!audioFor[msg.id]) {
-			await renderMessageAudio(
-				msg.id,
-				text,
-				replyLangFor(msg.content, latinFallback()),
-				settings.nativeVoiceId
-			);
-		}
-		if (audioFor[msg.id]) await saveAudioFile(msg.id);
-		else flashToast("Couldn't prepare the audio file.");
 	}
 
 	/** Paste-fold toggle: replace the message (never mutate in place). */
@@ -1137,17 +1166,15 @@
 		setPasteFold(chatState, msg.id, index, !(msg.pasteFolds?.[index]?.open ?? false));
 	}
 
-	function startSpeech(id: string, text: string, lang: string, onNaturalEnd?: () => void): void {
+	function startSpeech(id: string, text: string, lang: string): void {
 		stopSpeaking();
 		stopNative();
-		stopAudio();
 		voiceError = null;
 		speakingId = id;
 		const useNative = settings.voiceEngine === "native";
 		let fellBack = false;
 		const callbacks: SpeakCallbacks = {
 			onEnd: resetVoice,
-			onNaturalEnd,
 			onError: (message) => {
 				if (useNative && !fellBack) {
 					// The bridge failed: say why, then read this utterance
@@ -1177,23 +1204,29 @@
 		}
 	}
 
-	function speakReply(msg: ChatMsg): void {
-		const text = speechText(msg.content);
-		if (!text) return;
-		const lang = replyLangFor(msg.content, latinFallback());
-		// Playback only: the download button renders on demand (rendering
-		// right after playback wedged the shell, so nothing auto-renders).
-		// A finished readback marks the message heard, which is what
-		// reveals its download button.
-		startSpeech(msg.id, text, lang, () => {
-			heardIds.add(msg.id);
-		});
+	/**
+	 * Voice locale for a whole message: script detection first (reliable
+	 * for non-Latin scripts, needs no bridge), then Apple's language
+	 * recognizer for Latin scripts (French vs English), else the
+	 * voice-language fallback. The reply pill's voice never leaks here:
+	 * an English message with the Chinese pill on reads English.
+	 */
+	async function messageSpeechLang(text: string): Promise<string> {
+		const stripped = text.replace(/```[\s\S]*?```/g, " ");
+		const scriptLang = ttsLangFor(stripped, "");
+		if (scriptLang) return scriptLang;
+		return quoteLangFor(stripped, latinFallback());
 	}
 
-	/** Speak-button label: replay state wins over TTS state. */
+	async function speakReply(msg: ChatMsg): Promise<void> {
+		const text = speechText(msg.content);
+		if (!text) return;
+		const lang = await messageSpeechLang(text);
+		startSpeech(msg.id, text, lang);
+	}
+
+	/** Speak-button label. */
 	function speakTitle(msg: ChatMsg): string {
-		if (playingAudioId === msg.id) return "Stop replay";
-		if (audioFor[msg.id]) return "Replay downloaded audio";
 		if (speakingId === msg.id) return "Stop reading aloud";
 		return "Read this message aloud";
 	}
@@ -1202,7 +1235,7 @@
 		if (!settings.voice) return;
 		const last = chat.messages[chat.messages.length - 1];
 		if (last?.role === "assistant" && !last.error && last.content.trim()) {
-			speakReply(last);
+			void speakReply(last);
 		}
 	}
 
@@ -1240,13 +1273,6 @@
 		selMenu = null;
 		speakingSelection = messageId;
 		startSpeech("selection", quote, await quoteLangFor(quote, latinFallback()));
-	}
-
-	async function speakSelection(): Promise<void> {
-		if (!selMenu) return;
-		const quote = selMenu.quote;
-		const messageId = selMenu.messageId;
-		await speakQuote(quote, messageId);
 	}
 
 	/** Pill-mic dictation into the annotation comment box. */
@@ -1357,6 +1383,7 @@
 			attachments = [];
 			previewId = null;
 			annotations = [];
+			pendingAnn = null;
 			reviewOpen = false;
 			editingId = null;
 			highlightAnnId = null;
@@ -1423,7 +1450,7 @@
 		focusMode = "scroll";
 		// The prompt goes fully dormant: no caret, a hop-back hint, and
 		// no typing — keystrokes land on the window, where scroll mode
-		// owns the vim keys and ignores the rest.
+		// owns the J/K keys and ignores the rest.
 		editor?.blur();
 		editor?.setPlaceholder(SCROLL_PLACEHOLDER);
 		if (selectedIdx < 0 && chat.messages.length > 0) {
@@ -1550,7 +1577,6 @@
 
 	function promptOptions(): PromptEditorOptions {
 		return {
-			vim: settings.vim,
 			onSubmit,
 			onHopOut: enterScrollMode,
 			onImagePaste: onImagePasted,
@@ -1558,18 +1584,6 @@
 				hasText = text.trim().length > 0;
 			}
 		};
-	}
-
-	function setVimEnabled(on: boolean): void {
-		settings.vim = on;
-		persistSettings();
-		if (!promptEl) return;
-		// Vim is a build-time extension set: rebuild the prompt around the
-		// current draft so the toggle takes effect immediately.
-		const text = editor?.getText() ?? "";
-		editor?.destroy();
-		editor = createPromptEditor(promptEl, { ...promptOptions(), initialDoc: text });
-		editor.focus();
 	}
 
 	/**
@@ -1638,7 +1652,7 @@
 			const inEditor = (event.target as HTMLElement | null)?.closest(".cm-content");
 			if ((event.metaKey || event.ctrlKey) && (event.key === "t" || event.key === "T")) {
 				// Translate lookup only hijacks the combo over message text —
-				// vim and the browser keep it everywhere else.
+				// the prompt and the browser keep it everywhere else.
 				if (!inEditor && currentQuote()) {
 					event.preventDefault();
 					event.stopPropagation();
@@ -1684,8 +1698,8 @@
 				return;
 			}
 			if (event.ctrlKey && event.altKey && event.key.startsWith("Arrow")) {
-				// Capture phase (see listener below): fires before CodeMirror or
-				// vim can swallow the combo, so the shortcuts work from anywhere.
+				// Capture phase (see listener below): fires before CodeMirror can
+				// swallow the combo, so the shortcuts work from anywhere.
 				event.preventDefault();
 				event.stopPropagation();
 				if (event.key === "ArrowRight") cycleProvider(1);
@@ -1710,13 +1724,6 @@
 				event.preventDefault();
 				event.stopPropagation();
 				doNewChat();
-				return;
-			}
-			if (event.ctrlKey && event.altKey && event.code === "KeyV") {
-				// Same hard-to-hit family: toggles vim motions in the prompt.
-				event.preventDefault();
-				event.stopPropagation();
-				setVimEnabled(!settings.vim);
 				return;
 			}
 			if (event.ctrlKey && event.altKey && event.code === "KeyS") {
@@ -1850,8 +1857,8 @@
 					!(event.target as HTMLElement | null)?.closest("input, textarea, select")
 				) {
 					// ⌘D deletes the hovered message. Ctrl+D is deliberately
-					// excluded: Vim owns it in the prompt and scroll mode
-					// uses it to skip down.
+					// excluded: the prompt keeps it for editing and scroll
+					// mode uses it to skip down.
 					const target = chat.messages[hoveredIdx];
 					if (target) {
 						event.preventDefault();
@@ -1871,8 +1878,8 @@
 				!event.shiftKey &&
 				!(event.target as HTMLElement | null)?.closest("input, textarea, select")
 			) {
-				// F folds/unfolds the hovered message. Vim owns keystrokes
-				// inside the prompt, so typing "f" there is untouched.
+				// F folds/unfolds the hovered message. The prompt owns
+				// keystrokes inside it, so typing "f" there is untouched.
 				const target = chat.messages[hoveredIdx];
 				if (target) {
 					event.preventDefault();
@@ -2003,12 +2010,51 @@
 			if (!badge) return;
 			event.preventDefault();
 			const rect = badge.getBoundingClientRect();
-			saveAnnPop();
+			const id = (badge.dataset.annBadge ?? "") as AnnotationId;
+			// A re-press toggles closed (cancel): saving first would
+			// restart the fade the toggle is about to cancel.
+			if (!(annPop && !annPopClosing && annPop.id === id)) saveAnnPop();
 			// Same boundary as MessageBody's badge click: stamped ids.
-			openBadge((badge.dataset.annBadge ?? "") as AnnotationId, {
+			openBadge(id, {
 				x: rect.left + rect.width / 2,
 				y: rect.bottom
 			});
+		};
+		// Double-click summons the menu for the native word pick (the
+		// pick finalizes after mouseup, so mouseup alone never sees it).
+		// Triple-click in CJK text grows the pick to its sentence.
+		const clickGuardsPass = (event: MouseEvent): boolean => {
+			if (event.altKey) return false;
+			const target = event.target instanceof Element ? event.target : null;
+			if (
+				target?.closest(".cm-content, .sel-menu, .review, .translate-panel, button, input, textarea")
+			) {
+				return false;
+			}
+			return true;
+		};
+		const onDoubleClick = (event: MouseEvent) => {
+			if (!clickGuardsPass(event)) return;
+			const live = window.getSelection();
+			if (live) lockSelectionToMessage(live, articleOf);
+			placeSelMenu();
+		};
+		const onTripleClick = (event: MouseEvent) => {
+			if (event.detail !== 3 || !clickGuardsPass(event)) return;
+			const live = window.getSelection();
+			if (live) lockSelectionToMessage(live, articleOf);
+			// Grow the sentence under the cursor, not the paragraph's
+			// first: a triple-click on a later line must select (and
+			// anchor the menu to) that line's sentence.
+			if (!expandToSentence(pointRange(event.clientX, event.clientY) ?? undefined)) return;
+			placeSelMenu();
+		};
+		// Selection text at the last mousedown: a mouseup that changed
+		// nothing started on blank space, so a stale highlight is dropped
+		// instead of re-summoning the menu.
+		let downSel = "";
+		const snapSelection = (): void => {
+			downSel = window.getSelection()?.toString() ?? "";
 		};
 		const onMouseUp = (event: MouseEvent) => {
 			// Ignore clicks that start inside the prompt, popups, or buttons —
@@ -2021,6 +2067,13 @@
 				if (!target?.closest(".lang-menu")) openLangMenu = null;
 			}
 			if (target?.closest(".cm-content, .sel-menu, .review, .translate-panel, button, input, textarea")) {
+				return;
+			}
+			const live = window.getSelection();
+			const liveText = live?.toString() ?? "";
+			if (!target?.closest(".rendered") && liveText !== "" && liveText === downSel) {
+				live?.removeAllRanges();
+				selMenu = null;
 				return;
 			}
 			onSelectEnd(event);
@@ -2110,6 +2163,7 @@
 		window.addEventListener("blur", onBlur);
 		window.addEventListener("focusin", onFocusIn);
 		window.addEventListener("mousedown", onBadgePress, true);
+		window.addEventListener("mousedown", snapSelection, true);
 		// Secondary scrollers share the main chat's fade: scroll events
 		// don't bubble, so catch them on the way down and toggle the
 		// same .scrolling class with the same short hold.
@@ -2130,6 +2184,8 @@
 		};
 		window.addEventListener("scroll", onFadeScroll, true);
 		window.addEventListener("mouseup", onMouseUp);
+		window.addEventListener("dblclick", onDoubleClick);
+		window.addEventListener("click", onTripleClick);
 		window.addEventListener("contextmenu", onContextMenu, true);
 		return () => {
 			window.removeEventListener("focus", onWinFocus);
@@ -2139,13 +2195,15 @@
 			window.removeEventListener("blur", onBlur);
 			window.removeEventListener("focusin", onFocusIn);
 			window.removeEventListener("mousedown", onBadgePress, true);
+			window.removeEventListener("mousedown", snapSelection, true);
 			window.removeEventListener("scroll", onFadeScroll, true);
 			window.removeEventListener("mouseup", onMouseUp);
+			window.removeEventListener("dblclick", onDoubleClick);
+			window.removeEventListener("click", onTripleClick);
 			window.removeEventListener("contextmenu", onContextMenu, true);
 			window.clearTimeout(scrollIdleTimer);
 			stopSpeaking();
 			stopNative();
-			stopAudio();
 			stopDictation?.();
 			editor?.destroy();
 			editor = null;
@@ -2203,7 +2261,7 @@
 		</button>
 	</aside>
 
-	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
 	<!-- Click-off closes the settings panel (keyboard users get Esc and ⌘,). -->
 	<main
 		class:empty={chat.messages.length === 0}
@@ -2216,7 +2274,7 @@
 		onclick={closeSettingsFromMain}
 	>
 		{#if toast}
-			<button type="button" class="toast" title="Click to copy" aria-live="polite" onclick={copyToast}>{toast}</button>
+			<button type="button" class="toast" title="Click to copy" aria-live="polite" transition:fade={{ duration: 160 }} onclick={copyToast}>{toast}</button>
 		{/if}
 		<header role="toolbar" aria-label="App" tabindex="-1" onmousedown={dragWindow}>
 			<button
@@ -2261,7 +2319,10 @@
 					title="Toggle settings (⌘,)"
 					aria-label="Toggle settings"
 					aria-expanded={settingsOpen}
-					onclick={() => (settingsOpen = !settingsOpen)}
+					onclick={() => {
+						settingsOpen = !settingsOpen;
+						pulseCursor();
+					}}
 				>
 					<span class="key-hint" aria-hidden="true">⌘,</span>
 				</button>
@@ -2322,7 +2383,10 @@
 				</div>
 			{/if}
 			{#each chat.messages as msg, i (msg.id)}
-				{@const script = detectScript(msg.content)}
+				{@const sentRefs = annRefsFor(msg.content)}
+				{@const refsOnly = sentRefs ? sentRefs.text.trim() === "" : false}
+				{@const isFolded = refsOnly ? !foldedIds.has(msg.id) : foldedIds.has(msg.id)}
+				{@const script = detectScript(sentRefs ? sentRefs.text : msg.content)}
 				{@const aidId = script ? MODEL_AID_FOR_SCRIPT[script] : null}
 				{@const localKind = localAidFor(script)}
 				{@const streamingThis =
@@ -2334,7 +2398,7 @@
 					class:user={msg.role === "user"}
 					class:assistant={msg.role === "assistant"}
 					class:selected={focusMode === "scroll" && selectedIdx === i}
-					class:speaking={speakingId === msg.id || playingAudioId === msg.id}
+					class:speaking={speakingId === msg.id}
 					class:speaking-sel={speakingSelection === msg.id}
 					onclick={(e) => {
 						if (e.altKey) toggleFold(msg.id);
@@ -2342,18 +2406,49 @@
 					onmouseenter={() => (hoveredIdx = i)}
 					onmouseleave={(event) => onArticleLeave(event, msg, i)}
 				>
+					{#if sentRefs && (!refsOnly || isFolded)}
+						<!-- Baked annotation block, collapsed above the
+						message: the count stays visible like the composer
+						pill; hovering (or tabbing to) the number itself
+						reveals the saved quotes. Provider context is
+						unaffected — only the display is redacted. A
+						refs-only message shows the pill only while folded:
+						unfolded, the full block is the display. -->
+						<div class="ann-refs">
+							<button
+								type="button"
+								class="ann-refs-pill"
+								aria-label={sentRefs.refs.length === 1 ? "1 annotation" : `${sentRefs.refs.length} annotations`}
+							>
+								{annotationCountLabel(sentRefs.refs.length)}
+							</button>
+							<div class="ann-refs-pop" role="tooltip">
+								{#each sentRefs.refs as ref (ref.n)}
+									<div class="ann-refs-item">
+										<span class="ann-refs-num">{ref.n}.</span>
+										<span class="ann-refs-quote">“{ref.quote}”</span>
+										{#if ref.comment}
+											<span class="ann-refs-comment">{ref.comment}</span>
+										{/if}
+									</div>
+								{/each}
+							</div>
+						</div>
+					{/if}
 					<div class:bubble={msg.role === "user"}>
 						<MessageBody
 							message={msg}
 							streaming={streamingThis}
 							sourcesWanted={sourcesWanted}
-							folded={foldedIds.has(msg.id)}
+							folded={isFolded}
+							foldPreview={refsOnly && sentRefs ? sentRefs.refs.map((r) => `"${r.quote}"`).join(" ") : null}
 							marks={marksFor(msg.id)}
 							washId={annPop?.id ?? editingId ?? hoverBadgeId}
 						onBadgeHover={(id: string | null) => (hoverBadgeId = id)}
 							onBadgeClick={openBadge}
 							onFoldToggle={(index: number) => togglePasteFold(msg, index)}
 							textOverride={aidedTextFor(msg)}
+							contentOverride={sentRefs ? (refsOnly && !isFolded ? null : sentRefs.text) : null}
 							aidPreview={aidPeek?.id === msg.id && !aidPin.has(msg.id)}
 							aidOverride={localAidOverrideFor(msg)}
 							onAidLoadingChange={(loading: boolean) => setAidBusy(msg.id, loading)}
@@ -2372,8 +2467,9 @@
 						<button
 							type="button"
 							class="icon-btn"
+							class:folded={isFolded}
 							data-tip="Fold this message (F or Option-click)"
-							aria-label={foldedIds.has(msg.id) ? "Unfold this message" : "Fold this message"}
+							aria-label={isFolded ? "Unfold this message" : "Fold this message"}
 							onclick={() => toggleFold(msg.id)}
 						>
 							<ActionIcon kind="fold" />
@@ -2399,15 +2495,13 @@
 						<button
 							type="button"
 							class="icon-btn"
-							class:active={speakingId === msg.id || playingAudioId === msg.id}
+							class:active={speakingId === msg.id}
 							data-tip={speakTitle(msg)}
 							aria-label={speakTitle(msg)}
-							aria-pressed={speakingId === msg.id || playingAudioId === msg.id}
+							aria-pressed={speakingId === msg.id}
 							onclick={() => {
-								if (playingAudioId === msg.id) stopAudio();
-								else if (audioFor[msg.id]) playAudioFile(msg.id);
-								else if (speakingId === msg.id) stopVoice();
-								else speakReply(msg);
+								if (speakingId === msg.id) stopVoice();
+								else void speakReply(msg);
 							}}
 						>
 							<ActionIcon kind="speak" />
@@ -2486,62 +2580,6 @@
 								{/if}
 							{/if}
 						{/if}
-						{#if audioFor[msg.id]}
-							{@const entry = audioFor[msg.id]}
-							{#if entry}
-							<!-- eslint-disable svelte/no-navigation-without-resolve -- blob: download URL, not a route -->
-							<a
-								class="icon-btn"
-								href={entry.url}
-								download={entry.name}
-								data-tip="Download audio"
-								aria-label="Download audio for this message"
-								onclick={(e) => {
-									if (tauriBackendAvailable()) {
-										e.preventDefault();
-										void saveAudioFile(msg.id);
-									}
-								}}
-							>
-								<ActionIcon kind="download" />
-							</a>
-							<!-- eslint-enable svelte/no-navigation-without-resolve -->
-							<!-- Mounted with its download so play/stop never shoves the row. -->
-							<span
-								class="audio-dot"
-								class:on={playingAudioId === msg.id}
-								role="status"
-								aria-label="Playing downloaded audio"
-							></span>
-							{/if}
-						{:else if
-							msg.role === "assistant" &&
-							!msg.error &&
-							msg.content.trim() &&
-							heardIds.has(msg.id) &&
-							settings.voiceEngine === "native"}
-							<!-- Same icon, same spot: renders the audio on
-							demand, then saves it (see downloadAudio). -->
-							{#if renderingAudio.has(msg.id)}
-								<span
-									class="icon-btn"
-									role="status"
-									aria-label="Preparing audio download"
-								>
-									<ActionIcon kind="download" /><span class="tdots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
-								</span>
-							{:else}
-								<button
-									type="button"
-									class="icon-btn"
-									data-tip="Download audio"
-									aria-label="Download audio for this message"
-									onclick={() => void downloadAudio(msg)}
-								>
-									<ActionIcon kind="download" />
-								</button>
-							{/if}
-						{/if}
 						{#if msg.role === "user"}
 							<button
 								type="button"
@@ -2584,7 +2622,10 @@
 						type="button"
 						class="link"
 						data-settings-toggle
-						onclick={() => (settingsOpen = true)}
+						onclick={() => {
+						settingsOpen = true;
+						pulseCursor();
+					}}
 					>
 						Settings</button
 					>.
@@ -2594,7 +2635,10 @@
 						type="button"
 						class="link"
 						data-settings-toggle
-						onclick={() => (settingsOpen = true)}
+						onclick={() => {
+						settingsOpen = true;
+						pulseCursor();
+					}}
 					>
 						open Settings</button
 					>.
@@ -2691,7 +2735,6 @@
 								<div class="review-item" class:highlight={highlightAnnId === ann.id}>
 									<div class="review-head">
 										<span class="review-num">{n + 1}.</span>
-										<span class="review-label">Selected text:</span>
 										<span class="review-quote">“{ann.quote}”</span>
 										<button
 											type="button"
@@ -2704,7 +2747,7 @@
 									</div>
 									{#if editingId === ann.id}
 										<label>
-											<span class="review-label">User comment:</span>
+											<span class="review-label">note:</span>
 											<textarea rows="2" bind:value={editDraft} placeholder="Add an optional comment…"
 											></textarea>
 										</label>
@@ -2720,7 +2763,7 @@
 										</div>
 									{:else}
 										<div class="review-head">
-											<span class="review-label">User comment:</span>
+											<span class="review-label">note:</span>
 											<span class="review-comment">{ann.comment || "—"}</span>
 											<button
 												type="button"
@@ -2860,11 +2903,13 @@
 	</main>
 
 	{#if selMenu}
-		<div class="sel-menu" style="left: {selMenu.x}px; top: {selMenu.y}px" role="menu">
+		<div
+			class="sel-menu"
+			style="left: {selMenu.x}px; top: {selMenu.y}px"
+			role="menu"
+			transition:fade={{ duration: 150 }}
+		>
 			<button type="button" onclick={annotate}>Annotate</button>
-			<button type="button" title="Read only the selection aloud" onclick={speakSelection}>
-				Speak aloud
-			</button>
 		</div>
 	{/if}
 
@@ -2887,7 +2932,7 @@
 				aria-label="Annotation comment. Enter or clicking away saves, Escape cancels."
 				use:growPill
 				onkeydown={annPopKey}
-				onblur={() => saveAnnPop()}
+				onblur={() => blurAnnPop()}
 			></textarea>
 			{#if annPop.fresh}
 				{#if canMic}
@@ -2907,19 +2952,6 @@
 						<ActionIcon kind="mic" />
 					</button>
 				{/if}
-				<button
-					type="button"
-					class="ann-go"
-					class:gone={annDraft.trim().length === 0}
-					aria-label="Save annotation"
-					aria-hidden={annDraft.trim().length === 0}
-					tabindex={annDraft.trim().length > 0 ? 0 : -1}
-					title="Save annotation"
-					onmousedown={(e) => e.preventDefault()}
-					onclick={() => saveAnnPop()}
-				>
-					✓
-				</button>
 			{:else}
 			<div class="ann-pop-row">
 				<button
@@ -2980,8 +3012,10 @@
 		<div class="settings-inner">
 			<SettingsPanel
 			settings={settings}
-			onClose={() => (settingsOpen = false)}
-			onVimChange={setVimEnabled}
+			onClose={() => {
+			settingsOpen = false;
+			pulseCursor();
+		}}
 			onVoiceChange={setVoiceEnabled}
 			onShortcuts={() => (shortcutsOpen = true)}
 		/>
@@ -3020,7 +3054,6 @@
 					<div><dt>Scroll messages</dt><dd>J / K · gg top · G bottom · Ctrl+U / Ctrl+D skip · Space to write again</dd></div>
 					<div><dt>Chat list</dt><dd>⌘B, then J / K · Space or L enters its prompt</dd></div>
 					<div><dt>Newer / older chat</dt><dd>⇧⌘J / ⇧⌘K (J mints one past the newest)</dd></div>
-					<div><dt>Vim motions on/off</dt><dd>Ctrl+⌥+V</dd></div>
 					<div><dt>Voice readback on/off</dt><dd>Ctrl+⌥+S</dd></div>
 					<div><dt>Speak hovered word</dt><dd>Right-click the word</dd></div>
 					<div><dt>Speak highlight</dt><dd>Select text, then right-click it</dd></div>
@@ -3034,14 +3067,14 @@
 					<div><dt>Delete this chat</dt><dd>⌘+⇧+Delete</dd></div>
 					<div><dt>Delete every chat</dt><dd>⌥+⌘+⇧+Delete</dd></div>
 				</dl>
-				<h3>Vim in the prompt box</h3>
+				<h3>Prompt and message scroll</h3>
 				<p class="modal-note">
-					Vim is trapped inside the prompt: type to insert, Esc for normal mode,
-					Enter sends in either mode (Shift+Enter is a newline; inside
-					code both are newlines). Ctrl+G (or Space,
-					outside the prompt) hops out to message scroll (J/K); I, Enter, Space,
-					or Ctrl+G hops back in. The rest of vim (motions,
-					operators, :commands via the vim layer) works where you left it.
+					The prompt is a plain insert box: type, Enter sends
+					(Shift+Enter is a newline; inside code both are newlines).
+					Ctrl+G (or Space, outside the prompt) hops out to message
+					scroll (J/K, gg top, G bottom); I, Enter, Space, or Ctrl+G
+					hops back in. J/K also walks the chat list after ⌘B, and
+					⇧⌘J / ⇧⌘K steps between chats.
 				</p>
 			</div>
 		</div>
@@ -3559,6 +3592,13 @@
 	.messages {
 		flex: 1;
 		overflow-y: auto;
+		/* Selection starts at message text only: dragging empty space
+		between messages is a plain pointer drag (arrow, no I-beam, no
+		stray selection). .rendered re-enables both; buttons keep
+		their own pointer cursor. */
+		user-select: none;
+		-webkit-user-select: none;
+		cursor: default;
 		/* Fast wheel, eased programmatic jumps. The scrollbar snaps in
 		(the .scrolling override below shortens the transition while
 		scroll events land) and drifts out slowly once they stop. */
@@ -3787,6 +3827,12 @@
 		position: relative;
 		border-radius: 10px;
 		padding: 0.6rem 0.8rem;
+		/* Text starts only at the message body: dragging anywhere else
+		(empty space, action rows) is a plain pointer drag, never an
+		I-beam selection. .rendered re-enables both below. */
+		user-select: none;
+		-webkit-user-select: none;
+		cursor: default;
 	}
 	article.user {
 		align-self: flex-end;
@@ -3848,6 +3894,93 @@
 		margin-top: 0.35rem;
 		font-size: 0.75rem;
 		color: #6e6e73;
+	}
+	/* Sent-message annotation refs: the baked block collapses to the
+	count (like the composer pill); hover or Tab reveals the saved
+	quotes in a card above. Content-only — provider context keeps the
+	full block. */
+	/* Baked-refs count floats above the message (overlay, never
+	in-flow): annotated history keeps the exact dimensions of plain
+	history. No circle, no border — just the number, quiet. */
+	.ann-refs {
+		position: absolute;
+		top: -0.9rem;
+		left: 0.8rem;
+		display: flex;
+		margin: 0;
+	}
+	article.user .ann-refs {
+		left: auto;
+		right: 0.8rem;
+	}
+	.ann-refs-pill {
+		position: relative;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+		color: #6e6e73;
+		font-size: 0.72rem;
+		font-weight: 650;
+		line-height: 1.4;
+		padding: 0 0.1rem;
+		cursor: default;
+	}
+	.ann-refs-pop {
+		position: absolute;
+		bottom: calc(100% + 0.4rem);
+		left: 0;
+		z-index: 40;
+		min-width: 14rem;
+		max-width: 24rem;
+		background: #1c1c1e;
+		color: #f2f2f7;
+		border-radius: 10px;
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+		padding: 0.55rem 0.75rem;
+		font-size: 0.8rem;
+		line-height: 1.45;
+		opacity: 0;
+		pointer-events: none;
+		transition: opacity 0.15s ease;
+	}
+	article.user .ann-refs-pop {
+		left: auto;
+		right: 0;
+	}
+	/* The number itself summons the card — not the row around it. The
+	invisible bridge keeps it open while crossing into the card. */
+	.ann-refs-pill::after {
+		content: "";
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 100%;
+		height: 0.5rem;
+	}
+	.ann-refs-pill:hover + .ann-refs-pop,
+	.ann-refs-pill:focus-visible + .ann-refs-pop,
+	.ann-refs-pop:hover {
+		opacity: 1;
+		pointer-events: auto;
+	}
+	.ann-refs-item {
+		display: flex;
+		gap: 0.45rem;
+		padding: 0.2rem 0;
+	}
+	.ann-refs-item + .ann-refs-item {
+		border-top: 1px solid rgba(255, 255, 255, 0.14);
+	}
+	.ann-refs-num {
+		font-weight: 700;
+		flex-shrink: 0;
+	}
+	.ann-refs-quote {
+		overflow-wrap: anywhere;
+	}
+	.ann-refs-comment {
+		color: #c7c7cc;
+		overflow-wrap: anywhere;
 	}
 	.attachments {
 		list-style: none;
@@ -4056,7 +4189,7 @@
 	.ann-tool.recording {
 		color: #ff6b62;
 	}
-	.ann-tool .action-glyph {
+	.ann-tool :global(.action-glyph) {
 		height: 1.25rem;
 	}
 	.ann-cancel {
@@ -4083,19 +4216,18 @@
 		padding: 0.5rem 1.4rem;
 		cursor: pointer;
 	}
-	/* Fresh pill keeps mic and ✓ mounted and cross-fades them, so the
+	/* Fresh pill keeps the mic mounted and cross-fades it, so the
 	textarea never reflows when typing starts. Faded buttons are out of
 	the pointer and tab order. */
-	.ann-pop.fresh .ann-tool,
-	.ann-pop.fresh .ann-go {
-		transition: opacity 0.16s ease;
+	.ann-pop .ann-tool {
+		transition: opacity 0.2s ease;
 	}
-	.ann-pop.fresh .gone {
+	.ann-pop .gone {
 		opacity: 0;
 		pointer-events: none;
 	}
-	/* Fresh annotation: the compact pill (textarea + mic, ✓ once there
-	is text) rather than the edit card. */
+	/* Fresh annotation: the compact pill (textarea + mic) rather than
+	the edit card. Enter files it; clicking off cancels an empty draft. */
 	.ann-pop.fresh {
 		display: flex;
 		align-items: center;
@@ -4110,22 +4242,6 @@
 		min-height: 0;
 		font-size: 1rem;
 		padding: 0.15rem 0;
-	}
-	.ann-go {
-		flex: none;
-		width: 1.9rem;
-		height: 1.9rem;
-		border: 0;
-		border-radius: 50%;
-		background: #f2f2f7;
-		color: #1c1c1e;
-		font-size: 1rem;
-		line-height: 1;
-		cursor: pointer;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		padding-bottom: 0.1rem;
 	}
 	.review,
 	.translate-panel {
@@ -4322,6 +4438,12 @@
 	main.hover-assistant article.assistant .actions:focus-within {
 		opacity: 1;
 	}
+	/* Hovering the refs count never summons the row: the pill is the
+	article's child, so without this the row would rise under it. */
+	main.hover-user article.user:has(.ann-refs-pill:hover) .actions,
+	main.hover-assistant article.assistant:has(.ann-refs-pill:hover) .actions {
+		opacity: 0;
+	}
 	/* A message being read aloud keeps its row up while the audio runs:
 	the green stop button must stay clickable after the pointer leaves. */
 	main.hover-user article.user.speaking .actions,
@@ -4358,8 +4480,7 @@
 			translate: -50% 0;
 		}
 	}
-	.actions button[data-tip],
-	.actions a[data-tip] {
+	.actions button[data-tip] {
 		position: relative;
 	}
 	.actions [data-tip]::after {
@@ -4433,22 +4554,15 @@
 	.actions .icon-btn.active {
 		color: #1f7a4d;
 	}
-	/* Download replay light: same box as the speaking dot, mounted with
-	its download so play/stop never shoves the row. */
-	.audio-dot {
-		width: 0.55rem;
-		height: 0.55rem;
-		flex-shrink: 0;
-		align-self: center;
-		border-radius: 50%;
-		background: #30a46c;
-		visibility: hidden;
+	/* Fold chevron points right while collapsed. Glyph-only transform,
+	so no box moves (the row-reveal stylesheet test forbids motion on
+	that row's selectors — keep its selector text out of these rules). */
+	button.icon-btn :global(svg) {
+		transition: transform 0.18s ease;
 	}
-	.audio-dot.on {
-		visibility: visible;
-		animation: voice-pulse 1.2s ease-in-out infinite;
+	button.icon-btn.folded :global(svg) {
+		transform: rotate(-90deg);
 	}
-
 	.error {
 		font-size: 0.8rem;
 		color: #94250a;
@@ -4641,25 +4755,8 @@
 		   after this stylesheet — only importance wins deterministically. */
 		border-left-color: #1c1c1e !important;
 	}
-	:global(.cm-editor .cm-fat-cursor) {
-		background-color: #1c1c1e !important;
-		color: #fff;
-	}
-	:global(.cm-editor:not(.cm-focused) .cm-fat-cursor) {
-		/* Blurred normal mode keeps the solid block: the vim plugin's
-		   default swaps it for a static pink outline. */
-		background-color: #1c1c1e !important;
-		outline: none !important;
-		color: #fff !important;
-	}
-	:global(.cm-editor:not(.cm-focused) > .cm-scroller > .cm-cursorLayer.cm-vimCursorLayer) {
-		/* CodeMirror only blinks cursor layers while focused; keep the
-		   normal-mode block blinking after a click out. */
-		animation: steps(1) cm-blink 1.2s infinite;
-	}
 	.app[data-focus-mode="scroll"] :global(.cm-cursorLayer) {
-		/* Scroll mode shows no prompt cursor at all (see enterScrollMode):
-		   the vim plugin draws its block layer regardless of focus. */
+		/* Scroll mode shows no prompt cursor at all (see enterScrollMode). */
 		display: none;
 	}
 	@media (prefers-color-scheme: dark) {
@@ -4672,28 +4769,8 @@
 		:global(.cm-editor .cm-cursor) {
 			border-left-color: #f2f2f7 !important;
 		}
-		:global(.cm-editor .cm-fat-cursor) {
-			background-color: #f2f2f7 !important;
-			color: #17171a;
-		}
-		:global(.cm-editor:not(.cm-focused) .cm-fat-cursor) {
-			background-color: #f2f2f7 !important;
-			color: #17171a !important;
-		}
 		/* !important throughout: the CodeMirror theme object injects its
-		light rules after this stylesheet, so only importance wins —
-		same call as the cursor above. */
-		:global(.cm-fence-bar) {
-			background: #2c2c2e !important;
-		}
-		:global(.cm-fence-lang) {
-			color: #aeaeb2 !important;
-		}
-		:global(.cm-fence-bar button) {
-			background: #1c1c1e !important;
-			border-color: #48484a !important;
-			color: #f2f2f7 !important;
-		}
+		light rules after this stylesheet, so only importance wins. */
 		:global(.cm-paste-marker) {
 			background: #2c2c2e !important;
 			border-color: #48484a !important;
@@ -4836,12 +4913,6 @@
 			color: #98989f;
 		}
 		.actions button:hover {
-			color: #f2f2f7;
-		}
-		.actions a.icon-btn {
-			color: #98989f;
-		}
-		.actions a.icon-btn:hover {
 			color: #f2f2f7;
 		}
 		/* Same specificity as the light-theme hover above, so dark wins. */
