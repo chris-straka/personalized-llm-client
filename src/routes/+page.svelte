@@ -86,6 +86,7 @@
 	} from "$lib/annotations";
 	import { createRefMemo } from "$lib/aidLoading";
 	import { translateSelection } from "$lib/translate";
+	import { isAndroidUserAgent, edgeSwipeTarget } from "$lib/platform";
 	import {
 		detectScript,
 		detectScripts,
@@ -411,6 +412,13 @@
 		});
 	}
 	let shortcutsOpen = $state(false);
+	/**
+	 * Android (phone) UI: the shortcuts modal shows touch gestures
+	 * instead of key chords, and edge swipes open the sidebars. Set
+	 * once on mount from the user agent — never reactive, never
+	 * persisted.
+	 */
+	let androidUI = $state(false);
 	let hasText = $state(false);
 	let altHeld = $state(false);
 	const canSubmit = $derived(
@@ -1744,6 +1752,61 @@
 			const reason: unknown = event.reason;
 			flashToast(`Rejection: ${reason instanceof Error ? reason.message : String(reason)}`);
 		});
+		try {
+			androidUI = isAndroidUserAgent(navigator.userAgent);
+		} catch {
+			androidUI = false;
+		}
+		// Edge swipes toggle the sidebars on touch screens (Android
+		// milestone): rightward from the left edge for chats, leftward
+		// from the right edge for settings. Toggle, not open-only: with
+		// no keyboard or Esc key, a swipe is the touch user's only way
+		// back out. Multi-touch cancels, and the mostly-horizontal rule
+		// keeps scrolling and code-block pans to themselves. Passive:
+		// the app never blocks a scroll.
+		let edgeTouch: { id: number; x: number; y: number } | null = null;
+		window.addEventListener(
+			"touchstart",
+			(event) => {
+				if (event.touches.length > 1) {
+					edgeTouch = null;
+					return;
+				}
+				const touch = event.touches[0];
+				if (!touch) return;
+				edgeTouch = { id: touch.identifier, x: touch.clientX, y: touch.clientY };
+			},
+			{ passive: true }
+		);
+		window.addEventListener(
+			"touchend",
+			(event) => {
+				const start = edgeTouch;
+				edgeTouch = null;
+				if (!start) return;
+				let ended: { identifier: number; clientX: number; clientY: number } | null = null;
+				for (let i = 0; i < event.changedTouches.length; i++) {
+					const candidate = event.changedTouches[i];
+					if (candidate && candidate.identifier === start.id) ended = candidate;
+				}
+				if (!ended) return;
+				const target = edgeSwipeTarget(start.x, start.y, ended.clientX, ended.clientY, window.innerWidth);
+				if (target === "chats") {
+					settings.sidebarCollapsed = !settings.sidebarCollapsed;
+					persistSettings();
+				} else if (target === "settings") {
+					settingsOpen = !settingsOpen;
+				}
+			},
+			{ passive: true }
+		);
+		window.addEventListener(
+			"touchcancel",
+			() => {
+				edgeTouch = null;
+			},
+			{ passive: true }
+		);
 		if (!promptEl) return;
 		editor = createPromptEditor(promptEl, promptOptions());
 		editor.focus();
@@ -3234,7 +3297,7 @@
 		>
 			<div class="modal" role="dialog" aria-modal="true" aria-labelledby="shortcuts-heading" data-fade-scroll>
 				<div class="modal-head">
-					<h2 id="shortcuts-heading">Keyboard shortcuts</h2>
+					<h2 id="shortcuts-heading">{androidUI ? "Touch gestures" : "Keyboard shortcuts"}</h2>
 					<button
 						type="button"
 						aria-label="Close shortcuts"
@@ -3244,7 +3307,29 @@
 						×
 					</button>
 				</div>
-				<p class="modal-note">Settings (⌘,) is labeled on its button; chat list (⌘B), new chat (⌘N), and send (Enter) live below.</p>
+				<p class="modal-note">
+				{#if androidUI}
+					Every action here is a swipe, tap, or touch-hold — no keyboard needed.
+				{:else}
+					Settings (⌘,) is labeled on its button; chat list (⌘B), new chat (⌘N), and send (Enter) live below.
+				{/if}
+			</p>
+				{#if androidUI}
+					<!-- Android milestone: key chords don't exist on a phone,
+					so the same modal teaches the touch equivalents. -->
+					<dl class="keys">
+						<div><dt>Chats sidebar</dt><dd>Swipe right from the left edge (toggles)</dd></div>
+						<div><dt>Settings</dt><dd>Swipe left from the right edge (toggles)</dd></div>
+						<div><dt>Send</dt><dd>The ↑ button (newline is your keyboard's return key)</dd></div>
+						<div><dt>Select text</dt><dd>Touch and hold a word, then drag the handles</dd></div>
+						<div><dt>Annotate</dt><dd>The Annotate menu appears by the selection</dd></div>
+						<div><dt>Speak text</dt><dd>Select it, then Speak in the menu</dd></div>
+						<div><dt>Message buttons</dt><dd>Always visible on touch — no hover needed</dd></div>
+						<div><dt>Edit a message</dt><dd>Its pencil button, then resend</dd></div>
+						<div><dt>Reply language</dt><dd>The language menu in the prompt</dd></div>
+						<div><dt>Stop voice</dt><dd>Skip in the voice bar; menus fade or close on tap-away</dd></div>
+					</dl>
+				{:else}
 				<dl class="keys">
 					<div><dt>New line</dt><dd>Shift+Enter</dd></div>
 					<div><dt>Stage message, no reply</dt><dd>⌥+Enter (seen at the next send, in order)</dd></div>
@@ -3268,6 +3353,8 @@
 					<div><dt>Delete this chat</dt><dd>⌘+⇧+Delete</dd></div>
 					<div><dt>Delete every chat</dt><dd>⌥+⌘+⇧+Delete</dd></div>
 				</dl>
+				{/if}
+				{#if !androidUI}
 				<h3>Prompt and message scroll</h3>
 				<p class="modal-note">
 					The prompt is a plain insert box: type, Enter sends
@@ -3277,6 +3364,7 @@
 					hops back in. J/K also walks the chat list after ⌘B, and
 					⇧⌘J / ⇧⌘K steps between chats.
 				</p>
+				{/if}
 			</div>
 		</div>
 	{/if}

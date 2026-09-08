@@ -229,6 +229,42 @@ Highest-risk check was annotation wrap-into-query (passed). Manual at end:
 - Ancient-language voices are best-effort; stated in A6.
 - Rollback: branch before risky work; each stage is a reviewed commit.
 
+## Android milestone — S24 Galaxy (planned Sep 2026, decided solo)
+
+Tauri mobile target (`tauri android`), same Svelte codebase, no Kotlin.
+Desktop ships first; these UA-gated branches already ride along, covered
+by `src/lib/platform.test.ts` + `e2e/android.e2e.ts`:
+
+- Voice guard: the native engine is macOS-bridge-gated
+  (`nativeTtsSupported()` false everywhere else), so Android silently
+  stays on Web voices — no System-voices UI can appear. The Auto label
+  already names the web voice it will use.
+- Shortcuts modal: Android UA swaps key chords for the touch list
+  (edge swipes, touch-hold select, Speak-in-menu, always-visible rows).
+- Rows: `@media (hover: none)` already forces message buttons visible —
+  there is no hover to wait for on touch.
+- Sidebars: left/right edge swipes toggle chats/settings
+  (`edgeSwipeTarget`: ≥48px, mostly horizontal, 24px edge zone;
+  multi-touch cancels; passive listeners never block scroll). Toggle,
+  not open-only — with no Esc key the swipe is the only way back out.
+- Selection/annotation: touch-hold starts the native selection and the
+  existing `selectionchange` → cursor menu path takes it from there
+  (menu anchors to the selection rect, cursorX falls back to its left);
+  long-press needs a device pass before tuning. Hover peek has no touch
+  equivalent — pin (tap the aid button) is the touch path.
+
+Still phone-only work (needs a device/emulator; not started):
+
+- `tauri android init`, signing config, Play/self-sign decision.
+- Share intent (`ACTION_SEND` text) → overlay/import into a chat draft:
+  the "grab text from other apps" ask. Needs manifest + intent plugin.
+- Keychain → Android Keystore for API keys (`secrets.ts` Tauri branch
+  assumes Keychain availability; add a mobile-store fallback).
+- System TTS voice inventory on Android (no AVSpeech bridge; enumerate
+  via a small Kotlin-free plugin or stay on Web voices).
+- Thumb-sized composer controls, viewport/`100dvh` audit, safe-area
+  insets, and a long-press-vs-scroll tuning pass on real hardware.
+
 ## Sources
 
 - `https://v2.tauri.app/`
