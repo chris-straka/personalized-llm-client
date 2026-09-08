@@ -68,7 +68,7 @@ fn keychain_delete(account: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
@@ -93,11 +93,14 @@ pub fn run() {
             #[cfg(desktop)]
             _app.set_menu(menu::build(_app.handle())?)?;
             Ok(())
-        })
-        .on_menu_event(|app, event| {
-            #[cfg(desktop)]
-            menu::forward(app, event.id().as_ref());
-        })
+        });
+    // App-menu clicks, desktop only: mobile has no menu bar, and
+    // Builder::on_menu_event itself is desktop-gated in Tauri 2.11.
+    #[cfg(desktop)]
+    let builder = builder.on_menu_event(|app, event| {
+        menu::forward(app, event.id().as_ref());
+    });
+    builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
