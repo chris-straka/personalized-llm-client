@@ -485,7 +485,7 @@
 		enterEditMode();
 	}
 
-	/** Enter the cursor chat from the keyboard and land in its prompt. */
+	/** Enter the cursor chat from the keyboard, close the list, and land in its prompt. */
 	function enterSideChat(): void {
 		const chats = chatState.chats;
 		if (chats.length === 0) return;
@@ -493,7 +493,26 @@
 		if (!item) return;
 		sideIdx = chats.indexOf(item);
 		selectChat(chatState, item.id);
+		settings.sidebarCollapsed = true;
+		persistSettings();
 		enterEditMode();
+	}
+
+	/**
+	 * Delete key on a focused sidebar chat: drop it and land on the chat
+	 * below (deleteChat slides there, or mints a blank when the list
+	 * empties). The list re-renders async, so clamp the cursor now and
+	 * focus the laid-out row on the next frame.
+	 */
+	function deleteSideChat(): void {
+		const chats = chatState.chats;
+		if (chats.length === 0) return;
+		const at = Math.min(Math.max(sideIdx, 0), chats.length - 1);
+		const item = chats[at];
+		if (!item) return;
+		dropChat(item.id);
+		sideIdx = Math.min(Math.max(at, 0), chatState.chats.length - 1);
+		requestAnimationFrame(() => focusSideChat(sideIdx));
 	}
 
 	/** Unsent composer extras quote one chat's messages — never carry over. */
@@ -1589,13 +1608,15 @@
 
 	/**
 	 * Reset the voice language to the checked keyboard input source
-	 * (⇧⌘Delete's second half). Silent on success by design; only an
-	 * unrecognized layout or non-Mac runtime toasts, since the language
-	 * is then left untouched and the reset would otherwise fail silently.
+	 * (⇧⌘Delete's second half). No source id means the bridge is down
+	 * (browser preview): nothing to reset from, so stay silent — routine
+	 * chat deletions must never toast. Only a positively unrecognized
+	 * layout toasts, since the language is then left untouched.
 	 */
 	async function resetVoiceLangFromKeyboard(): Promise<void> {
 		const sourceId = await currentKeyboardInputSource();
-		const locale = sourceId ? voiceLocaleForInputSource(sourceId) : null;
+		if (!sourceId) return;
+		const locale = voiceLocaleForInputSource(sourceId);
 		if (!locale) {
 			flashToast("Couldn't tell the keyboard layout — voice language unchanged.");
 			return;
@@ -1849,17 +1870,30 @@
 					return;
 				}
 				if (event.code === "KeyH") {
-					// ⇧⌘H mirrors ⌘B for the chat list.
+					// ⇧⌘H with settings open closes them and lands in the
+					// prompt; otherwise it mirrors ⌘B for the chat list.
 					event.preventDefault();
 					event.stopPropagation();
+					if (settingsOpen) {
+						settingsOpen = false;
+						enterEditMode();
+						return;
+					}
 					toggleSidebar();
 					if (!settings.sidebarCollapsed) focusFirstSideChat();
 					return;
 				}
 				if (event.code === "KeyL") {
-					// ⇧⌘L mirrors ⌘, for the settings panel.
+					// ⇧⌘L with the chat list open closes it and lands in
+					// the prompt; otherwise it mirrors ⌘, for settings.
 					event.preventDefault();
 					event.stopPropagation();
+					if (!settings.sidebarCollapsed) {
+						settings.sidebarCollapsed = true;
+						persistSettings();
+						enterEditMode();
+						return;
+					}
 					settingsOpen = !settingsOpen;
 					return;
 				}
@@ -1976,8 +2010,10 @@
 			}
 			const inSidebar = (event.target as HTMLElement | null)?.closest("aside");
 			if (!settings.sidebarCollapsed && inSidebar) {
-				// Open chat list owns its keys: j/k walks chats, space/l
-				// enters the cursor chat and lands in its prompt.
+				// Open chat list owns its keys: j/k walks chats AND
+				// switches to each one (preview-as-you-go), space/l
+				// enters the cursor chat, closes the list, and lands in
+				// its prompt.
 				if (
 					!event.metaKey &&
 					!event.ctrlKey &&
@@ -1993,6 +2029,8 @@
 					const from =
 						sideIdx >= 0 ? sideIdx : chats.findIndex((c) => c.id === chatState.activeChatId);
 					focusSideChat(from + delta);
+					const landed = chats[Math.min(Math.max(sideIdx, 0), chats.length - 1)];
+					if (landed) selectChat(chatState, landed.id);
 					return;
 				}
 				if (
@@ -2005,6 +2043,19 @@
 					// it over so entering always lands in the prompt.
 					event.preventDefault();
 					enterSideChat();
+					return;
+				}
+				if (
+					!event.metaKey &&
+					!event.ctrlKey &&
+					!event.altKey &&
+					!event.shiftKey &&
+					(event.key === "Delete" || event.key === "Backspace")
+				) {
+					// Delete drops the focused chat and lands on the one
+					// below (or a fresh blank when the list empties).
+					event.preventDefault();
+					deleteSideChat();
 					return;
 				}
 			}
@@ -2395,14 +2446,6 @@
 			<button type="button" class="toast" title="Click to copy" aria-live="polite" transition:fade={{ duration: 160 }} onclick={copyToast}>{toast}</button>
 		{/if}
 		<header role="toolbar" aria-label="App" tabindex="-1" onmousedown={dragWindow}>
-			<button
-				type="button"
-				class="settings-btn"
-				aria-label="Toggle chat list"
-				onclick={toggleSidebar}
-			>
-				<span class="key-hint" aria-hidden="true">⌘B</span>
-			</button>
 			<span class="tokens-wrap">
 				<span class="tokens selectable" title="{total} tokens total this chat">{formatTokens(split.prompt)} in / {formatTokens(split.completion)} out</span>
 				{#if activeReplyLang}
@@ -2410,24 +2453,17 @@
 						<button
 							type="button"
 							class="lang-chip"
-							title="Reply language — click to clear"
+							title="{activeReplyLang.name} — click to clear"
+							aria-label="Reply language {activeReplyLang.name} — click to clear"
 							onclick={clearReplyLang}
 						>
-							{activeReplyLang.name} <ActionIcon kind="close" />
+							<span aria-hidden="true">{activeReplyLang.badge}</span> <ActionIcon kind="close" />
 						</button>
 					</span>
 				{/if}
 			</span>
 			<span class="spacer"></span>
 			<div class="top-actions">
-				<button
-					type="button"
-					class="settings-btn"
-					aria-label="New chat"
-					onclick={doNewChat}
-				>
-					<span class="key-hint" aria-hidden="true">⌘N</span>
-				</button>
 				<button
 					type="button"
 					class="settings-btn"
@@ -2611,6 +2647,15 @@
 						<button
 							type="button"
 							class="icon-btn"
+							data-tip="Delete this message (⌘D)"
+							aria-label="Delete this message (⌘D)"
+							onclick={() => deleteMessage(chatState, i)}
+						>
+							<ActionIcon kind="delete" />
+						</button>
+						<button
+							type="button"
+							class="icon-btn"
 							class:active={speakingId === msg.id}
 							data-tip={speakTitle(msg)}
 							aria-label={speakTitle(msg)}
@@ -2622,17 +2667,8 @@
 						>
 							<ActionIcon kind="speak" />
 						</button>
-						<button
-							type="button"
-							class="icon-btn"
-							data-tip="Delete this message (⌘D)"
-							aria-label="Delete this message (⌘D)"
-							onclick={() => deleteMessage(chatState, i)}
-						>
-							<ActionIcon kind="delete" />
-						</button>
 						{#if msg.role === "assistant" && !streamingThis}
-							<!-- Reading aids live here, right of delete: hover
+							<!-- Reading aids live here, right of speak: hover
 							previews, click pins (show original unpins). Model
 							and local aids sit side by side on mixed messages;
 							exactly one shows at a time, last click wins. -->
@@ -3155,7 +3191,6 @@
 			settingsOpen = false;
 			pulseCursor();
 		}}
-			onVoiceChange={setVoiceEnabled}
 			onShortcuts={() => (shortcutsOpen = true)}
 		/>
 		</div>
@@ -3182,7 +3217,7 @@
 						×
 					</button>
 				</div>
-				<p class="modal-note">Chat list (⌘B), new chat (⌘N), settings (⌘,), and send (Enter) are labeled on their buttons.</p>
+				<p class="modal-note">Settings (⌘,) is labeled on its button; chat list (⌘B), new chat (⌘N), and send (Enter) live below.</p>
 				<dl class="keys">
 					<div><dt>New line</dt><dd>Shift+Enter</dd></div>
 					<div><dt>Stage message, no reply</dt><dd>⌥+Enter (seen at the next send, in order)</dd></div>
@@ -3270,8 +3305,25 @@
 		/* Never wrap mid-collapse: clip instead of reflowing over itself. */
 		white-space: nowrap;
 	}
+	/* The current chat wears a marker bar, never a background — so the
+	hover wash reads on every row including the current one. */
+	aside ul button.side-chat {
+		position: relative;
+	}
 	aside button.active {
-		background: #ececf1;
+		background: transparent;
+		font-weight: 650;
+	}
+	aside button.active::before {
+		content: "";
+		position: absolute;
+		left: 0.12rem;
+		top: 50%;
+		transform: translateY(-50%);
+		width: 0.22rem;
+		height: 1.05rem;
+		border-radius: 999px;
+		background: #5a9bf7;
 	}
 	aside ul button:hover {
 		background: #ececf1;
@@ -4975,7 +5027,7 @@
 			border-color: #38383a;
 		}
 		aside button.active {
-			background: #2c2c2e;
+			background: transparent;
 		}
 		aside ul button:hover {
 			background: #2c2c2e;

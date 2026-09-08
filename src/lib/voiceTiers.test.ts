@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hasQualityVoices, tierLabel, voicesForLang } from "./voiceTiers";
+import { hasQualityVoices, tierLabel, voicesForLang, autoVoiceForLang } from "./voiceTiers";
 import type { NativeVoice } from "./nativeTts";
 
 const voice = (id: string, lang: string, quality: number, name?: string): NativeVoice => ({
@@ -84,6 +84,35 @@ describe("voicesForLang", () => {
 			name: "Jamie",
 			lang: "en-GB",
 			tier: "premium"
+		});
+	});
+});
+
+describe("autoVoiceForLang", () => {
+	const jamie = voice("com.apple.voice.premium.en-GB.Malcolm", "en-GB", 3, "Jamie");
+	const zoe = voice("com.apple.voice.enhanced.en-US.Zoe", "en-US", 2, "Zoe");
+	const sam = voice("com.apple.voice.compact.en-US.Samantha", "en-US", 1, "Samantha");
+	const voices = [sam, zoe, jamie];
+
+	it("prefers the saved pick when it matches the language", () => {
+		expect(autoVoiceForLang(voices, "en-US", zoe.id)).toMatchObject({ name: "Zoe" });
+	});
+
+	it("picks best installed otherwise: exact locale, then quality", () => {
+		// Jamie is premium but en-GB: Zoe's exact en-US wins the +10.
+		expect(autoVoiceForLang(voices, "en-US", null)).toMatchObject({
+			name: "Zoe",
+			tier: "enhanced"
+		});
+		// Nothing installed for French: no resolution.
+		expect(autoVoiceForLang(voices, "fr-FR", null)).toBeNull();
+		expect(autoVoiceForLang([], "en-US", null)).toBeNull();
+	});
+
+	it("reaches default-tier voices that the picker hides", () => {
+		expect(autoVoiceForLang([sam], "en-US", null)).toMatchObject({
+			name: "Samantha",
+			tier: "default"
 		});
 	});
 });

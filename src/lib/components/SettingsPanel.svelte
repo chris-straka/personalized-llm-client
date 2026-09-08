@@ -13,7 +13,7 @@
 		nativeVoices,
 		openVoiceSettings
 	} from "$lib/nativeTts";
-	import { hasQualityVoices, voicesForLang } from "$lib/voiceTiers";
+	import { hasQualityVoices, voicesForLang, autoVoiceForLang } from "$lib/voiceTiers";
 	import type { NativeVoice } from "$lib/nativeTts";
 	import { onMount } from "svelte";
 
@@ -22,11 +22,9 @@
 		onClose: () => void;
 		/** Opens the shortcuts modal (owned by the page). */
 		onShortcuts: () => void;
-		/** Flips voice readback (stops in-flight speech when turning off). */
-		onVoiceChange: (on: boolean) => void;
 	}
 
-	let { settings, onClose, onShortcuts, onVoiceChange }: Props = $props();
+	let { settings, onClose, onShortcuts }: Props = $props();
 	let updateStatus = $state("");
 	let checkingUpdate = $state(false);
 	let modelLoading = $state(false);
@@ -77,6 +75,14 @@
 	/** Picker options follow the Latin-script voice language field. */
 	const voiceLangTag = $derived(settings.voiceLang?.trim() || "en-US");
 	const voiceOptions = $derived(voicesForLang(installedVoices, voiceLangTag));
+	/** The voice Auto would use next for the tag above (label only —
+	the bridge stays authoritative at speak time). */
+	const autoVoice = $derived(autoVoiceForLang(installedVoices, voiceLangTag, settings.nativeVoiceId));
+	const autoLabel = $derived(
+		autoVoice
+			? `Auto - ${autoVoice.name} (${autoVoice.tier.charAt(0).toUpperCase()}${autoVoice.tier.slice(1)})`
+			: "Auto"
+	);
 	// A picked voice never reads another language: when the tag moves on
 	// from the saved pick, fall back to Auto instead of a blank field.
 	$effect(() => {
@@ -462,26 +468,22 @@
 		</fieldset>
 	{/if}
 	<label class="check">
-		<input
-			type="checkbox"
-			checked={settings.voice}
-			onchange={(e) => onVoiceChange(e.currentTarget.checked)}
-		/>
-		Voice readback
-		<span class="key-hint" aria-hidden="true">Ctrl+⌥+S</span>
-	</label>
-	<label class="check">
 		<input type="checkbox" bind:checked={settings.ownBubble} />
 		Background on my messages
 	</label>
-	<label class="check">
-		<input type="checkbox" bind:checked={settings.hoverUserActions} />
-		My message buttons only on hover
-	</label>
-	<label class="check">
-		<input type="checkbox" bind:checked={settings.hoverAssistantActions} />
-		AI message buttons only on hover
-	</label>
+	<!-- One row for both hover toggles: the label names the behavior once,
+	each box names whose buttons it covers. -->
+	<fieldset class="hover-row">
+		<legend>Message buttons only on hover for…</legend>
+		<label class="check">
+			<input type="checkbox" bind:checked={settings.hoverUserActions} />
+			my msgs
+		</label>
+		<label class="check">
+			<input type="checkbox" bind:checked={settings.hoverAssistantActions} />
+			AI msgs
+		</label>
+	</fieldset>
 	{#if nativeVoice}
 		<fieldset class="voice-engine">
 			<legend>Voice engine</legend>
@@ -509,8 +511,7 @@
 				System voices use macOS speech and sound much better. To install
 				system voices, go to
 				<button type="button" title="Open Accessibility settings" onclick={openVoiceSetup}>a11y</button>
-				then Read &amp; Speak → System Voice -> ⓘ to install new
-				system voices.
+				→ Read &amp; Speak → System Voice → ⓘ to install new system voices.
 				{#if voiceSetupError}<span role="alert"> (couldn't open it automatically)</span>{/if}
 			</p>
 			{#if voiceLoadError}
@@ -531,7 +532,7 @@
 								settings.nativeVoiceId = e.currentTarget.value || null;
 							}}
 						>
-							<option value="">Auto (System voice, else best)</option>
+							<option value="">{autoLabel}</option>
 							{#each voiceOptions as option (option.id)}
 								<option value={option.id}>
 									{option.name} ·
@@ -589,7 +590,7 @@
 			<input
 				type="range"
 				min="80"
-				max="140"
+				max="200"
 				step="5"
 				value={Math.round(settings.fontScale * 100)}
 				aria-label="Text size percent"
@@ -913,6 +914,14 @@
 	+ picker): a breath more room before Voice language. */
 	.voice-engine {
 		margin-bottom: 1.2rem;
+	}
+	/* Hover toggles share one legend row instead of repeating the label. */
+	.hover-row {
+		display: flex;
+		gap: 1.2rem;
+	}
+	.hover-row legend {
+		margin-bottom: 0.3rem;
 	}
 	legend {
 		font-size: 0.83rem;

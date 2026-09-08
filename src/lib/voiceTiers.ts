@@ -29,6 +29,38 @@ function toOption(voice: NativeVoice): VoiceOption {
 	return { id: voice.id, name: voice.name, lang: voice.lang, tier: tierLabel(voice) };
 }
 
+/**
+ * The voice Auto would actually use for `lang`: the saved pick when it
+ * matches the language family, else the best installed voice (exact
+ * locale first, then quality, then name). Mirrors the Rust auto-pick
+ * closely enough for a picker label — the bridge stays authoritative at
+ * speak time (System Voice id, registry order, and eloquence tie-breaks
+ * live there). Pure and unit-tested.
+ */
+export function autoVoiceForLang(
+	voices: NativeVoice[],
+	lang: string,
+	savedId: string | null
+): VoiceOption | null {
+	const exactTag = lang.trim().toLowerCase();
+	const primary = exactTag.split(/[-_]/)[0] ?? "";
+	const family = (tag: string): boolean => tag.toLowerCase().split(/[-_]/)[0] === primary;
+	const saved = savedId ? voices.find((voice) => voice.id === savedId) : undefined;
+	if (saved && family(saved.lang)) return toOption(saved);
+	let best: NativeVoice | null = null;
+	let bestScore = Number.MIN_SAFE_INTEGER;
+	for (const voice of voices) {
+		const exact = voice.lang.toLowerCase() === exactTag;
+		if (!exact && !family(voice.lang)) continue;
+		const score = voice.quality + (exact ? 10 : 0);
+		if (best === null || score > bestScore || (score === bestScore && voice.name < best.name)) {
+			best = voice;
+			bestScore = score;
+		}
+	}
+	return best ? toOption(best) : null;
+}
+
 function byName(a: VoiceOption, b: VoiceOption): number {
 	return a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
 }
