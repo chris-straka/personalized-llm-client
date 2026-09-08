@@ -1,5 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
+#[cfg(all(target_os = "macos", debug_assertions))]
+mod dev_icon;
 mod keyboard;
 mod tts;
 
@@ -77,8 +79,18 @@ pub fn run() {
             tts::tts_speak,
             tts::tts_stop,
             tts::tts_voices,
+            tts::tts_render,
+            tts::tts_save_audio,
             tts::tts_identify_lang
         ])
+        .setup(|app| {
+            // Dev-only: shrink the oversized runtime Dock tile (see dev_icon).
+            #[cfg(all(target_os = "macos", debug_assertions))]
+            if let Some(window) = tauri::Manager::get_webview_window(app.handle(), "main") {
+                dev_icon::watch(window);
+            }
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -1,8 +1,8 @@
 /**
  * Reply languages (Round 2). Choosing one appends a "Reply in X." suffix to
  * the system prompt and sets the Latin-script voice locale. Groups keep the
- * requested order; national languages render as ISO-code badges, classics
- * as their chosen markers.
+ * requested order; every language renders as its chosen marker (flag emoji
+ * for national languages, thematic emoji for classics).
  */
 
 export interface ReplyLanguage {
@@ -31,37 +31,47 @@ const LANG = (
 });
 
 export const EUROPEAN_LANGUAGES: ReplyLanguage[] = [
-	LANG("fr", "French", "fr-FR", "FR"),
-	LANG("de", "German", "de-DE", "DE"),
-	LANG("es", "Spanish", "es-ES", "ES"),
-	LANG("pt", "Portuguese", "pt-PT", "PT"),
-	LANG("ru", "Russian", "ru-RU", "RU"),
-	LANG("pl", "Polish", "pl-PL", "PL"),
-	LANG("it", "Italian", "it-IT", "IT"),
-	LANG("no", "Norwegian", "nb-NO", "NO"),
-	LANG("cs", "Czech", "cs-CZ", "CZ"),
-	LANG("el", "Greek", "el-GR", "GR"),
-	LANG("ro", "Romanian", "ro-RO", "RO"),
-	LANG("bg", "Bulgarian", "bg-BG", "BG"),
-	LANG("hu", "Hungarian", "hu-HU", "HU"),
-	LANG("uk", "Ukrainian", "uk-UA", "UA"),
-	LANG("nl", "Dutch", "nl-NL", "NL")
+	LANG("fr", "French", "fr-FR", "🇫🇷"),
+	LANG("de", "German", "de-DE", "🇩🇪"),
+	LANG("es", "Spanish", "es-ES", "🇪🇸"),
+	LANG("pt", "Portuguese", "pt-PT", "🇵🇹"),
+	LANG("ru", "Russian", "ru-RU", "🇷🇺"),
+	LANG("pl", "Polish", "pl-PL", "🇵🇱"),
+	LANG("it", "Italian", "it-IT", "🇮🇹"),
+	LANG("no", "Norwegian", "nb-NO", "🇳🇴"),
+	LANG("cs", "Czech", "cs-CZ", "🇨🇿"),
+	LANG("el", "Greek", "el-GR", "🇬🇷"),
+	LANG("ro", "Romanian", "ro-RO", "🇷🇴"),
+	LANG("bg", "Bulgarian", "bg-BG", "🇧🇬"),
+	LANG("hu", "Hungarian", "hu-HU", "🇭🇺"),
+	LANG("uk", "Ukrainian", "uk-UA", "🇺🇦"),
+	LANG("nl", "Dutch", "nl-NL", "🇳🇱"),
+	LANG("sv", "Swedish", "sv-SE", "🇸🇪"),
+	LANG("da", "Danish", "da-DK", "🇩🇰"),
+	LANG("fi", "Finnish", "fi-FI", "🇫🇮"),
+	LANG("sr", "Serbian", "sr-RS", "🇷🇸"),
+	LANG("sk", "Slovak", "sk-SK", "🇸🇰")
 ];
 
 export const ASIAN_LANGUAGES: ReplyLanguage[] = [
-	LANG("zh", "Chinese", "zh-CN", "CN"),
-	LANG("ja", "Japanese", "ja-JP", "JP"),
-	LANG("ko", "Korean", "ko-KR", "KR"),
-	LANG("ar", "Arabic (MSA)", "ar-SA", "SA", "Reply in Modern Standard Arabic."),
-	LANG("hi", "Hindi", "hi-IN", "IN"),
-	LANG("id", "Indonesian", "id-ID", "ID"),
-	LANG("tr", "Turkish", "tr-TR", "TR"),
-	LANG("fa", "Persian", "fa-IR", "IR"),
-	LANG("th", "Thai", "th-TH", "TH"),
-	LANG("vi", "Vietnamese", "vi-VN", "VN"),
-	LANG("hy", "Armenian", "hy-AM", "AM"),
-	LANG("ur", "Urdu", "ur-PK", "PK"),
-	LANG("he", "Hebrew", "he-IL", "IL")
+	LANG("zh", "Chinese", "zh-CN", "🇹🇼"),
+	LANG("ja", "Japanese", "ja-JP", "🇯🇵"),
+	LANG("ko", "Korean", "ko-KR", "🇰🇷"),
+	LANG("ar", "Arabic (MSA)", "ar-SA", "🇸🇦", "Reply in Modern Standard Arabic."),
+	LANG("hi", "Hindi", "hi-IN", "🇮🇳"),
+	LANG("id", "Indonesian", "id-ID", "🇮🇩"),
+	LANG("tr", "Turkish", "tr-TR", "🇹🇷"),
+	LANG("fa", "Persian", "fa-IR", "🇮🇷"),
+	LANG("th", "Thai", "th-TH", "🇹🇭"),
+	LANG("vi", "Vietnamese", "vi-VN", "🇻🇳"),
+	LANG("hy", "Armenian", "hy-AM", "🇦🇲"),
+	LANG("ur", "Urdu", "ur-PK", "🇵🇰"),
+	LANG("he", "Hebrew", "he-IL", "🇮🇱"),
+	LANG("bn", "Bengali", "bn-BD", "🇧🇩"),
+	LANG("ta", "Tamil", "ta-IN", "🇱🇰"),
+	LANG("tl", "Tagalog", "fil-PH", "🇵🇭"),
+	LANG("ms", "Malay", "ms-MY", "🇲🇾"),
+	LANG("yue", "Cantonese", "zh-HK", "🇭🇰", "Reply in Cantonese.")
 ];
 
 export const CLASSICAL_LANGUAGES: ReplyLanguage[] = [
@@ -70,8 +80,13 @@ export const CLASSICAL_LANGUAGES: ReplyLanguage[] = [
 	LANG("sa", "Sanskrit", "hi-IN", "🪷", "Reply in Sanskrit.")
 ];
 
+export const AFRICAN_LANGUAGES: ReplyLanguage[] = [
+	LANG("sw", "Swahili", "sw-KE", "🇰🇪"),
+	LANG("am", "Amharic", "am-ET", "🇪🇹")
+];
+
 export interface LanguageMenu {
-	id: "europe" | "asia" | "classics";
+	id: "europe" | "asia" | "africa" | "classics";
 	marker: string;
 	label: string;
 	languages: ReplyLanguage[];
@@ -80,6 +95,7 @@ export interface LanguageMenu {
 export const LANGUAGE_MENUS: LanguageMenu[] = [
 	{ id: "europe", marker: "🌍", label: "Europe", languages: EUROPEAN_LANGUAGES },
 	{ id: "asia", marker: "🌏", label: "Asia", languages: ASIAN_LANGUAGES },
+	{ id: "africa", marker: "🐘", label: "Africa", languages: AFRICAN_LANGUAGES },
 	{ id: "classics", marker: "🏛", label: "Classics", languages: CLASSICAL_LANGUAGES }
 ];
 

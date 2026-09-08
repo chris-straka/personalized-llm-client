@@ -1,5 +1,6 @@
 import type {
 	ChatMessage,
+	ChatOptions,
 	ChatProvider,
 	ChatResult,
 	StreamCallbacks
@@ -14,20 +15,24 @@ import { messageText } from "./types";
 export class MockProvider implements ChatProvider {
 	readonly id = "mock";
 
-	async chat(messages: ChatMessage[]): Promise<ChatResult> {
-		return {
+	chat(messages: ChatMessage[]): Promise<ChatResult> {
+		// Promise interface (not async): the reply is canned, but the
+		// provider contract is async so the signature stays put.
+		return Promise.resolve({
 			content: canned(messages),
 			usage: { prompt: 10, completion: 12, total: 22 }
-		};
+		});
 	}
 
 	async stream(
 		messages: ChatMessage[],
-		callbacks: StreamCallbacks
+		callbacks: StreamCallbacks,
+		opts?: ChatOptions
 	): Promise<ChatResult> {
 		const full = canned(messages);
 		for (const word of full.split(/(?<=\s)/)) {
 			await new Promise((r) => setTimeout(r, 15));
+			opts?.signal?.throwIfAborted();
 			callbacks.onToken(word);
 		}
 		return { content: full, usage: { prompt: 10, completion: 12, total: 22 } };

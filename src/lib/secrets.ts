@@ -50,7 +50,11 @@ export async function getSecret(account: string): Promise<string | null> {
 
 export async function setSecret(account: string, secret: string): Promise<void> {
 	if (tauriBackendAvailable()) {
-		await invoke("keychain_set", { account, secret });
+		try {
+			await invoke("keychain_set", { account, secret });
+		} catch {
+			// Locked keychain: the key stays session-only, like its siblings.
+		}
 		return;
 	}
 	try {
@@ -83,11 +87,13 @@ export async function deleteSecret(account: string): Promise<void> {
 export async function hydrateSecrets(settings: AppSettings): Promise<string[]> {
 	const hydrated: string[] = [];
 	for (const id of Object.keys(settings.providers)) {
-		if (settings.providers[id].apiKey.trim()) continue;
+		const entry = settings.providers[id];
+		if (!entry) continue;
+		if (entry.apiKey.trim()) continue;
 		try {
 			const secret = await getSecret(secretAccount(id));
 			if (secret) {
-				settings.providers[id].apiKey = secret;
+				entry.apiKey = secret;
 				hydrated.push(id);
 			}
 		} catch {
@@ -104,7 +110,7 @@ export async function hydrateSecrets(settings: AppSettings): Promise<string[]> {
  */
 export async function persistSecrets(settings: AppSettings): Promise<void> {
 	for (const id of Object.keys(settings.providers)) {
-		const key = settings.providers[id].apiKey.trim();
+		const key = settings.providers[id]?.apiKey.trim();
 		if (!key) continue;
 		try {
 			await setSecret(secretAccount(id), key);

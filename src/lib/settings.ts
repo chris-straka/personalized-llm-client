@@ -1,23 +1,37 @@
 import { getProviderDef, listProviders, type ProviderDef } from "./providers/registry";
 import { replyLanguageFor } from "./languages";
+import {
+	thinkingFor,
+	resolveThinkingId,
+	type ThinkingSupport
+} from "./providers/thinking";
 
-export type ThinkingLevel = "low" | "medium" | "high";
 export type VoiceEngine = "web" | "native";
 
-export const THINKING_LEVELS: ThinkingLevel[] = ["low", "medium", "high"];
+/**
+ * Active provider entry. loadSettings backfills every listed id and clamps
+ * activeProviderId to one of them, so a missing entry means corrupt state —
+ * fail loud instead of scattering possibly-undefined through the panel.
+ */
+export function activeProviderSettings(s: AppSettings): ProviderSettings {
+	const found = s.providers[s.activeProviderId];
+	if (!found) throw new Error(`unknown provider ${s.activeProviderId}`);
+	return found;
+}
 
-/** System-prompt deliberation hint per level (medium = the plain default). */
-export const THINKING_HINT: Record<ThinkingLevel, string> = {
-	low: "Answer directly with minimal deliberation.",
-	medium: "",
-	high: "Think carefully before answering."
-};
+/**
+ * Thinking support for the active provider + model (see
+ * providers/thinking.ts): only the levels the model actually offers.
+ */
+export function activeThinkingSupport(settings: AppSettings): ThinkingSupport {
+	const provider = settings.providers[settings.activeProviderId];
+	return thinkingFor(settings.activeProviderId, provider?.model ?? "");
+}
 
-export function cycleThinkingLevel(level: ThinkingLevel, direction: 1 | -1): ThinkingLevel {
-	const next =
-		(THINKING_LEVELS.indexOf(level) + direction + THINKING_LEVELS.length) %
-		THINKING_LEVELS.length;
-	return THINKING_LEVELS[next];
+/** Saved thinking option for the active provider, clamped to its dial. */
+export function activeThinkingId(settings: AppSettings): string {
+	const support = activeThinkingSupport(settings);
+	return resolveThinkingId(support, settings.thinking[settings.activeProviderId]);
 }
 
 export interface ProviderSettings {
@@ -35,9 +49,9 @@ export interface AppSettings {
 	/** User-added provider defs (Cline-style); settings live in `providers`. */
 	customProviders: ProviderDef[];
 	systemPrompt: string;
-	thinkingLevel: ThinkingLevel;
-	/** Reading aids (pinyin / furigana / tashkeel). Off unless toggled. */
-	readingAids: boolean;
+	/** Native thinking option id per provider (see providers/thinking.ts);
+	 * missing entries resolve to that model's default. */
+	thinking: Record<string, string>;
 	/** Voice readback. Off unless toggled. */
 	voice: boolean;
 	voiceEngine: VoiceEngine;
@@ -60,6 +74,18 @@ export interface AppSettings {
 	sidebarCollapsed: boolean;
 	/** Text-size multiplier for messages and the prompt (1 = default). */
 	fontScale: number;
+	/**
+	 * The user explicitly picked the voice locale (voice-language field),
+	 * so restarts must keep it. Unset when a reply pill overrides the
+	 * voice: the next launch returns to the system default instead.
+	 */
+	voiceLangPinned: boolean;
+	/** Shade the user's own messages like a bubble. Off = plain like replies. */
+	ownBubble: boolean;
+	/** My message action buttons appear only on hover/focus. Off = always shown. */
+	hoverUserActions: boolean;
+	/** AI message action buttons appear only on hover/focus. Off = always shown. */
+	hoverAssistantActions: boolean;
 }
 
 const STORAGE_KEY = "ccez-studio-settings-v1";
@@ -111,8 +137,8 @@ export function envProviderDefaults(
 	for (const id of ["deepseek", "muse"]) {
 		const def = getProviderDef(id);
 		providers[id] = {
-			baseUrl: firstSet(env, BASE_URL_ALIASES[id]) || def.defaultBaseUrl,
-			apiKey: firstSet(env, ENV_ALIASES[id]),
+			baseUrl: firstSet(env, BASE_URL_ALIASES[id] ?? []) || def.defaultBaseUrl,
+			apiKey: firstSet(env, ENV_ALIASES[id] ?? []),
 			model: def.defaultModel,
 			models: []
 		};
@@ -144,8 +170,7 @@ export function defaultSettings(): AppSettings {
 		providers,
 		customProviders: [],
 		systemPrompt: DEFAULT_SYSTEM_PROMPT,
-		thinkingLevel: "high",
-		readingAids: false,
+		thinking: {},
 		voice: false,
 		// Native first: this is a Mac-first app, and every runtime without
 		// system voices corrects itself back to web on the support probe.
@@ -155,16 +180,20 @@ export function defaultSettings(): AppSettings {
 		replyLang: null,
 		vim: true,
 		sidebarCollapsed: true,
-		fontScale: 1
+		fontScale: 1,
+		ownBubble: true,
+		hoverUserActions: false,
+		hoverAssistantActions: false,
+		voiceLangPinned: false
 	};
 }
 
-/** Base prompt + thinking deliberation hint + reply-language suffix. */
-export function effectiveSystemPrompt(settings: AppSettings): string {
+/** Base prompt + thinking hint (generic providers only) + reply-language suffix. */
+export function effectiveSystemPrompt(settings: AppSettings, replyCode?: string | null): string {
 	const parts = [settings.systemPrompt.trim()];
-	const hint = THINKING_HINT[settings.thinkingLevel] ?? "";
+	const hint = activeThinkingSupport(settings).promptHint(activeThinkingId(settings));
 	if (hint) parts.push(hint);
-	const lang = replyLanguageFor(settings.replyLang);
+	const lang = replyLanguageFor(replyCode ?? settings.replyLang);
 	if (lang) parts.push(lang.prompt);
 	return parts.filter(Boolean).join(" ");
 }
@@ -215,7 +244,9 @@ export function loadSettings(store?: KeyValueStore): AppSettings {
 		// Backfill the model cache (provider entries from older saves
 		// replace the fresh ones wholesale, so the field is missing).
 		for (const id of Object.keys(merged.providers)) {
-			if (!Array.isArray(merged.providers[id].models)) merged.providers[id].models = [];
+			const entry = merged.providers[id];
+			if (!entry) continue;
+			if (!Array.isArray(entry.models)) entry.models = [];
 		}
 		// Clamp the text-size multiplier (range inputs persist strings).
 		if (typeof merged.fontScale !== "number" || !(merged.fontScale >= 0.5 && merged.fontScale <= 2)) {
@@ -230,10 +261,60 @@ export function loadSettings(store?: KeyValueStore): AppSettings {
 		// up `.env` keys without clobbering anything already saved.
 		const env = devEnv();
 		for (const id of Object.keys(merged.providers)) {
-			if (!merged.providers[id].apiKey) {
-				merged.providers[id].apiKey = firstSet(env, ENV_ALIASES[id] ?? []);
+			const entry = merged.providers[id];
+			if (!entry) continue;
+			if (!entry.apiKey) {
+				entry.apiKey = firstSet(env, ENV_ALIASES[id] ?? []);
 			}
 		}
+		// Reply languages are per-chat and per-session (loadChats strips
+		// them), so a restart opens with no pill anywhere. The voice the
+		// pill overrode comes back with it: a persisted voice matching the
+		// dropped pill's voice is the override's fingerprint. A deliberate
+		// pick (pinned, or a non-default voice no pill explains) survives.
+		const dropped = merged.replyLang ? replyLanguageFor(merged.replyLang) : null;
+		merged.replyLang = null;
+		if (dropped && merged.voiceLang === dropped.voice) {
+			merged.voiceLang = fresh.voiceLang;
+		}
+		if (!merged.voiceLangPinned) merged.voiceLang = fresh.voiceLang;
+		// The single hover-actions toggle split in two: saves predating the
+		// split carry the old key (fresh defaults already filled both new
+		// ones, so read the parsed save, not the merge).
+		const legacy = parsed as Partial<AppSettings> & { hoverActions?: unknown };
+		if (typeof parsed.hoverUserActions !== "boolean") {
+			merged.hoverUserActions = legacy.hoverActions === true;
+		}
+		if (typeof parsed.hoverAssistantActions !== "boolean") {
+			merged.hoverAssistantActions = legacy.hoverActions === true;
+		}
+		delete (merged as unknown as Record<string, unknown>).hoverActions;
+		// The global reading-aids toggle is gone (per-message pins only):
+		// drop the retired key from older saves.
+		delete (merged as unknown as Record<string, unknown>).readingAids;
+		// The shared low/medium/high dial became per-provider native ids:
+		// Muse keeps its id, DeepSeek maps onto off/high/max. Saves that
+		// already carry the record keep it; anything else resolves to
+		// each model's default at read time.
+		const savedThinking = (parsed as { thinking?: unknown }).thinking;
+		if (
+			typeof savedThinking === "object" &&
+			savedThinking !== null &&
+			Object.values(savedThinking).every((v) => typeof v === "string")
+		) {
+			merged.thinking = { ...(savedThinking as Record<string, string>) };
+		} else {
+			const legacyLevel = (parsed as { thinkingLevel?: unknown }).thinkingLevel;
+			merged.thinking =
+				legacyLevel === "high"
+					? { muse: "high", deepseek: "max" }
+					: legacyLevel === "medium"
+						? { muse: "medium", deepseek: "high" }
+						: legacyLevel === "low"
+							? { muse: "low", deepseek: "high" }
+							: {};
+		}
+		delete (merged as unknown as Record<string, unknown>).thinkingLevel;
 		return merged;
 	} catch {
 		return defaultSettings();

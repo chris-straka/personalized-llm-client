@@ -8,8 +8,29 @@ import type { Attachment } from "./attachments";
 import type { KeyValueStore } from "./settings";
 import { memoryStore } from "./settings";
 
+/**
+ * Opaque identifiers: still plain strings at runtime (comparisons,
+ * template slots, and Map/Record keys all keep working), but a chat id
+ * can never be passed where a message id is expected. The compiler, not
+ * discipline, catches the swap.
+ */
+export type ChatId = string & { readonly kind: "chat" };
+export type ChatMsgId = string & { readonly kind: "message" };
+
+/**
+ * A collapsed pasted span inside a user message: UTF-16 offsets into
+ * `content` as sent. Display-only — the API always sees full content.
+ */
+export interface PasteFold {
+	start: number;
+	end: number;
+	chars: number;
+	/** True once the user unfolded it (persisted). Default: folded. */
+	open?: boolean;
+}
+
 export interface ChatMsg {
-	id: string;
+	id: ChatMsgId;
 	role: "user" | "assistant";
 	content: string;
 	usage: TokenUsage | null;
@@ -17,12 +38,16 @@ export interface ChatMsg {
 	error: string | null;
 	/** Files/images sent with a user message (persisted with history). */
 	attachments?: Attachment[];
+	/** Collapsed pastes, captured at send time (persisted with history). */
+	pasteFolds?: PasteFold[];
 }
 
 export interface Chat {
-	id: string;
+	id: ChatId;
 	createdAt: number;
 	messages: ChatMsg[];
+	/** Reply-language pill code for this chat only (null = off). */
+	replyLang: string | null;
 }
 
 /**
@@ -32,18 +57,22 @@ export interface Chat {
  */
 export interface ChatState {
 	chats: Chat[];
-	activeChatId: string;
+	activeChatId: ChatId;
 	sending: boolean;
 }
 
 const STORAGE_KEY = "ccez-studio-chats-v1";
 
-export function newId(): string {
-	return crypto.randomUUID();
+export function newChatId(): ChatId {
+	return crypto.randomUUID() as ChatId;
+}
+
+export function newChatMsgId(): ChatMsgId {
+	return crypto.randomUUID() as ChatMsgId;
 }
 
 function blankChat(): Chat {
-	return { id: newId(), createdAt: Date.now(), messages: [] };
+	return { id: newChatId(), createdAt: Date.now(), messages: [], replyLang: null };
 }
 
 function browserStore(): KeyValueStore | null {
@@ -56,7 +85,7 @@ function browserStore(): KeyValueStore | null {
 }
 
 export function createChatState(store?: KeyValueStore): ChatState {
-	const state: ChatState = { chats: [], activeChatId: "", sending: false };
+	const state: ChatState = { chats: [], activeChatId: "" as ChatId, sending: false };
 	loadChats(state, store ?? browserStore() ?? memoryStore);
 	if (state.chats.length === 0) {
 		const chat = blankChat();
@@ -64,7 +93,16 @@ export function createChatState(store?: KeyValueStore): ChatState {
 		state.activeChatId = chat.id;
 	}
 	if (!state.chats.some((c) => c.id === state.activeChatId)) {
-		state.activeChatId = state.chats[0].id;
+		// Land on the newest chat (last), as before — only the order
+		// flipped, not the destination.
+		const last = state.chats[state.chats.length - 1];
+		if (!last) {
+			const chat = blankChat();
+			state.chats = [chat];
+			state.activeChatId = chat.id;
+		} else {
+			state.activeChatId = last.id;
+		}
 	}
 	return state;
 }
@@ -77,25 +115,91 @@ export function activeChat(state: ChatState): Chat {
 
 export function newChat(state: ChatState, store?: KeyValueStore): void {
 	const chat = blankChat();
-	state.chats = [chat, ...state.chats];
+	// Newest at the bottom, next to the add button — never prepend.
+	state.chats = [...state.chats, chat];
 	state.activeChatId = chat.id;
 	persistChats(state, store);
 }
 
-export function selectChat(state: ChatState, id: string): void {
+export function selectChat(state: ChatState, id: ChatId): void {
 	if (state.chats.some((c) => c.id === id)) state.activeChatId = id;
 }
 
-export function deleteChat(state: ChatState, id: string, store?: KeyValueStore): void {
+/**
+ * Fold/unfold one pasted span, replacing the message object (never
+ * mutating in place — proxy signals need the swap). No-op on bad ids.
+ * Persists like siblings.
+ */
+export function setPasteFold(
+	state: ChatState,
+	msgId: ChatMsgId,
+	index: number,
+	open: boolean,
+	store?: KeyValueStore
+): void {
+	for (const chat of state.chats) {
+		const at = chat.messages.findIndex((m) => m.id === msgId);
+		if (at < 0) continue;
+		const msg = chat.messages[at];
+		const folds = msg?.pasteFolds;
+		if (!msg || !folds || index < 0 || index >= folds.length) return;
+		const fold = folds[index];
+		if (!fold) return;
+		chat.messages = [
+			...chat.messages.slice(0, at),
+			{
+				...msg,
+				pasteFolds: [...folds.slice(0, index), { ...fold, open }, ...folds.slice(index + 1)]
+			},
+			...chat.messages.slice(at + 1)
+		];
+		persistChats(state, store);
+		return;
+	}
+}
+
+/** Set (or clear) one chat's reply-language pill. Persists like siblings. */
+export function setChatReplyLang(
+	state: ChatState,
+	id: ChatId,
+	code: string | null,
+	store?: KeyValueStore
+): void {
+	const target = state.chats.find((c) => c.id === id);
+	if (!target) return;
+	target.replyLang = code;
+	persistChats(state, store);
+}
+
+/** Abort controller for the in-flight send, if any (see abortSend). */
+let inflight: AbortController | null = null;
+
+/**
+ * Abort the in-flight send, if any. Dropping a chat mid-stream must kill
+ * its network request too — otherwise `sending` strands "Thinking..." on
+ * whatever chat replaces it.
+ */
+export function abortSend(): void {
+	inflight?.abort();
+	inflight = null;
+}
+
+export function deleteChat(state: ChatState, id: ChatId, store?: KeyValueStore): void {
+	abortSend();
+	const at = state.chats.findIndex((c) => c.id === id);
 	state.chats = state.chats.filter((c) => c.id !== id);
 	if (state.chats.length === 0) state.chats = [blankChat()];
 	if (!state.chats.some((c) => c.id === state.activeChatId)) {
-		state.activeChatId = state.chats[0].id;
+		// Land on the chat that slid into the deleted one's place (the
+		// one right below it), or the new bottom one if it was last.
+		const target = state.chats[Math.min(Math.max(at, 0), state.chats.length - 1)];
+		if (target) state.activeChatId = target.id;
 	}
 	persistChats(state, store);
 }
 
 export function deleteAllChats(state: ChatState, store?: KeyValueStore): void {
+	abortSend();
 	const chat = blankChat();
 	state.chats = [chat];
 	state.activeChatId = chat.id;
@@ -104,6 +208,12 @@ export function deleteAllChats(state: ChatState, store?: KeyValueStore): void {
 
 export function deleteMessage(state: ChatState, index: number, store?: KeyValueStore): void {
 	const chat = activeChat(state);
+	// Removing the streaming placeholder mid-flight strands it the same
+	// way dropping the chat does — kill the send with it.
+	const target = chat.messages[index];
+	if (state.sending && target?.role === "assistant" && index === chat.messages.length - 1) {
+		abortSend();
+	}
 	chat.messages = chat.messages.filter((_, i) => i !== index);
 	persistChats(state, store);
 }
@@ -124,7 +234,7 @@ export function stageMessage(
 	chat.messages = [
 		...chat.messages,
 		{
-			id: newId(),
+			id: newChatMsgId(),
 			role: "user",
 			content: trimmed,
 			usage: null,
@@ -142,9 +252,9 @@ export function branchFrom(state: ChatState, index: number, store?: KeyValueStor
 		...blankChat(),
 		messages: source.messages
 			.slice(0, index + 1)
-			.map((m) => ({ ...m, id: newId(), error: null }))
+			.map((m) => ({ ...m, id: newChatMsgId(), error: null }))
 	};
-	state.chats = [fork, ...state.chats];
+	state.chats = [...state.chats, fork];
 	state.activeChatId = fork.id;
 	persistChats(state, store);
 }
@@ -176,7 +286,7 @@ export function takeBackLastReply(state: ChatState, store?: KeyValueStore): void
 export function truncateToMessage(state: ChatState, index: number, store?: KeyValueStore): void {
 	const chat = activeChat(state);
 	if (index < 0 || index >= chat.messages.length) return;
-	if (chat.messages[index].role !== "user") return;
+	if (chat.messages[index]?.role !== "user") return;
 	chat.messages = chat.messages.slice(0, index + 1);
 	persistChats(state, store);
 }
@@ -186,18 +296,37 @@ export async function resendLast(
 	state: ChatState,
 	provider: ChatProvider,
 	systemPrompt: string,
-	store?: KeyValueStore
+	opts: { store?: KeyValueStore | undefined; thinking?: string | undefined } = {}
 ): Promise<void> {
 	const chat = activeChat(state);
 	const last = chat.messages[chat.messages.length - 1];
 	if (!last || last.role !== "user" || state.sending) return;
 	chat.messages = chat.messages.slice(0, -1);
-	await sendMessage(state, provider, systemPrompt, last.content, { attachments: last.attachments }, store);
+	await sendMessage(
+		state,
+		provider,
+		systemPrompt,
+		last.content,
+		{ attachments: last.attachments, thinking: opts.thinking },
+		opts.store
+	);
 }
 
 export function tokenTotal(state: ChatState, chat?: Chat): number {
 	const target = chat ?? activeChat(state);
 	return target.messages.reduce((sum, m) => sum + (m.usage?.total ?? 0), 0);
+}
+
+/** Per-chat input/output split, summed from each message's reported usage. */
+export function tokenSplit(state: ChatState, chat?: Chat): { prompt: number; completion: number } {
+	const target = chat ?? activeChat(state);
+	let prompt = 0;
+	let completion = 0;
+	for (const m of target.messages) {
+		prompt += m.usage?.prompt ?? 0;
+		completion += m.usage?.completion ?? 0;
+	}
+	return { prompt, completion };
 }
 
 /**
@@ -231,6 +360,15 @@ export function waypoints(state: ChatState, chat?: Chat): number[] {
 	return out;
 }
 
+/**
+ * Menu label for a waypoint jump target: the message's first line,
+ * whitespace-collapsed and capped (may be empty for blank messages —
+ * callers fall back).
+ */
+export function waypointLabel(content: string, max = 60): string {
+	return content.replace(/\s+/g, " ").trim().slice(0, max);
+}
+
 export function buildApiMessages(chat: Chat, systemPrompt: string): ChatMessage[] {
 	const api: ChatMessage[] = [{ role: "system", content: systemPrompt }];
 	for (const m of chat.messages) {
@@ -255,7 +393,10 @@ export function apiContent(message: ChatMsg): string | ContentPart[] {
 	if (images.length === 0) return text;
 	const parts: ContentPart[] = [{ type: "text", text }];
 	for (const image of images) {
-		parts.push({ type: "image_url", image_url: { url: image.dataUrl! } });
+		// The filter above already required dataUrl; re-check so a future
+		// edit to it can't smuggle null into the API payload.
+		if (!image.dataUrl) continue;
+		parts.push({ type: "image_url", image_url: { url: image.dataUrl } });
 	}
 	return parts;
 }
@@ -265,33 +406,46 @@ export async function sendMessage(
 	provider: ChatProvider,
 	systemPrompt: string,
 	text: string,
-	opts: { signal?: AbortSignal; attachments?: Attachment[] } = {},
+	opts: {
+		signal?: AbortSignal | undefined;
+		attachments?: Attachment[] | undefined;
+		thinking?: string | undefined;
+		pasteFolds?: PasteFold[] | undefined;
+	} = {},
 	store?: KeyValueStore
 ): Promise<void> {
 	const trimmed = text.trim();
 	const attachments = opts.attachments ?? [];
+	const pasteFolds = opts.pasteFolds ?? [];
 	if ((!trimmed && attachments.length === 0) || state.sending) return;
 	const chat = activeChat(state);
 	chat.messages = [
 		...chat.messages,
 		{
-			id: newId(),
+			id: newChatMsgId(),
 			role: "user",
 			content: trimmed,
 			usage: null,
 			error: null,
-			...(attachments.length > 0 ? { attachments } : {})
+			...(attachments.length > 0 ? { attachments } : {}),
+			...(pasteFolds.length > 0 ? { pasteFolds } : {})
 		}
 	];
 	persistChats(state, store);
 
 	const apiMessages = buildApiMessages(chat, systemPrompt);
-	const replyId = newId();
+	const replyId = newChatMsgId();
 	chat.messages = [
 		...chat.messages,
 		{ id: replyId, role: "assistant", content: "", usage: null, error: null }
 	];
 	state.sending = true;
+	// Own controller (chained off a caller-provided signal, if any) so
+	// dropping the chat can abort the network request, not just orphan it.
+	const controller = new AbortController();
+	inflight = controller;
+	if (opts.signal?.aborted) controller.abort();
+	else opts.signal?.addEventListener("abort", () => controller.abort(), { once: true });
 	// NOTE: never mutate a message object in place here. Svelte's proxy
 	// signals capture values on first read, so only wholesale replacement
 	// notifies reliably. The running text lives in this local accumulator.
@@ -308,7 +462,7 @@ export async function sendMessage(
 				streamed += token;
 				replaceReply({ content: streamed });
 			}
-		}, { signal: opts.signal });
+		}, { signal: controller.signal, thinking: opts.thinking });
 		replaceReply({ content: result.content, usage: result.usage });
 	} catch (error) {
 		replaceReply({
@@ -316,6 +470,7 @@ export async function sendMessage(
 			error: error instanceof Error ? error.message : String(error)
 		});
 	} finally {
+		if (inflight === controller) inflight = null;
 		state.sending = false;
 		persistChats(state, store);
 	}
@@ -348,9 +503,15 @@ function loadChats(state: ChatState, store: KeyValueStore): void {
 				.map((c) => {
 					// The old pins array is gone; top-posted messages replaced it.
 					delete c.pins;
+					// Reply languages are per-session: a restart opens
+					// with no pill on any chat (and backfills old saves).
+					c.replyLang = null;
 					return c;
 				});
-			if (state.chats.length > 0) state.activeChatId = state.chats[0].id;
+			if (state.chats.length > 0) {
+				const first = state.chats[0];
+				if (first) state.activeChatId = first.id;
+			}
 		}
 	} catch {
 		// Corrupt storage starts fresh.

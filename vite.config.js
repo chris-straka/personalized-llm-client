@@ -1,10 +1,10 @@
 import { defineConfig } from "vite";
 import { sveltekit } from "@sveltejs/kit/vite";
-// @ts-expect-error type error without @types/node package
+// Explicit node: imports (never global `process`): with tsconfig
+// `types: []`, @types/node stays out of the frontend, where no
+// process object exists at runtime.
 import process from "node:process";
-// @ts-expect-error type error without @types/node package
 import { readFile } from "node:fs/promises";
-// @ts-expect-error type error without @types/node package
 import { fileURLToPath } from "node:url";
 
 const zlibGunzipBridge = fileURLToPath(
@@ -49,6 +49,11 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(() => ({
   plugins: [sveltekit(), kuromojiDictFix()],
+  optimizeDeps: {
+    // lindera-wasm resolves its .wasm sibling via `new URL(..., import.meta.url)`;
+    // pre-bundling would relocate the glue and break that link (per its docs).
+    exclude: ["lindera-wasm"]
+  },
   resolve: {
     // kuromoji joins dictionary URLs with node:path; shim it in the browser.
     // kuromoji gunzips its dictionary through zlibjs, a global script whose
@@ -71,13 +76,9 @@ export default defineConfig(() => ({
     port: 1420,
     strictPort: true,
     host: host || "127.0.0.1",
-    hmr: host
-      ? {
-          protocol: "ws",
-          host,
-          port: 1421,
-        }
-      : undefined,
+    // No hmr key at all without a mobile host: HmrOptions takes no
+    // explicit undefined.
+    ...(host ? { hmr: { protocol: "ws", host, port: 1421 } } : {}),
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],

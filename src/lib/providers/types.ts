@@ -29,7 +29,7 @@ export interface TokenUsage {
 	completion: number;
 	total: number;
 	/** Reasoning/thinking tokens, when the API reports them. */
-	reasoning?: number;
+	reasoning?: number | undefined;
 }
 
 export interface ChatResult {
@@ -42,7 +42,12 @@ export interface StreamCallbacks {
 }
 
 export interface ChatOptions {
-	signal?: AbortSignal;
+	// Explicitly undefined-accepting: callers thread through an optional
+	// controller, and providers tolerate its absence.
+	signal?: AbortSignal | undefined;
+	/** Native thinking option id (see providers/thinking.ts); providers
+	 * without a knob for it send nothing. */
+	thinking?: string | undefined;
 }
 
 export interface ChatProvider {
@@ -56,7 +61,7 @@ export interface ChatProvider {
 }
 
 export class ProviderError extends Error {
-	readonly status?: number;
+	readonly status?: number | undefined;
 	constructor(message: string, status?: number) {
 		super(message);
 		this.name = "ProviderError";

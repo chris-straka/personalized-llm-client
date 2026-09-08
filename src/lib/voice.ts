@@ -52,6 +52,12 @@ export interface VoiceProgress {
 export interface SpeakCallbacks {
 	onProgress?: (progress: VoiceProgress) => void;
 	onEnd?: () => void;
+	/**
+	 * Fires only when the utterance plays to its natural end (never on
+	 * stop/cancel). The downloader hook rides this: a stopped readback
+	 * must not mint an audio file.
+	 */
+	onNaturalEnd?: (() => void) | undefined;
 	onError?: (message: string) => void;
 }
 
@@ -95,14 +101,17 @@ export function speakText(text: string, lang: string, callbacks: SpeakCallbacks 
 				}
 			};
 			utterance.onerror = (event) => {
-				if (!cancelled && (event as SpeechSynthesisErrorEvent).error !== "canceled") {
+				if (!cancelled && event.error !== "canceled") {
 					cancelled = true;
-					callbacks.onError?.(String((event as SpeechSynthesisErrorEvent).error || "speech error"));
+					callbacks.onError?.(String(event.error || "speech error"));
 				}
 			};
 			if (index === sentences.length - 1) {
 				utterance.onend = () => {
-					if (!cancelled) callbacks.onEnd?.();
+					if (!cancelled) {
+						callbacks.onEnd?.();
+						callbacks.onNaturalEnd?.();
+					}
 				};
 			}
 			synth.speak(utterance);

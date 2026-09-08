@@ -7,6 +7,9 @@ import {
 	estimateTextTokens,
 	renderMarkdown,
 	renderMessage,
+	applyPasteFolds,
+	foldSegments,
+	pasteFoldButton,
 	htmlToText,
 	highlightRendered
 } from "./render";
@@ -117,5 +120,58 @@ describe("token estimates", () => {
 		expect(estimateTextTokens("")).toBe(1);
 		expect(estimateTextTokens("abcd")).toBe(1);
 		expect(estimateTextTokens("abcde")).toBe(2);
+	});
+});
+
+describe("applyPasteFolds", () => {
+	it("passes content through with no folds", () => {
+		expect(applyPasteFolds("hello", undefined)).toBe("hello");
+		expect(applyPasteFolds("hello", [])).toBe("hello");
+	});
+
+	it("splices closed folds into marker buttons, keeps open ones inline", () => {
+		const out = applyPasteFolds("aa BBBB cc DDDD ee", [
+			{ start: 3, end: 7, chars: 4 },
+			{ start: 11, end: 15, chars: 4, open: true }
+		]);
+		expect(out).toContain('data-paste-fold="0"');
+		expect(out).toContain("[Pasted content 4 chars]");
+		expect(out).toContain("DDDD");
+		expect(out).not.toContain("BBBB");
+		expect(out.startsWith("aa ")).toBe(true);
+		expect(out.endsWith(" ee")).toBe(true);
+	});
+
+	it("ignores invalid and overlapping folds", () => {
+		const out = applyPasteFolds("abcdef", [
+			{ start: 1, end: 3, chars: 2 },
+			{ start: 2, end: 5, chars: 3 },
+			{ start: -2, end: 1, chars: 3 },
+			{ start: 4, end: 99, chars: 95 }
+		]);
+		expect(out).toContain('data-paste-fold="0"');
+		expect(out.match(/data-paste-fold/g)).toHaveLength(1);
+	});
+});
+
+describe("foldSegments", () => {
+	it("splits visible runs from closed-fold markers, merging open folds", () => {
+		expect(foldSegments("hello", undefined)).toEqual([{ kind: "text", text: "hello" }]);
+		expect(
+			foldSegments("aa BBBB cc DDDD ee", [
+				{ start: 3, end: 7, chars: 4 },
+				{ start: 11, end: 15, chars: 4, open: true }
+			])
+		).toEqual([
+			{ kind: "text", text: "aa " },
+			{ kind: "marker", index: 0, chars: 4 },
+			{ kind: "text", text: " cc DDDD ee" }
+		]);
+	});
+
+	it("emits the same markers applyPasteFolds splices", () => {
+		expect(pasteFoldButton(2, 128)).toBe(
+			'<button type="button" class="paste-fold" data-paste-fold="2">[Pasted content 128 chars]</button>'
+		);
 	});
 });

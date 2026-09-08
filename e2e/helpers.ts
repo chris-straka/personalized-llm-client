@@ -1,0 +1,67 @@
+import type { Page } from "@playwright/test";
+
+export interface SeedMessage {
+	role: "user" | "assistant";
+	content: string;
+}
+
+/**
+ * Seed one chat (plus hover-reveal settings and the mock provider) before
+ * the app boots, so e2e specs open on a deterministic conversation with
+ * no API key and no typing.
+ */
+export async function seedChat(page: Page, messages: SeedMessage[]): Promise<void> {
+	await page.addInitScript((msgs: SeedMessage[]) => {
+		window.localStorage.setItem("ccez-mock-provider", "1");
+		window.localStorage.setItem(
+			"ccez-studio-settings-v1",
+			JSON.stringify({ hoverAssistantActions: true, hoverUserActions: true })
+		);
+		window.localStorage.setItem(
+			"ccez-studio-chats-v1",
+			JSON.stringify([
+				{
+					id: "e2e-chat",
+					createdAt: 1,
+					replyLang: null,
+					messages: msgs.map((m, i) => ({
+						id: `e2e-m${i}`,
+						role: m.role,
+						content: m.content,
+						usage: null,
+						error: null
+					}))
+				}
+			])
+		);
+	}, messages);
+}
+
+/** Bounding boxes for every button in an assistant message's action row. */
+export async function rowBoxes(page: Page, article: string): Promise<Array<{ x: number; y: number; width: number; height: number } | null>> {
+	const buttons = page.locator(`${article} .actions button`);
+	const count = await buttons.count();
+	const boxes = [];
+	for (let i = 0; i < count; i++) boxes.push(await buttons.nth(i).boundingBox());
+	return boxes;
+}
+
+/** Assert two box snapshots match within a pixel (no hover nudges). */
+export function expectBoxesStable(
+	before: Array<{ x: number; y: number; width: number; height: number } | null>,
+	after: Array<{ x: number; y: number; width: number; height: number } | null>
+): void {
+	if (before.length !== after.length) {
+		throw new Error(`button count changed: ${before.length} -> ${after.length}`);
+	}
+	for (let i = 0; i < before.length; i++) {
+		const a = before[i];
+		const b = after[i];
+		if (!a || !b) throw new Error(`button ${i} lost its box`);
+		for (const key of ["x", "y", "width", "height"] as const) {
+			if (Math.abs(a[key] - b[key]) > 1) {
+				throw new Error(`button ${i} moved: ${key} ${a[key]} -> ${b[key]}`);
+			}
+		}
+	}
+}

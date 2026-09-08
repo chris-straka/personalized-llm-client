@@ -1,0 +1,128 @@
+import init, { TokenizerBuilder, loadDictionaryFromBytes } from "lindera-wasm";
+import { unzipSync } from "fflate";
+import { toHiragana } from "wanakana";
+import { rubyHtmlForTokens, type RubyToken } from "./furiganaRuby";
+
+/**
+ * Furigana conversion off the main thread. Lindera's dictionary build
+ * (10MB of trie construction, all synchronous) freezes the UI for a
+ * while on first use — in a WebView that freeze reads as a crash.
+ * Everything slow lives here; the main thread keeps the loading dots
+ * animating and stays interactive throughout.
+ *
+ * Only conversion runs here: sanitizing needs DOMPurify's window, so the
+ * worker returns raw ruby HTML and the caller sanitizes it.
+ *
+ * The dictionary ships inside the app (static/lindera, offline-first):
+ * the single zip is unpacked in-memory, so no server encoding quirks
+ * can corrupt the bytes the way transparent gzip once did kuromoji's.
+ */
+
+interface ConvertRequest {
+	id: number;
+	text: string;
+}
+
+/** Minimal worker scope: lib.dom types the window flavor, not this one. */
+interface WorkerScope {
+	postMessage(message: unknown): void;
+	addEventListener(type: "message", listener: (event: Event) => void): void;
+}
+
+const scope = self as unknown as WorkerScope;
+
+const base = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
+const DICT_URL = `${base}/lindera/lindera-ipadic-6.0.0.zip`;
+
+/** Zip member names (under the lindera-ipadic/ prefix) in load order. */
+const DICT_FILES = [
+	"metadata.json",
+	"dict.trie",
+	"dict.valsidx",
+	"dict.vals",
+	"dict.wordsidx",
+	"dict.words",
+	"matrix.mtx",
+	"char_def.bin",
+	"unk.bin"
+] as const;
+
+type Tokenizer = ReturnType<TokenizerBuilder["build"]>;
+
+let ready: Promise<Tokenizer> | null = null;
+
+/**
+ * Single shared init: overlapping conversions (the render effect can
+ * refire mid-load on a new marks array) must all await the same
+ * instance. A failed init resets so the next request retries instead of
+ * replaying the same rejection.
+ */
+function ensureReady(): Promise<Tokenizer> {
+	ready ??= (async () => {
+		try {
+			await init();
+			const response = await fetch(DICT_URL);
+			if (!response.ok) {
+				throw new Error(`dictionary download failed (HTTP ${response.status})`);
+			}
+			const members = unzipSync(new Uint8Array(await response.arrayBuffer()));
+			const at = (name: string): Uint8Array => {
+				const bytes = members[`lindera-ipadic/${name}`];
+				if (!bytes) throw new Error(`dictionary archive missing ${name}`);
+				return bytes;
+			};
+			const dictionary = loadDictionaryFromBytes(
+				at(DICT_FILES[0]),
+				at(DICT_FILES[1]),
+				at(DICT_FILES[2]),
+				at(DICT_FILES[3]),
+				at(DICT_FILES[4]),
+				at(DICT_FILES[5]),
+				at(DICT_FILES[6]),
+				at(DICT_FILES[7]),
+				at(DICT_FILES[8])
+			);
+			const builder = new TokenizerBuilder();
+			builder.setDictionaryInstance(dictionary);
+			builder.setMode("normal");
+			return builder.build();
+		} catch (error) {
+			ready = null;
+			throw error;
+		}
+	})();
+	return ready;
+}
+
+interface LinderaToken {
+	surface?: unknown;
+	details?: unknown;
+}
+
+function toRubyToken(token: LinderaToken): RubyToken {
+	const surface = typeof token.surface === "string" ? token.surface : "";
+	const details = Array.isArray(token.details) ? token.details : [];
+	const reading = typeof details[7] === "string" ? (details[7] as string) : null;
+	return { surface, reading };
+}
+
+async function convert(text: string): Promise<string> {
+	const tokenizer = await ensureReady();
+	const tokens = (tokenizer.tokenize(text) as LinderaToken[]).map(toRubyToken);
+	return rubyHtmlForTokens(tokens, toHiragana);
+}
+
+scope.addEventListener("message", (event: Event) => {
+	const request = (event as MessageEvent).data as ConvertRequest;
+	void convert(request.text).then(
+		(html) => scope.postMessage({ id: request.id, html }),
+		(error: unknown) =>
+			scope.postMessage({
+				id: request.id,
+				error:
+					error instanceof Error
+						? `${error.message}\n${error.stack ?? ""}`
+						: String(error)
+			})
+	);
+});

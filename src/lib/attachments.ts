@@ -50,7 +50,7 @@ export function fitDimensions(width: number, height: number): { width: number; h
 
 /** Downscale an image to a data URL via canvas. Callers pass a loaded
  * HTMLImageElement (or any canvas-drawImage source with width/height). */
-export async function downscaleImage(
+export function downscaleImage(
 	source: { width: number; height: number },
 	draw: (canvas: HTMLCanvasElement, width: number, height: number) => void,
 	mime = "image/jpeg"
@@ -60,11 +60,13 @@ export async function downscaleImage(
 	canvas.width = width;
 	canvas.height = height;
 	draw(canvas, width, height);
-	return {
+	// Promise interface (not async): canvas work is synchronous, but every
+	// caller already awaits this, so the signature stays put.
+	return Promise.resolve({
 		dataUrl: canvas.toDataURL(mime, 0.85),
 		width,
 		height
-	};
+	});
 }
 
 export function newId(): string {

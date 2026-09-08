@@ -1,4 +1,5 @@
 import {
+	Compartment,
 	EditorState,
 	StateEffect,
 	StateField,
@@ -19,6 +20,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import { foldEffect, foldState } from "@codemirror/language";
 import { vim, getCM, Vim } from "@replit/codemirror-vim";
 import { isFenceTrigger } from "./fence";
+import { IMAGE_MARKER } from "./attachments";
 
 /**
  * A chat box should greet typing with insert mode (Esc still drops to normal
@@ -36,14 +38,27 @@ function enterInsertMode(view: EditorView): void {
 
 export type SubmitKind = "send" | "stage";
 
+/** Composer hint in edit mode. */
+export const PROMPT_PLACEHOLDER = "ctrl+g message scroll";
+/** Composer hint while scrolled out hopping messages. */
+export const SCROLL_PLACEHOLDER = "ctrl+g to hop back in";
+
 export interface PromptEditor {
 	readonly view: EditorView;
 	getText(): string;
+	/** Collapsed-paste spans in document coordinates (for send-time folds). */
+	getPastes(): PasteSpan[];
 	setText(text: string): void;
 	/** Insert text at the cursor (used for pasted-image markers). */
 	insertText(text: string): void;
 	clear(): void;
 	focus(): void;
+	/** Drop the caret (scroll mode must show no cursor in the prompt). */
+	blur(): void;
+	/** Swap the empty-prompt hint (edit vs scroll mode). */
+	setPlaceholder(text: string): void;
+	/** Re-run layout measurement (stale caches after occlusion/DPR change). */
+	remeasure(): void;
 	destroy(): void;
 }
 
@@ -131,6 +146,8 @@ function fenceBars(): Extension {
 			click: (event, view) => {
 			const target = (event.target as HTMLElement).closest("[data-fence-action]");
 			if (!target) return false;
+			// Written by our own bar builders as action:from:to; anything
+			// else is foreign markup — leave the event alone, no crash.
 			const [action, from, to] = target.getAttribute("data-fence-action")!.split(":");
 			if (action === "collapse") {
 				// Park the cursor outside the fold or CodeMirror clears it instantly.
@@ -189,6 +206,10 @@ class PasteMarker extends WidgetType {
 		super();
 	}
 
+	get charCount(): number {
+		return this.chars;
+	}
+
 	eq(other: PasteMarker): boolean {
 		return other.pasteId === this.pasteId && other.chars === this.chars;
 	}
@@ -215,6 +236,12 @@ interface PasteCollapse {
 
 const addPaste = StateEffect.define<PasteCollapse>();
 const expandPaste = StateEffect.define<number>();
+
+/**
+ * The paste-decoration field of the live composer (single instance).
+ * Read it with pasteSpans — never touch it directly.
+ */
+let pasteFieldRef: StateField<DecorationSet> | null = null;
 
 function pastePlaceholders(): Extension {
 	const field = StateField.define<DecorationSet>({
@@ -262,7 +289,88 @@ function pastePlaceholders(): Extension {
 			}
 		})
 	);
+	pasteFieldRef = field;
 	return [field, clicks];
+}
+
+export interface PasteSpan {
+	from: number;
+	to: number;
+	chars: number;
+}
+
+export interface SendFold {
+	start: number;
+	end: number;
+	chars: number;
+}
+
+/** Current collapsed-paste spans in document coordinates. Never throws. */
+export function pasteSpans(state: EditorState): PasteSpan[] {
+	if (!pasteFieldRef) return [];
+	let set: DecorationSet;
+	try {
+		set = state.field(pasteFieldRef);
+	} catch {
+		return [];
+	}
+	const out: PasteSpan[] = [];
+	const cursor = set.iter();
+	while (cursor.value) {
+		const widget = (cursor.value.spec as { widget?: unknown }).widget;
+		if (widget instanceof PasteMarker) {
+			out.push({ from: cursor.from, to: cursor.to, chars: widget.charCount });
+		}
+		cursor.next();
+	}
+	return out;
+}
+
+/**
+ * Map document-coordinate paste spans into send-text coordinates, applying
+ * exactly the send transforms (drop IMAGE_MARKER lines like
+ * stripImageMarkers, then trim like composerText). A span touched by either
+ * transform is dropped — sent unfolded — rather than misplaced. Pure and
+ * unit-tested.
+ */
+export function sendPasteFolds(doc: string, spans: PasteSpan[]): { text: string; folds: SendFold[] } {
+	// Drop marker lines, tracking dropped document ranges. Mirrors
+	// stripImageMarkers line for line (split/filter/join); a parity test
+	// below pins the text output to that function.
+	const dropped: Array<{ start: number; end: number }> = [];
+	const kept: string[] = [];
+	let offset = 0;
+	const lines = doc.split("\n");
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i] ?? "";
+		const chunk = line + (i < lines.length - 1 ? "\n" : "");
+		if (line.trim() === IMAGE_MARKER) dropped.push({ start: offset, end: offset + chunk.length });
+		else kept.push(chunk);
+		offset += chunk.length;
+	}
+	const joined = kept.join("");
+	// Trim; every surviving position shifts left by the leading run.
+	const leading = joined.length - joined.trimStart().length;
+	const text = joined.trim();
+	const shift = (pos: number): number => {
+		let delta = 0;
+		for (const range of dropped) {
+			if (range.end <= pos) delta += range.end - range.start;
+			else break;
+		}
+		return pos - delta - leading;
+	};
+	const folds: SendFold[] = [];
+	for (const span of spans) {
+		if (span.from < 0 || span.to > doc.length || span.from >= span.to) continue;
+		if (dropped.some((range) => span.from < range.end && range.start < span.to)) continue;
+		const start = shift(span.from);
+		const end = shift(span.to);
+		if (start < 0 || end > text.length || start >= end) continue;
+		folds.push({ start, end, chars: end - start });
+	}
+	folds.sort((a, b) => a.start - b.start);
+	return { text, folds };
 }
 
 /**
@@ -422,10 +530,11 @@ export function createPromptEditor(
 	]);
 
 	const vimEnabled = options.vim !== false;
+	const placeholderCompartment = new Compartment();
 	const state = EditorState.create({
 		doc: options.initialDoc ?? "",
 		extensions: [
-			placeholder("ctrl+g message scroll"),
+			placeholderCompartment.of(placeholder(PROMPT_PLACEHOLDER)),
 			submitKeys,
 			EditorView.updateListener.of((update) => {
 				if (update.docChanged) options.onDocChange?.(update.state.doc.toString());
@@ -451,6 +560,7 @@ export function createPromptEditor(
 	return {
 		view,
 		getText: () => view.state.doc.toString(),
+		getPastes: () => pasteSpans(view.state),
 		setText: (text: string) =>
 			view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } }),
 		insertText: (text: string) => {
@@ -459,13 +569,30 @@ export function createPromptEditor(
 				changes: { from, to, insert: text },
 				selection: { anchor: from + text.length }
 			});
-			view.focus();
+			// Insertions (dictation, image markers) take the cursor
+			// without yanking the messages list.
+			view.contentDOM.focus({ preventScroll: true });
 		},
 		clear() {
 			this.setText("");
 			if (vimEnabled) enterInsertMode(view);
 		},
-		focus: () => view.focus(),
-		destroy: () => view.destroy()
+		// preventScroll: refocusing (notably on window focus) must
+		// never yank the messages list — view.focus() scrolls.
+		focus: () => {
+			view.contentDOM.focus({ preventScroll: true });
+		},
+		blur: () => view.contentDOM.blur(),
+		setPlaceholder: (text: string) => {
+			view.dispatch({
+				effects: placeholderCompartment.reconfigure(placeholder(text))
+			});
+		},
+		remeasure: () => {
+			view.requestMeasure();
+		},
+		destroy() {
+			view.destroy();
+		}
 	};
 }

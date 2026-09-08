@@ -82,7 +82,7 @@ describe("chat", () => {
 	it("wraps HTTP failures and network errors in ProviderError", async () => {
 		vi.stubGlobal("fetch", vi.fn(async () => new Response("nope", { status: 401 })));
 		const provider = new OpenAICompatProvider("probe", CONFIG);
-		const err = await provider.chat([{ role: "user", content: "x" }]).catch((e) => e);
+		const err = await provider.chat([{ role: "user", content: "x" }]).catch((e: unknown) => e);
 		expect(err).toBeInstanceOf(ProviderError);
 		expect((err as ProviderError).status).toBe(401);
 
@@ -92,7 +92,7 @@ describe("chat", () => {
 				throw new Error("down");
 			})
 		);
-		const net = await provider.chat([{ role: "user", content: "x" }]).catch((e) => e);
+		const net = await provider.chat([{ role: "user", content: "x" }]).catch((e: unknown) => e);
 		expect(net).toBeInstanceOf(ProviderError);
 	});
 });
@@ -178,5 +178,48 @@ describe("parseModelIds", () => {
 		expect(parseModelIds({})).toEqual([]);
 		expect(parseModelIds(null)).toEqual([]);
 		expect(parseModelIds({ data: "nope" })).toEqual([]);
+	});
+});
+
+describe("thinking", () => {
+	async function postedBody(
+		id: string,
+		model: string,
+		thinking?: string
+	): Promise<Record<string, unknown>> {
+		const fetchMock = vi.fn(async () =>
+			jsonResponse({ choices: [{ message: { content: "x" } }] })
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		const provider = new OpenAICompatProvider(id, { ...CONFIG, model });
+		await provider.chat([{ role: "user", content: "x" }], { thinking });
+		const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+		return JSON.parse(init.body as string) as Record<string, unknown>;
+	}
+
+	it("sends reasoning_effort for Muse Spark", async () => {
+		const body = await postedBody("muse", "muse-spark-1.3-contributor", "high");
+		expect(body).toMatchObject({ reasoning_effort: "high" });
+		expect(body).not.toHaveProperty("thinking");
+	});
+
+	it("sends the thinking toggle plus effort for DeepSeek v4", async () => {
+		const max = await postedBody("deepseek", "deepseek-v4-pro", "max");
+		expect(max).toMatchObject({
+			thinking: { type: "enabled" },
+			reasoning_effort: "max"
+		});
+		const off = await postedBody("deepseek", "deepseek-v4-pro", "off");
+		expect(off).toMatchObject({ thinking: { type: "disabled" } });
+		expect(off).not.toHaveProperty("reasoning_effort");
+	});
+
+	it("sends nothing native for unknown providers and ids", async () => {
+		const body = await postedBody("probe", "m", "high");
+		expect(body).not.toHaveProperty("reasoning_effort");
+		expect(body).not.toHaveProperty("thinking");
+		// Unknown ids resolve to the model's default before sending.
+		const museBogus = await postedBody("muse", "muse-spark-1.3-contributor", "bogus");
+		expect(museBogus).toMatchObject({ reasoning_effort: "medium" });
 	});
 });

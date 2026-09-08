@@ -11,39 +11,45 @@ import {
 } from "./annotations";
 import { buildTranslateMessages, translateSelection } from "./translate";
 import type { ChatProvider } from "./providers/types";
+import type { ChatMsgId } from "./chat";
+import type { AnnotationId } from "./annotations";
 
 describe("annotations", () => {
 	it("adds, edits, deletes, and clears", () => {
-		let list = addAnnotation([], "m1", "  langue  ", "What does this mean?");
+		let list = addAnnotation([], "m1" as ChatMsgId, "  langue  ", "What does this mean?");
 		expect(list).toHaveLength(1);
-		expect(list[0].quote).toBe("langue");
-		expect(list[0].messageId).toBe("m1");
+		expect(list[0]?.quote).toBe("langue");
+		expect(list[0]?.messageId).toBe("m1");
 
 		// Blank quotes are ignored.
-		list = addAnnotation(list, "m1", "   ");
+		list = addAnnotation(list, "m1" as ChatMsgId, "   ");
 		expect(list).toHaveLength(1);
 
-		list = editAnnotationComment(list, list[0].id, "edited");
-		expect(list[0].comment).toBe("edited");
+		list = editAnnotationComment(list, list[0]!.id, "edited");
+		expect(list[0]?.comment).toBe("edited");
 
-		list = deleteAnnotation(list, list[0].id);
+		list = deleteAnnotation(list, list[0]!.id);
 		expect(list).toEqual([]);
 
-		list = addAnnotation(addAnnotation([], "m1", "a"), "m2", "b");
+		list = addAnnotation(addAnnotation([], "m1" as ChatMsgId, "a"), "m2" as ChatMsgId, "b");
 		expect(clearAnnotations()).toEqual([]);
-		expect(annotationNumber(list, list[1].id)).toBe(2);
-		expect(annotationNumber(list, "missing")).toBe(0);
+		expect(annotationNumber(list, list[1]!.id)).toBe(2);
+		expect(annotationNumber(list, "missing" as AnnotationId)).toBe(0);
 	});
 
 	it("formats numbered quote/comment pairs for the prompt", () => {
-		const list = addAnnotation(addAnnotation([], "m1", "langue", "What does this mean?"), "m1", "alphabet");
+		const list = addAnnotation(
+			addAnnotation([], "m1" as ChatMsgId, "langue", "What does this mean?"),
+			"m1" as ChatMsgId,
+			"alphabet"
+		);
 		expect(formatAnnotations(list)).toBe(
 			'1. "langue" — What does this mean?\n2. "alphabet"'
 		);
 	});
 
 	it("wraps annotations into the outgoing prompt", () => {
-		const list = addAnnotation([], "m1", "langue", "meaning?");
+		const list = addAnnotation([], "m1" as ChatMsgId, "langue", "meaning?");
 		expect(withAnnotations("explain", list)).toBe(
 			'explain\n\nAnnotated selections:\n1. "langue" — meaning?'
 		);
@@ -99,8 +105,8 @@ describe("locateQuote", () => {
 describe("translate helper", () => {
 	it("builds a translation-only prompt", () => {
 		const messages = buildTranslateMessages("bonjour", "English");
-		expect(messages[0].role).toBe("system");
-		expect(messages[0].content).toContain("English");
+		expect(messages[0]?.role).toBe("system");
+		expect(messages[0]?.content).toContain("English");
 		expect(messages[1]).toEqual({ role: "user", content: "bonjour" });
 	});
 

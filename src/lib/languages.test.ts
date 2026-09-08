@@ -3,6 +3,7 @@ import {
 	LANGUAGE_MENUS,
 	EUROPEAN_LANGUAGES,
 	ASIAN_LANGUAGES,
+	AFRICAN_LANGUAGES,
 	CLASSICAL_LANGUAGES,
 	QUICK_LANG_CODES,
 	quickKeyFor,
@@ -10,8 +11,8 @@ import {
 } from "./languages";
 
 describe("reply languages", () => {
-	it("has three menus in order", () => {
-		expect(LANGUAGE_MENUS.map((m) => m.id)).toEqual(["europe", "asia", "classics"]);
+	it("has four menus in order", () => {
+		expect(LANGUAGE_MENUS.map((m) => m.id)).toEqual(["europe", "asia", "africa", "classics"]);
 	});
 
 	it("keeps the requested European order", () => {
@@ -30,7 +31,12 @@ describe("reply languages", () => {
 			"bg",
 			"hu",
 			"uk",
-			"nl"
+			"nl",
+			"sv",
+			"da",
+			"fi",
+			"sr",
+			"sk"
 		]);
 	});
 
@@ -48,8 +54,17 @@ describe("reply languages", () => {
 			"vi",
 			"hy",
 			"ur",
-			"he"
+			"he",
+			"bn",
+			"ta",
+			"tl",
+			"ms",
+			"yue"
 		]);
+	});
+
+	it("keeps the requested African order", () => {
+		expect(AFRICAN_LANGUAGES.map((l) => l.code)).toEqual(["sw", "am"]);
 	});
 
 	it("labels Arabic short and resolves the new languages", () => {
@@ -65,9 +80,22 @@ describe("reply languages", () => {
 		expect(CLASSICAL_LANGUAGES.map((l) => l.code)).toEqual(["la", "grc", "sa"]);
 	});
 
+	it("gives every language a distinct emoji marker", () => {
+		for (const menu of LANGUAGE_MENUS) {
+			const badges = menu.languages.map((l) => l.badge);
+			for (const badge of badges) {
+				expect(badge).toMatch(/[^\x00-\x7F]/);
+			}
+			expect(new Set(badges).size).toBe(badges.length);
+		}
+	});
+
 	it("resolves codes and tolerates unknowns", () => {
 		expect(replyLanguageFor("ja")?.prompt).toBe("Reply in Japanese.");
 		expect(replyLanguageFor("ja")?.voice).toBe("ja-JP");
+		expect(replyLanguageFor("yue")?.prompt).toBe("Reply in Cantonese.");
+		expect(replyLanguageFor("sw")?.voice).toBe("sw-KE");
+		expect(replyLanguageFor("sv")?.badge).toBe("🇸🇪");
 		expect(replyLanguageFor(null)).toBeNull();
 		expect(replyLanguageFor("xx")).toBeNull();
 	});

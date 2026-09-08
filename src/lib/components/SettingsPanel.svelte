@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { getProviderDef, listProviders, createProvider } from "$lib/providers/registry";
-	import { maskKey, type AppSettings, type ThinkingLevel } from "$lib/settings";
+	import { maskKey, activeProviderSettings, type AppSettings } from "$lib/settings";
+	import { thinkingFor, resolveThinkingId } from "$lib/providers/thinking";
 	import { ejectProvider, restoreProvider } from "$lib/session";
 	import { hydrateSecrets, tauriBackendAvailable } from "$lib/secrets";
+	import { getCurrentWindow } from "@tauri-apps/api/window";
 	import { check } from "@tauri-apps/plugin-updater";
 	import {
 		nativeTtsSupported,
@@ -77,6 +79,14 @@
 	/** Picker options follow the Latin-script voice language field. */
 	const voiceLangTag = $derived(settings.voiceLang?.trim() || "en-US");
 	const voiceOptions = $derived(voicesForLang(installedVoices, voiceLangTag));
+	// A picked voice never reads another language: when the tag moves on
+	// from the saved pick, fall back to Auto instead of a blank field.
+	$effect(() => {
+		const options = voiceOptions;
+		if (settings.nativeVoiceId && !options.some((v) => v.id === settings.nativeVoiceId)) {
+			settings.nativeVoiceId = null;
+		}
+	});
 	/** Per-provider "replace key" mode; otherwise a stored key shows masked. */
 	let editingKey: Record<string, boolean> = $state({});
 	/** Local mirror of the session module set, so eject/restore re-renders. */
@@ -88,7 +98,7 @@
 	const activeCustom = $derived(
 		settings.customProviders.some((p) => p.id === settings.activeProviderId)
 	);
-	const active = $derived(settings.providers[settings.activeProviderId]);
+	const active = $derived(activeProviderSettings(settings));
 	const ejected = $derived(ejectedIds.includes(settings.activeProviderId));
 	const showKeyField = $derived(!active.apiKey.trim() || editingKey[settings.activeProviderId]);
 
@@ -227,16 +237,70 @@
 		switchProvider("muse");
 	}
 
-	function setThinking(level: ThinkingLevel) {
-		settings.thinkingLevel = level;
+	/** This model's thinking dial (native knob or prompt hints); hidden
+	 * when a single level exists. Recomputes from the model field, so a
+	 * newer/cheaper model id picks up its own dial as soon as it is typed. */
+	const thinkingSupport = $derived(thinkingFor(settings.activeProviderId, active.model));
+	const thinkingId = $derived(
+		resolveThinkingId(thinkingSupport, settings.thinking[settings.activeProviderId])
+	);
+	function setThinking(id: string) {
+		settings.thinking = { ...settings.thinking, [settings.activeProviderId]: id };
+	}
+
+	/**
+	 * The header doubles as the window drag strip and the close target:
+	 * mousedown starts a native drag (Tauri shell), while a plain click
+	 * (no real pointer travel) closes the panel. The travel check keeps
+	 * a drag that ends over the header from closing settings. Travel is
+	 * measured in screen coordinates: during a native drag the window
+	 * follows the cursor, so client coordinates barely move and would
+	 * misread every drag as a click.
+	 */
+	let headDown: { x: number; y: number } | null = null;
+	function dragHead(event: MouseEvent): void {
+		if (event.button !== 0) return;
+		headDown = { x: event.screenX, y: event.screenY };
+		if (!tauriBackendAvailable()) return;
+		try {
+			getCurrentWindow().startDragging().catch((error: unknown) => {
+				console.warn(
+					"Window drag failed:",
+					error instanceof Error ? error.message : String(error)
+				);
+			});
+		} catch (error) {
+			console.warn(
+				"Window drag failed:",
+				error instanceof Error ? error.message : String(error)
+			);
+		}
+	}
+	function closeFromHead(event: MouseEvent): void {
+		const down = headDown;
+		headDown = null;
+		if (down && Math.hypot(event.screenX - down.x, event.screenY - down.y) > 5) return;
+		onClose();
 	}
 </script>
 
-<div class="panel-head">
+<div
+	class="panel-head"
+	data-tauri-drag-region
+	role="button"
+	tabindex="0"
+	aria-label="Close settings"
+	title="Close settings"
+	onmousedown={dragHead}
+	onclick={closeFromHead}
+	onkeydown={(e) => {
+		if (e.key === "Enter" || e.key === " ") {
+			e.preventDefault();
+			onClose();
+		}
+	}}
+>
 	<h1>Settings</h1>
-	<button type="button" aria-label="Close settings" title="Close settings" onclick={onClose}>
-		×
-	</button>
 </div>
 
 <section aria-labelledby="provider-heading">
@@ -381,37 +445,24 @@
 		System prompt
 		<textarea rows="2" bind:value={settings.systemPrompt} spellcheck="false"></textarea>
 	</label>
-	<fieldset>
-		<legend>Thinking level (appends a deliberation hint to the system prompt)</legend>
-		<div class="segmented" role="radiogroup" aria-label="Thinking level">
-			<button
-				type="button"
-				role="radio"
-				aria-checked={settings.thinkingLevel === "low"}
-				class:selected={settings.thinkingLevel === "low"}
-				onclick={() => setThinking("low")}>Low</button
+	{#if thinkingSupport.options.length > 1}
+		<fieldset>
+			<legend
+				>Thinking level ({thinkingSupport.native ? "sent to the model" : "adds to system prompt"})</legend
 			>
-			<button
-				type="button"
-				role="radio"
-				aria-checked={settings.thinkingLevel === "medium"}
-				class:selected={settings.thinkingLevel === "medium"}
-				onclick={() => setThinking("medium")}>Medium</button
-			>
-			<button
-				type="button"
-				role="radio"
-				aria-checked={settings.thinkingLevel === "high"}
-				class:selected={settings.thinkingLevel === "high"}
-				onclick={() => setThinking("high")}>High</button
-			>
-		</div>
-	</fieldset>
-	<label class="check">
-		<input type="checkbox" bind:checked={settings.readingAids} />
-		Reading aids
-		<span class="key-hint" aria-hidden="true">⇧⌘A</span>
-	</label>
+			<div class="segmented" role="radiogroup" aria-label="Thinking level">
+				{#each thinkingSupport.options as option (option.id)}
+					<button
+						type="button"
+						role="radio"
+						aria-checked={thinkingId === option.id}
+						class:selected={thinkingId === option.id}
+						onclick={() => setThinking(option.id)}>{option.label}</button
+					>
+				{/each}
+			</div>
+		</fieldset>
+	{/if}
 	<label class="check">
 		<input
 			type="checkbox"
@@ -430,8 +481,20 @@
 		Voice readback
 		<span class="key-hint" aria-hidden="true">Ctrl+⌥+S</span>
 	</label>
+	<label class="check">
+		<input type="checkbox" bind:checked={settings.ownBubble} />
+		Background on my messages
+	</label>
+	<label class="check">
+		<input type="checkbox" bind:checked={settings.hoverUserActions} />
+		My message buttons only on hover
+	</label>
+	<label class="check">
+		<input type="checkbox" bind:checked={settings.hoverAssistantActions} />
+		AI message buttons only on hover
+	</label>
 	{#if nativeVoice}
-		<fieldset>
+		<fieldset class="voice-engine">
 			<legend>Voice engine</legend>
 			<div class="segmented" role="radiogroup" aria-label="Voice engine">
 				<button
@@ -479,7 +542,7 @@
 								settings.nativeVoiceId = e.currentTarget.value || null;
 							}}
 						>
-							<option value="">Auto (your System Voice, else best)</option>
+							<option value="">Auto (System voice, else best)</option>
 							{#each voiceOptions as option (option.id)}
 								<option value={option.id}>
 									{option.name} ·
@@ -525,10 +588,14 @@
 			placeholder="en-US"
 			autocomplete="off"
 			spellcheck="false"
+			onchange={() => {
+				// A typed locale is deliberate: restarts keep it.
+				settings.voiceLangPinned = true;
+			}}
 		/>
 	</div>
 	<label>
-		Text size <span class="hint">(percent · messages and prompt only)</span>
+		Text Size
 		<span class="font-row">
 			<input
 				type="range"
@@ -562,43 +629,48 @@
 </section>
 
 <style>
+	/* The header is the close target and the window drag strip:
+	chrome, not content — no text selection for the native drag
+	region to fight over. Negative margins stretch it over the
+	aside's own padding so the strip reaches the panel's top edge,
+	and the gap down to the divider is padding (clickable, part of
+	the header) rather than margin (clicks would fall through to
+	the aside and drag nothing). Values mirror .settings-panel
+	padding in +page.svelte. */
 	.panel-head {
 		display: flex;
 		align-items: center;
 		gap: 1rem;
-		margin-bottom: 0.5rem;
+		margin: -1.2rem -0.7rem 0;
+		padding: 1.2rem 0.7rem 0.5rem;
+		/* Default arrow like the main chat top bar: the whole strip
+		closes on click, so no pointer finger. Buttons keep their own. */
+		cursor: default;
+		user-select: none;
+		-webkit-user-select: none;
 	}
 	.panel-head h1 {
 		font-size: 1.15rem;
 		font-weight: 700;
 		margin: 0;
 	}
-	.panel-head button {
-		margin-left: auto;
-		font-size: 1.1rem;
-		line-height: 1;
-		border: 1px solid #c7c7cc;
-		border-radius: 8px;
-		background: none;
-		cursor: pointer;
-		padding: 0.15rem 0.55rem;
-		color: #3a3a3c;
-		transition:
-			border-color 0.15s ease,
-			background-color 0.15s ease,
-			color 0.15s ease;
-	}
-	.panel-head button:hover {
-		border-color: #1c1c1e;
+	.panel-head:focus-visible {
+		outline: 2px solid #1c1c1e;
+		outline-offset: 2px;
+		border-radius: 4px;
 	}
 	input[type="checkbox"] {
 		cursor: pointer;
+		transition: box-shadow 0.15s ease;
+	}
+	input[type="checkbox"]:hover {
+		box-shadow: 0 0 0 3px rgba(142, 142, 147, 0.45);
 	}
 	.font-row {
 		display: flex;
 		align-items: center;
 		gap: 0.7rem;
-		margin-top: 0.3rem;
+		margin-top: 0.55rem;
 	}
 	.font-row input[type="range"] {
 		flex: 1;
@@ -641,13 +713,27 @@
 		font-weight: 550;
 		margin-bottom: 0.9rem;
 	}
-	/* The picker follows the install note: breathing room on top. */
+	/* The picker hangs below the install note with room to breathe, then
+	hands off tightly to Voice language (the fieldset adds its own 0.9rem). */
 	.voice-pick {
 		margin-top: 0.9rem;
+		margin-bottom: 0.4rem;
 	}
 	.voice-pick-label {
 		display: block;
 		margin-bottom: 0.35rem;
+	}
+	/* Native select chrome (Aqua in the shell) sizes itself, so the
+	picker would never match the text field: draw it as a twin with a
+	chevron in the project's line-icon style instead. */
+	.voice-pick select {
+		appearance: none;
+		-webkit-appearance: none;
+		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236e6e73' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+		background-repeat: no-repeat;
+		background-position: right 0.7rem center;
+		padding-right: 2rem;
+		cursor: pointer;
 	}
 	details.note summary {
 		cursor: pointer;
@@ -837,6 +923,11 @@
 		padding: 0;
 		margin: 0 0 0.9rem;
 	}
+	/* The voice engine block carries the tallest stack (segmented + note
+	+ picker): a breath more room before Voice language. */
+	.voice-engine {
+		margin-bottom: 1.2rem;
+	}
 	legend {
 		font-size: 0.83rem;
 		font-weight: 550;
@@ -881,9 +972,8 @@
 		overflow-wrap: anywhere;
 	}
 	@media (prefers-color-scheme: dark) {
-		.panel-head button {
-			border-color: #48484a;
-			color: #aeaeb2;
+		.panel-head:focus-visible {
+			outline-color: #aeaeb2;
 		}
 		section {
 			border-color: #38383a;
@@ -901,7 +991,6 @@
 			border-color: #48484a;
 			color: #f2f2f7;
 		}
-		.panel-head button:hover,
 		.provider-row button:not(.selected):not(:disabled):hover,
 		.segmented button:not(.selected):not(:disabled):hover,
 		.key-state button:hover,
@@ -916,6 +1005,9 @@
 		select:hover,
 		textarea:hover {
 			border-color: #636366;
+		}
+		.voice-pick select {
+			background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23aeaeb2' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 		}
 		input[type="url"]:focus,
 		input[type="text"]:focus,

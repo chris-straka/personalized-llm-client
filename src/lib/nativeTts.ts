@@ -148,12 +148,24 @@ export async function openVoiceSettings(): Promise<void> {
 export function sentenceAtOffset(sentences: string[], utterance: string, offset: number): number {
 	let cursor = 0;
 	for (let i = 0; i < sentences.length; i++) {
-		const at = utterance.indexOf(sentences[i], cursor);
+		const sentence = sentences[i];
+		if (sentence === undefined) continue;
+		const at = utterance.indexOf(sentence, cursor);
 		const start = at === -1 ? cursor : at;
-		if (offset < start + sentences[i].length) return i;
-		cursor = start + sentences[i].length;
+		if (offset < start + sentence.length) return i;
+		cursor = start + sentence.length;
 	}
 	return sentences.length - 1;
+}
+
+/** Watchdog for a wedged bridge: cleared on every settle or teardown. */
+let watchdog: ReturnType<typeof setTimeout> | undefined;
+
+function clearWatchdog(): void {
+	if (watchdog !== undefined) {
+		clearTimeout(watchdog);
+		watchdog = undefined;
+	}
 }
 
 let unlisteners: UnlistenFn[] = [];
@@ -171,6 +183,7 @@ let generation = 0;
 function teardown(): void {
 	generation += 1;
 	expectedId = null;
+	clearWatchdog();
 	const pending = unlisteners;
 	unlisteners = [];
 	for (const unlisten of pending) {
@@ -205,6 +218,21 @@ export function speakNative(
 		teardown();
 		callbacks.onError?.(error instanceof Error ? error.message : String(error));
 	};
+	// A wedged bridge (no word events, no done, no error) must never leave
+	// the UI stuck "speaking": generous ceiling over the utterance length,
+	// then stop and say so. Cleared on every settle and teardown.
+	watchdog = setTimeout(
+		() => {
+			if (settled || gen !== generation) return;
+			settled = true;
+			teardown();
+			invoke("tts_stop").catch(() => {
+				// Best effort; the error below already explains.
+			});
+			callbacks.onError?.("Speech timed out — stopped. Try again.");
+		},
+		Math.min(300_000, Math.max(30_000, utterance.length * 250))
+	);
 	// Listeners first so nothing slips between invoke and registration; the
 	// backend id lands right after and arms the match below.
 	Promise.all([
@@ -219,8 +247,10 @@ export function speakNative(
 		}),
 		listen<DonePayload>("tts-done", (event) => {
 			if (event.payload.id !== expectedId) return;
+			const finished = event.payload.finished;
 			teardown();
 			callbacks.onEnd?.();
+			if (finished) callbacks.onNaturalEnd?.();
 		})
 	])
 		.then(([unword, undone]) => {
@@ -249,6 +279,59 @@ export function speakNativeWord(
 	invoke<number>("tts_speak", { text: word, lang, voice: voiceId }).catch((error: unknown) => {
 		onError?.(error instanceof Error ? error.message : String(error));
 	});
+}
+
+/**
+ * Render `text` to a WAV file through the native synthesizer (same voice
+ * pick and rate as live speech) and return it base64-encoded, or null when
+ * the bridge is unavailable. Never throws. Web `speechSynthesis` cannot
+ * produce audio, so downloads only exist on the native engine.
+ */
+export async function renderNativeSpeech(
+	text: string,
+	lang: string,
+	voiceId: string | null = null
+): Promise<string | null> {
+	if (!text.trim()) return null;
+	try {
+		return await invoke<string>("tts_render", { text, lang, voice: voiceId });
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Save rendered WAV bytes (base64) through the shell into Downloads.
+ * Returns the saved file name, or null when the bridge is unavailable.
+ * Never throws. Browser previews use the blob anchor instead — a WebView
+ * blob download is cancelled when no download handler is registered.
+ */
+export async function saveNativeAudio(
+	name: string,
+	wavBase64: string
+): Promise<string | null> {
+	if (!name.trim() || !wavBase64) return null;
+	try {
+		return await invoke<string>("tts_save_audio", { name, wavBase64 });
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Download filename for a message's rendered audio: first words slugged,
+ * always a `.wav`. Pure (unit-tested).
+ */
+export function audioFileNameFor(text: string): string {
+	const slug = text
+		.toLowerCase()
+		.split(/[^\p{L}\p{N}]+/u)
+		.filter(Boolean)
+		.slice(0, 6)
+		.join("-")
+		.slice(0, 48)
+		.replace(/-+$/, "");
+	return `ccez-${slug || "message"}.wav`;
 }
 
 /** Stop native speech and invalidate in-flight event listeners. Never throws. */

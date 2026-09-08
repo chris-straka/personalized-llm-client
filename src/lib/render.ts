@@ -16,7 +16,10 @@ const THINK_FULL = /<think>([\s\S]*?)<\/think>/gi;
 export function extractThoughts(markdown: string): { thoughts: string | null; body: string } {
 	const full = [...markdown.matchAll(THINK_FULL)];
 	if (full.length > 0) {
-		const thoughts = full.map((m) => m[1].trim()).filter(Boolean).join("\n\n");
+		const thoughts = full
+			.map((m) => (m[1] ?? "").trim())
+			.filter(Boolean)
+			.join("\n\n");
 		const body = markdown.replace(THINK_FULL, "").trim();
 		return { thoughts: thoughts || null, body };
 	}
@@ -132,8 +135,73 @@ export function sanitize(dirty: string): string {
 	purifier ??= DOMPurify(window);
 	return purifier.sanitize(dirty, {
 		ADD_TAGS: ["details", "summary", "button", "ruby", "rt", "rp"],
-		ADD_ATTR: ["open", "class", "style", "data-code-index", "data-code-action", "type"]
+		ADD_ATTR: ["open", "class", "style", "data-code-index", "data-code-action", "data-paste-fold", "type"]
 	});
+}
+
+/** One visible run: body text, or a closed-fold marker button. */
+export type FoldSegment =
+	| { kind: "text"; text: string }
+	| { kind: "marker"; index: number; chars: number };
+
+/** Marker button HTML (same label as the composer). Chars/index are numbers — nothing to escape. */
+export function pasteFoldButton(index: number, chars: number): string {
+	return `<button type="button" class="paste-fold" data-paste-fold="${index}">[Pasted content ${chars} chars]</button>`;
+}
+
+/**
+ * Split content into visible runs: open folds merge into the surrounding
+ * text, closed folds become marker segments. Invalid or overlapping folds
+ * are ignored, never fatal. Pure and unit-tested.
+ */
+export function foldSegments(
+	content: string,
+	folds: Array<{ start: number; end: number; chars: number; open?: boolean }> | undefined
+): FoldSegment[] {
+	if (!folds || folds.length === 0) return [{ kind: "text", text: content }];
+	const ordered = folds
+		.map((fold, index) => ({ ...fold, index }))
+		.filter((fold) => fold.start >= 0 && fold.end <= content.length && fold.start < fold.end)
+		.sort((a, b) => a.start - b.start || a.end - b.end);
+	const segments: FoldSegment[] = [];
+	let run = "";
+	let cursor = 0;
+	const flush = () => {
+		if (run) {
+			segments.push({ kind: "text", text: run });
+			run = "";
+		}
+	};
+	for (const fold of ordered) {
+		if (fold.start < cursor) continue; // overlapping: keep the earliest
+		run += content.slice(cursor, fold.start);
+		if (fold.open) run += content.slice(fold.start, fold.end);
+		else {
+			flush();
+			segments.push({ kind: "marker", index: fold.index, chars: fold.chars });
+		}
+		cursor = fold.end;
+	}
+	run += content.slice(cursor);
+	flush();
+	return segments;
+}
+
+/**
+ * Splice closed paste folds into display text: each becomes a
+ * `<button data-paste-fold>` marker carrying the composer's
+ * `[Pasted content N chars]` label; open folds stay inline. Clicks
+ * delegate in MessageBody like code-block buttons. Pure and unit-tested.
+ */
+export function applyPasteFolds(
+	content: string,
+	folds: Array<{ start: number; end: number; chars: number; open?: boolean }> | undefined
+): string {
+	return foldSegments(content, folds)
+		.map((segment) =>
+			segment.kind === "text" ? segment.text : pasteFoldButton(segment.index, segment.chars)
+		)
+		.join("");
 }
 
 /** Plain-text copy of rendered HTML (for "copy as text"). */
@@ -198,21 +266,20 @@ export async function highlightRendered(rendered: RenderedMessage): Promise<stri
 		return rendered.html;
 	}
 	const loaded = new Set(highlighter.getLoadedLanguages());
-	const highlighted = await Promise.all(
-		rendered.codes.map(async ({ lang, code }) => {
-			const language = loaded.has(lang) ? lang : "plaintext";
-			try {
-				const full = highlighter.codeToHtml(code, {
-					lang: language,
-					themes: { light: "github-light", dark: "github-dark" }
-				});
-				const match = full.match(/<pre[^>]*>([\s\S]*)<\/pre>/);
-				return match ? match[1].replace(/^<code[^>]*>|<\/code>$/g, "") : null;
-			} catch {
-				return null;
-			}
-		})
-	);
+	// Synchronous throughout (codeToHtml is not async): no Promise.all.
+	const highlighted = rendered.codes.map(({ lang, code }) => {
+		const language = loaded.has(lang) ? lang : "plaintext";
+		try {
+			const full = highlighter.codeToHtml(code, {
+				lang: language,
+				themes: { light: "github-light", dark: "github-dark" }
+			});
+			const match = full.match(/<pre[^>]*>([\s\S]*)<\/pre>/);
+			return match ? (match[1] ?? "").replace(/^<code[^>]*>|<\/code>$/g, "") : null;
+		} catch {
+			return null;
+		}
+	});
 	if (typeof document === "undefined") return rendered.html;
 	const template = document.createElement("template");
 	template.innerHTML = rendered.html;

@@ -1,47 +1,119 @@
 import { sanitize } from "./render";
+import { plainParagraphs } from "./pinyin";
 
 /**
- * Japanese furigana via kuroshiro + kuromoji. The 17MB dictionary is fetched
- * lazily on first use (never at startup) and conversions are cached.
+ * Japanese furigana via lindera (IPAdic) in a Web Worker. Conversion
+ * (and the dictionary load behind it) runs off the main thread —
+ * building the dictionary on the main thread freezes the UI until the
+ * watchdog kills it. The dictionary still fetches lazily on first use
+ * (never at startup) and conversions are cached on the main thread, so
+ * hover previews consult the cache without ever waking the worker.
  */
 
-type KuroshiroInstance = {
-	init(analyzer: unknown): Promise<void>;
-	convert(text: string, options?: Record<string, unknown>): Promise<string>;
-};
+interface ConvertResponse {
+	id: number;
+	html?: string;
+	error?: string;
+}
 
-let ready: Promise<KuroshiroInstance> | null = null;
 const cache = new Map<string, string>();
 
-function dictPath(): string {
-	// Vitest (node or jsdom) runs from the repo root; the browser serves /kuromoji/.
-	const userAgent =
-		typeof window !== "undefined" ? (window.navigator?.userAgent ?? "") : "";
-	if (typeof window === "undefined" || /jsdom/i.test(userAgent)) {
-		return "node_modules/kuromoji/dict/";
+let worker: Worker | null = null;
+let nextRequestId = 0;
+const inflight = new Map<
+	number,
+	{ resolve: (html: string) => void; reject: (error: Error) => void }
+>();
+
+function getWorker(): Worker {
+	if (typeof Worker === "undefined") throw new Error("Web workers are unavailable.");
+	if (!worker) {
+		const created = new Worker(new URL("./furigana.worker.ts", import.meta.url), {
+			type: "module"
+		});
+		created.onmessage = (event: MessageEvent) => {
+			const response = event.data as ConvertResponse;
+			const pending = inflight.get(response.id);
+			if (!pending) return;
+			inflight.delete(response.id);
+			if (response.error !== undefined) pending.reject(new Error(response.error));
+			else pending.resolve(response.html ?? "");
+		};
+		created.onerror = (event: Event) => {
+			// Drop the worker so the next request starts fresh instead of
+			// talking to a dead one; in-flight callers fail loudly.
+			const detail = event instanceof ErrorEvent && event.message ? `: ${event.message}` : "";
+			const error = new Error(`Furigana worker failed${detail}.`);
+			inflight.forEach((pending) => pending.reject(error));
+			inflight.clear();
+			worker = null;
+		};
+		worker = created;
 	}
-	const base = import.meta.env.BASE_URL || "/";
-	return `${base.replace(/\/$/, "")}/kuromoji/`;
+	return worker;
 }
 
-async function loader(): Promise<KuroshiroInstance> {
-	const [{ default: Kuroshiro }, { default: KuromojiAnalyzer }] = await Promise.all([
-		import("kuroshiro"),
-		import("kuroshiro-analyzer-kuromoji")
-	]);
-	const instance = new Kuroshiro();
-	await instance.init(new KuromojiAnalyzer({ dictPath: dictPath() }));
-	return instance;
+/**
+ * Worker round-trip ceiling: a hung worker (stalled dictionary fetch,
+ * no error event) must never leave a conversion pending forever. On
+ * timeout the worker is dropped so the next request starts fresh, and
+ * every in-flight caller fails loudly through the normal path.
+ */
+const CONVERT_TIMEOUT_MS = 60_000;
+
+function convertInWorker(text: string): Promise<string> {
+	const w = getWorker();
+	const id = nextRequestId++;
+	return new Promise<string>((resolve, reject) => {
+		const timer = setTimeout(() => {
+			try {
+				w.terminate();
+			} catch {
+				// Already dead; the rejects below still land.
+			}
+			worker = null;
+			const error = new Error("Furigana conversion timed out.");
+			inflight.forEach((pending) => pending.reject(error));
+			inflight.clear();
+		}, CONVERT_TIMEOUT_MS);
+		inflight.set(id, {
+			resolve: (html) => {
+				clearTimeout(timer);
+				resolve(html);
+			},
+			reject: (error) => {
+				clearTimeout(timer);
+				reject(error);
+			}
+		});
+		w.postMessage({ id, text });
+	});
 }
 
-/** Convert Japanese text to sanitized furigana ruby HTML. */
+/**
+ * Convert Japanese text to sanitized furigana ruby HTML. The worker emits
+ * bare inline ruby, so lines are wrapped in paragraphs exactly like the
+ * pinyin path — the reserved ruby room keys off `p`.
+ */
+/**
+ * True when the furigana HTML for this exact text is already computed.
+ * Hover previews consult this so hovering never starts the dictionary
+ * fetch — fetching happens on click alone.
+ */
+export function isFuriganaCached(text: string): boolean {
+	return cache.has(text);
+}
+
+/**
+ * Worker-only: runtimes without Web Workers (Vitest, SSR) cannot
+ * convert. Unit coverage lives in furiganaRuby.test.ts (pure builder)
+ * and the browser e2e spec (real engine end to end).
+ */
 export async function furiganaHtml(text: string): Promise<string> {
 	const cached = cache.get(text);
 	if (cached !== undefined) return cached;
-	ready ??= loader();
-	const instance = await ready;
-	const raw = await instance.convert(text, { to: "hiragana", mode: "furigana" });
-	const html = sanitize(raw);
+	const raw = await convertInWorker(text);
+	const html = sanitize(plainParagraphs(raw));
 	cache.set(text, html);
 	return html;
 }

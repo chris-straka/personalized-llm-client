@@ -43,8 +43,8 @@ export const AID_LABEL: Record<DetectedScript, string> = {
 const WORD_BREAK =
 	/[\s，。！？、；：「」『』（）［］【】《》〈〉…—–·,.!?;:"'()[\]{}<>・、。؟؛،«»‹›„“”‘’\n\r\t]/;
 
-export function isWordChar(char: string): boolean {
-	return char !== "" && !WORD_BREAK.test(char);
+export function isWordChar(char: string | undefined): boolean {
+	return char !== undefined && char !== "" && !WORD_BREAK.test(char);
 }
 
 /** Expand `offset` to the full word (maximal run of word chars). */
@@ -138,6 +138,35 @@ export const MODEL_AID_FOR_SCRIPT: Record<AidScript, string | null> = {
 	ja: null,
 	ar: "tashkeel"
 };
+
+/** Locally computed ruby rendering (message body changes when the aids
+toggle flips). Model-aid scripts (Arabic tashkeel) render identically
+either way until their aid button is applied — the toggle only reveals
+the button. */
+export type LocalAid = "pinyin" | "furigana";
+
+/** Native-script labels for the per-message local-aid buttons. */
+export const LOCAL_AID_BUTTON: Record<LocalAid, string> = {
+	pinyin: "拼音",
+	furigana: "読み仮名"
+};
+
+/** "Show original" in the aid's own script (button state after pinning). */
+export const LOCAL_AID_SHOW_ORIGINAL: Record<LocalAid, string> = {
+	pinyin: "显示原件",
+	furigana: "オリジナルを表示"
+};
+
+/** English titles for the per-message local-aid buttons. */
+export const LOCAL_AID_ADD_TITLE: Record<LocalAid, string> = {
+	pinyin: "Add pinyin",
+	furigana: "Add furigana"
+};
+export function localAidFor(script: DetectedScript | null): LocalAid | null {
+	if (script === "zh") return "pinyin";
+	if (script === "ja") return "furigana";
+	return null;
+}
 
 const aidCache = new Map<string, string>();
 

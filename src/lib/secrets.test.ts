@@ -52,24 +52,24 @@ describe("secrets fallback (no Tauri shell)", () => {
 	it("hydrates blank settings keys from storage", async () => {
 		await setSecret(secretAccount("muse"), "muse-test");
 		const settings = defaultSettings();
-		settings.providers["deepseek"].apiKey = "";
-		settings.providers["muse"].apiKey = "";
+		settings.providers["deepseek"]!.apiKey = "";
+		settings.providers["muse"]!.apiKey = "";
 		const hydrated = await hydrateSecrets(settings);
 		expect(hydrated).toEqual(["muse"]);
-		expect(settings.providers["muse"].apiKey).toBe("muse-test");
+		expect(settings.providers["muse"]!.apiKey).toBe("muse-test");
 		// Already-filled keys are left alone.
-		settings.providers["deepseek"].apiKey = "keep";
+		settings.providers["deepseek"]!.apiKey = "keep";
 		await expect(hydrateSecrets(settings)).resolves.toEqual([]);
-		expect(settings.providers["deepseek"].apiKey).toBe("keep");
+		expect(settings.providers["deepseek"]!.apiKey).toBe("keep");
 	});
 
 	it("persists keys and blanks copies for shell storage", async () => {
 		const settings = defaultSettings();
-		settings.providers["deepseek"].apiKey = "sk-live";
+		settings.providers["deepseek"]!.apiKey = "sk-live";
 		await persistSecrets(settings);
 		expect(await getSecret(secretAccount("deepseek"))).toBe("sk-live");
 		const blanked = withBlankedKeys(settings);
-		expect(blanked.providers["deepseek"].apiKey).toBe("");
-		expect(settings.providers["deepseek"].apiKey).toBe("sk-live");
+		expect(blanked.providers["deepseek"]!.apiKey).toBe("");
+		expect(settings.providers["deepseek"]!.apiKey).toBe("sk-live");
 	});
 });

@@ -55,6 +55,22 @@ privileged (Keychain, updater, native TTS).
 
 - Settings: `src/lib/settings.ts` (`defaultSettings`, `saveSettings`); secrets
   go to Keychain via `src/lib/secrets.ts`, never into persisted settings.
+- Types are load-bearing compiler feedback, not decoration: `strict` plus
+  `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes` (every index and
+  optional is guilty until proven defined), type-aware `recommendedTypeChecked`
+  lint (`no-floating-promises` enforces the `void`-your-promises convention),
+  and branded ids (`ChatId` / `ChatMsgId` / `AnnotationId` in `chat.ts` /
+  `annotations.ts`) so a chat id can never be passed as a message id. Zod was
+  evaluated and rejected (runtime errors, not compiler feedback; boundaries
+  already narrow by hand). TS stays at v6 until `svelte-check` peers allow v7.
+- `@types/node` is install-but-never-global (`tsconfig` `types: []`): tooling
+  imports it explicitly from `node:*`. Frontend code must never see a global
+  `process` — it doesn't exist in the webview.
+- Dev-only macOS icon fix lives in `src-tauri/src/dev_icon.rs`
+  (`#[cfg(all(target_os = "macos", debug_assertions))]`): `tauri dev` runs
+  unbundled, so the switcher tile comes from raw `.icns` bytes reporting
+  512pt — the watcher swaps a 128pt tile after Tauri's own lands. Release
+  bundles are unaffected (IconServices picks the right rep).
 - Tests live next to code (`foo.test.ts`); pure logic must be importable without
   Tauri or DOM (extract `sentenceAtOffset`-style pure helpers to test them).
 - Agent-captured verification screenshots go in `.screenshots/` (gitignored),

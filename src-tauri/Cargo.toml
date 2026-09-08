@@ -24,6 +24,10 @@ tauri-plugin-updater = "2"
 keyring = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Downloads-folder lookup for the shell audio-save path, plus base64 to
+# carry WAV bytes over the invoke bridge in both directions.
+dirs = "6"
+base64 = "0.22"
 
 # macOS-only native TTS (AVSpeechSynthesizer). Pure-Rust bindings via
 # objc2 — no Objective-C is written anywhere in this project.
@@ -33,6 +37,8 @@ objc2-foundation = "0.3"
 objc2-app-kit = "0.3"
 objc2-avf-audio = "0.3"
 objc2-natural-language = "0.3"
+# Objective-C blocks for `writeUtterance:toBufferCallback:` (offline render).
+block2 = "0.6"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

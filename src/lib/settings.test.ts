@@ -6,7 +6,7 @@ import {
 	saveSettings,
 	memoryStore,
 	DEFAULT_SYSTEM_PROMPT,
-	cycleThinkingLevel,
+	activeThinkingId,
 	effectiveSystemPrompt,
 	systemLocale
 } from "./settings";
@@ -14,24 +14,29 @@ import {
 /** Blank slate: tests must never see the developer's real `.env`. */
 function blankSettings() {
 	const s = defaultSettings();
-	s.providers["deepseek"].apiKey = "";
-	s.providers["muse"].apiKey = "";
+	s.providers["deepseek"]!.apiKey = "";
+	s.providers["muse"]!.apiKey = "";
 	return s;
 }
 
 describe("settings", () => {
-	it("defaults to high thinking, aids off, voice off, empty system prompt", () => {
+	it("defaults to per-model thinking, voice off, empty system prompt", () => {
 		const s = defaultSettings();
-		expect(s.thinkingLevel).toBe("high");
-		expect(s.readingAids).toBe(false);
+		expect(s.thinking).toEqual({});
+		// Unset resolves to each model's default (muse → medium).
+		expect(activeThinkingId(s)).toBe("medium");
+		expect("readingAids" in s).toBe(false);
 		expect(s.vim).toBe(true);
 		expect(s.voice).toBe(false);
+		expect(s.ownBubble).toBe(true);
+		expect(s.hoverUserActions).toBe(false);
+		expect(s.hoverAssistantActions).toBe(false);
 		expect(s.voiceEngine).toBe("native");
 		expect(s.voiceLang).toBe("en-US");
 		expect(s.systemPrompt).toBe(DEFAULT_SYSTEM_PROMPT);
-		expect(s.providers["deepseek"].model).toBe("deepseek-v4-pro");
-		expect(s.providers["muse"].model).toBe("muse-spark-1.3-contributor");
-		expect(s.providers["muse"].models).toEqual([]);
+		expect(s.providers["deepseek"]!.model).toBe("deepseek-v4-pro");
+		expect(s.providers["muse"]!.model).toBe("muse-spark-1.3-contributor");
+		expect(s.providers["muse"]!.models).toEqual([]);
 	});
 
 	it("defaults text size to 1 and backfills/clamps old saves", () => {
@@ -50,21 +55,43 @@ describe("settings", () => {
 		expect(loadSettings(memoryStore).fontScale).toBe(1.2);
 	});
 
-	it("cycles low → medium → high and back", () => {
-		expect(cycleThinkingLevel("low", 1)).toBe("medium");
-		expect(cycleThinkingLevel("medium", 1)).toBe("high");
-		expect(cycleThinkingLevel("high", 1)).toBe("low");
-		expect(cycleThinkingLevel("high", -1)).toBe("medium");
-		expect(cycleThinkingLevel("low", -1)).toBe("high");
+	it("migrates the shared thinking dial to per-provider native ids", () => {
+		const raw = blankSettings();
+		(raw as unknown as Record<string, unknown>)["thinkingLevel"] = "high";
+		delete (raw as unknown as Record<string, unknown>)["thinking"];
+		saveSettings(raw, memoryStore);
+		const loaded = loadSettings(memoryStore);
+		expect(loaded.thinking).toEqual({ muse: "high", deepseek: "max" });
+		expect("thinkingLevel" in loaded).toBe(false);
+		const low = blankSettings();
+		(low as unknown as Record<string, unknown>)["thinkingLevel"] = "low";
+		delete (low as unknown as Record<string, unknown>)["thinking"];
+		saveSettings(low, memoryStore);
+		expect(loadSettings(memoryStore).thinking).toEqual({ muse: "low", deepseek: "high" });
 	});
 
 	it("composes thinking hint and reply language into the prompt", () => {
 		const s = defaultSettings();
 		s.systemPrompt = "Be brief.";
-		expect(effectiveSystemPrompt(s)).toBe("Be brief. Think carefully before answering.");
-		s.thinkingLevel = "medium";
+		// Muse sends thinking natively: no prompt hint.
 		expect(effectiveSystemPrompt(s)).toBe("Be brief.");
-		s.thinkingLevel = "low";
+		// Generic providers fall back to prompt hints.
+		s.customProviders = [
+			{
+				id: "x",
+				label: "X",
+				defaultBaseUrl: "https://x.test",
+				defaultModel: "xm",
+				keyHint: ""
+			}
+		];
+		s.providers["x"] = { baseUrl: "https://x.test", apiKey: "", model: "xm", models: [] };
+		s.activeProviderId = "x";
+		s.thinking = { x: "high" };
+		expect(effectiveSystemPrompt(s)).toBe("Be brief. Think carefully before answering.");
+		s.thinking = { x: "medium" };
+		expect(effectiveSystemPrompt(s)).toBe("Be brief.");
+		s.thinking = { x: "low" };
 		s.replyLang = "fr";
 		expect(effectiveSystemPrompt(s)).toBe(
 			"Be brief. Answer directly with minimal deliberation. Reply in French."
@@ -79,6 +106,32 @@ describe("settings", () => {
 		expect(s.systemPrompt).toBe("");
 	});
 
+	it("drops the retired global reading-aids key", () => {
+		const s = blankSettings();
+		(s as unknown as Record<string, unknown>)["readingAids"] = true;
+		saveSettings(s, memoryStore);
+		expect("readingAids" in loadSettings(memoryStore)).toBe(false);
+	});
+
+	it("splits the legacy hover-actions toggle across both sides", () => {
+		const s = blankSettings();
+		(s as unknown as Record<string, unknown>).hoverActions = true;
+		delete (s as unknown as Record<string, unknown>).hoverUserActions;
+		delete (s as unknown as Record<string, unknown>).hoverAssistantActions;
+		saveSettings(s, memoryStore);
+		const loaded = loadSettings(memoryStore);
+		expect(loaded.hoverUserActions).toBe(true);
+		expect(loaded.hoverAssistantActions).toBe(true);
+		expect("hoverActions" in loaded).toBe(false);
+		const kept = blankSettings();
+		kept.hoverUserActions = true;
+		kept.hoverAssistantActions = false;
+		saveSettings(kept, memoryStore);
+		const reloaded = loadSettings(memoryStore);
+		expect(reloaded.hoverUserActions).toBe(true);
+		expect(reloaded.hoverAssistantActions).toBe(false);
+	});
+
 	it("migrates the retired default prompt but keeps custom ones", () => {
 		const s = blankSettings();
 		s.systemPrompt = "Be brief, no summaries.";
@@ -89,11 +142,42 @@ describe("settings", () => {
 		expect(loadSettings(memoryStore).systemPrompt).toBe("Talk like a pirate.");
 	});
 
+	it("drops a persisted reply language and its voice override on load", () => {
+		const s = blankSettings();
+		s.replyLang = "ar";
+		s.voiceLang = "ar-SA";
+		saveSettings(s, memoryStore);
+		const loaded = loadSettings(memoryStore);
+		expect(loaded.replyLang).toBeNull();
+		expect(loaded.voiceLang).toBe(systemLocale());
+	});
+
+	it("keeps a pinned voice across restarts", () => {
+		const s = blankSettings();
+		s.replyLang = null;
+		s.voiceLang = "fr-FR";
+		s.voiceLangPinned = true;
+		saveSettings(s, memoryStore);
+		const loaded = loadSettings(memoryStore);
+		expect(loaded.replyLang).toBeNull();
+		expect(loaded.voiceLang).toBe("fr-FR");
+	});
+
+	it("returns an unpinned voice to the default on load", () => {
+		const s = blankSettings();
+		s.replyLang = null;
+		s.voiceLang = "fr-FR";
+		s.voiceLangPinned = false;
+		saveSettings(s, memoryStore);
+		const loaded = loadSettings(memoryStore);
+		expect(loaded.voiceLang).toBe(systemLocale());
+	});
+
 	it("never clobbers a saved key when loading", () => {
 		const s = blankSettings();
-		s.providers["muse"].apiKey = "typed";
+		s.providers["muse"]!.apiKey = "typed";
 		saveSettings(s, memoryStore);
-		expect(loadSettings(memoryStore).providers["muse"].apiKey).toBe("typed");
+		expect(loadSettings(memoryStore).providers["muse"]!.apiKey).toBe("typed");
 	});
 
 	it("resolves dev-time env names, VITE_ first", () => {
@@ -112,9 +196,9 @@ describe("settings", () => {
 			envProviderDefaults({
 				META_OPENAI_API_KEY_MUSE_SPARK_ONE_POINT_THREE: "sk-legacy",
 				VITE_MUSE_API_KEY: "sk-vite"
-			}).muse.apiKey
+			}).muse!.apiKey
 		).toBe("sk-vite");
-		expect(envProviderDefaults({}).muse.apiKey).toBe("");
+		expect(envProviderDefaults({}).muse!.apiKey).toBe("");
 	});
 
 	it("starts with no custom providers and resets unknown active ids", () => {
@@ -167,10 +251,10 @@ describe("settings", () => {
 
 	it("round-trips through a store and survives corrupt JSON", () => {
 		const s = blankSettings();
-		s.providers["muse"].apiKey = "secret";
+		s.providers["muse"]!.apiKey = "secret";
 		saveSettings(s, memoryStore);
 		const loaded = loadSettings(memoryStore);
-		expect(loaded.providers["muse"].apiKey).toBe("secret");
+		expect(loaded.providers["muse"]!.apiKey).toBe("secret");
 
 		memoryStore.setItem("ccez-studio-settings-v1", "{not json");
 		expect(loadSettings(memoryStore)).toEqual(defaultSettings());

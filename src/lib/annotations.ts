@@ -3,22 +3,26 @@
  * wrapped into the next query. Composer-scoped (like attachments): sending
  * bakes them into the message text, so they are never persisted separately.
  */
+import type { ChatMsgId } from "./chat";
+
+/** Opaque annotation identifier (see ChatId/ChatMsgId in chat.ts). */
+export type AnnotationId = string & { readonly kind: "annotation" };
 
 export interface Annotation {
-	id: string;
+	id: AnnotationId;
 	/** Message the selection came from (drives badge placement). */
-	messageId: string;
+	messageId: ChatMsgId;
 	quote: string;
 	comment: string;
 }
 
-export function newAnnotationId(): string {
-	return crypto.randomUUID();
+export function newAnnotationId(): AnnotationId {
+	return crypto.randomUUID() as AnnotationId;
 }
 
 export function addAnnotation(
 	list: Annotation[],
-	messageId: string,
+	messageId: ChatMsgId,
 	quote: string,
 	comment = ""
 ): Annotation[] {
@@ -44,7 +48,7 @@ export function clearAnnotations(): Annotation[] {
 }
 
 /** 1-based badge number of an annotation within the composer list. */
-export function annotationNumber(list: Annotation[], id: string): number {
+export function annotationNumber(list: Annotation[], id: AnnotationId): number {
 	return list.findIndex((a) => a.id === id) + 1;
 }
 
@@ -73,7 +77,7 @@ function stripForMatch(text: string): { stripped: string; offsets: number[] } {
 	let stripped = "";
 	const offsets: number[] = [];
 	for (let i = 0; i < text.length; i++) {
-		const ch = foldChar(text[i]);
+		const ch = foldChar(text[i] ?? "");
 		if (/\s/.test(ch)) continue;
 		offsets.push(i);
 		stripped += ch;
@@ -104,20 +108,191 @@ export function locateQuote(nodeTexts: string[], quote: string): QuoteLocation |
 	nodeTexts.forEach((text, node) => {
 		const s = stripForMatch(text);
 		for (let i = 0; i < s.stripped.length; i++) {
-			map.push({ node, offset: s.offsets[i] });
-			hay += s.stripped[i];
+			const offset = s.offsets[i];
+			const ch = s.stripped[i];
+			if (offset === undefined || ch === undefined) continue;
+			map.push({ node, offset });
+			hay += ch;
 		}
 	});
 	const at = hay.indexOf(q.stripped);
 	if (at === -1) return null;
 	const first = map[at];
 	const last = map[at + q.stripped.length - 1];
+	if (!first || !last) return null;
 	return {
 		startNode: first.node,
 		startOffset: first.offset,
 		endNode: last.node,
 		endOffset: last.offset + 1
 	};
+}
+
+/** Badge to stamp onto a message's quoted span. */
+export interface AnnotationMark {
+	id: AnnotationId;
+	number: number;
+	quote: string;
+}
+
+/**
+ * Rendered text nodes eligible for quote location. Badge buttons stamped
+ * earlier in the same pass are UI chrome, not message text: their number
+ * text must stay out of the haystack, or any later quote spanning that
+ * position (overlapping or nested selections) stops matching and its
+ * badge never appears.
+ */
+/**
+ * Plain text of a cloned selection fragment minus UI chrome and overlay
+ * readings: annotation badge numbers would bake into the quote ("Kyoto1
+ * in two sentences") and ruby readings would bake in too ("漢かん字じ"
+ * for 漢字). Only the base text is content.
+ */
+export function quoteFragmentText(frag: DocumentFragment): string {
+	frag.querySelectorAll("[data-ann-badge], rt, rp").forEach((el) => el.remove());
+	return frag.textContent?.trim() ?? "";
+}
+
+export function quoteTextNodes(root: Node): Text[] {
+	const nodes: Text[] = [];
+	const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+	while (walker.nextNode()) {
+		const node = walker.currentNode;
+		if (!(node instanceof Text)) continue;
+		const parent = node.parentNode;
+		if (parent instanceof Element && parent.closest("[data-ann-badge]")) continue;
+		nodes.push(node);
+	}
+	return nodes;
+}
+
+/**
+ * Prompt badge count for the annotation tracker: the number, capped at
+ * 99+ so the badge never stretches the prompt tools.
+ */
+export function annotationCountLabel(count: number): string {
+	return count > 99 ? "99+" : String(count);
+}
+
+/**
+ * Numbered badge on the first occurrence of each quoted span, plus the
+ * yellow wash on the one annotation whose comment box is open. Old
+ * marks unwrap first so re-renders never accumulate. Quotes that no
+ * longer match (edited messages, cross-message selections) stay
+ * listed in the review panel without a badge — never an error.
+ */
+/** Wash fade-out length in ms — mirrors the ann-wash-out keyframes. */
+export const WASH_FADE_MS = 180;
+
+export function applyMarks(
+	root: Element,
+	items: AnnotationMark[],
+	skip: boolean,
+	wash: string | null
+): void {
+	// Ids already on screen: re-stamping them (every render unwraps and
+	// re-locates) must not replay the mount fade — only new badges are fresh.
+	const settled = new Set(
+		[...root.querySelectorAll("[data-ann-badge]")].map((el) =>
+			el instanceof HTMLElement ? (el.dataset.annBadge ?? "") : ""
+		)
+	);
+	for (const badge of root.querySelectorAll("[data-ann-badge]")) badge.remove();
+	// The wash whose marks are currently mounted ("" when none): a steady
+	// wash re-stamps without replaying its fade-in, like settled badges.
+	const prevWash = (root as HTMLElement).dataset.washStamped || null;
+	// A cleared wash fades out: unwrap now (badges need clean text to
+	// anchor beside, never inside, a mark), stamp badges normally, then
+	// re-wrap the old range as leaving marks below.
+	const fading = !skip && !wash && prevWash ? prevWash : null;
+	for (const mark of root.querySelectorAll("mark.ccez-ann")) {
+		mark.replaceWith(document.createTextNode(mark.textContent ?? ""));
+	}
+	(root as HTMLElement).dataset.washStamped = wash ?? "";
+	if (skip || items.length === 0) return;
+	// A newly arrived wash fades in; a steady one re-mounts silently.
+	const freshWash = !!wash && wash !== prevWash;
+	for (const item of items) {
+		// Fresh snapshot per item: the previous wrap splits text nodes,
+		// so earlier indices go stale — nested quotes (a sentence and
+		// its parts) only locate on the current DOM.
+		const nodes = quoteTextNodes(root);
+		const texts = nodes.map((n) => n.textContent ?? "");
+		const loc = locateQuote(texts, item.quote);
+		if (!loc) continue;
+		const anchor =
+			item.id === wash ? wrapRange(nodes, loc, freshWash ? "fresh" : undefined) : endNodeOf(nodes, loc);
+		if (!anchor) continue;
+		const badge = document.createElement("button");
+		badge.type = "button";
+		badge.className = "ccez-ann-badge";
+		if (!settled.has(item.id)) badge.classList.add("fresh");
+		badge.dataset.annBadge = item.id;
+		badge.textContent = String(item.number);
+		badge.title = "Open annotation";
+		anchor.after(badge);
+	}
+	if (fading) {
+		// Re-wrap the cleared wash so CSS can ramp it to transparent;
+		// unwrap once the fade plays out. Runs in the same task as the
+		// unwrap above, so no unwashed frame ever paints. A superseding
+		// stamp unwraps these early and the sweep no-ops (replaceWith on
+		// a detached node does nothing).
+		const gone = items.find((item) => item.id === fading);
+		if (gone) {
+			const fnodes = quoteTextNodes(root);
+			const floc = locateQuote(
+				fnodes.map((node) => node.textContent ?? ""),
+				gone.quote
+			);
+			if (floc) {
+				wrapRange(fnodes, floc, "leaving");
+				const doomed = [...root.querySelectorAll("mark.ccez-ann.leaving")];
+				setTimeout(() => {
+					for (const mark of doomed) {
+						if (mark.classList.contains("leaving")) {
+							mark.replaceWith(document.createTextNode(mark.textContent ?? ""));
+						}
+					}
+				}, WASH_FADE_MS);
+			}
+		}
+	}
+}
+
+/** End node of a located quote (badge anchor when no wash is wanted). */
+function endNodeOf(nodes: Text[], loc: QuoteLocation): Text | null {
+	return nodes[loc.endNode] ?? null;
+}
+
+/**
+ * Wrap every text-node part of a located quote in its own highlight
+ * (sub-ranges stay inside single text nodes, so splitting is safe).
+ * Returns the last mark for badge placement. Out-of-range offsets
+ * (stale indices, partial overlaps) skip instead of throwing.
+ */
+function wrapRange(nodes: Text[], loc: QuoteLocation, extraClass?: string): HTMLElement | null {
+	let last: HTMLElement | null = null;
+	for (let i = loc.startNode; i <= loc.endNode; i++) {
+		const node = nodes[i];
+		if (!node) continue;
+		const length = node.textContent?.length ?? 0;
+		const from = i === loc.startNode ? loc.startOffset : 0;
+		const to = i === loc.endNode ? loc.endOffset : length;
+		if (from >= to) continue;
+		try {
+			const range = document.createRange();
+			range.setStart(node, from);
+			range.setEnd(node, to);
+			const highlight = document.createElement("mark");
+			highlight.className = extraClass ? `ccez-ann ${extraClass}` : "ccez-ann";
+			range.surroundContents(highlight);
+			last = highlight;
+		} catch {
+			continue;
+		}
+	}
+	return last;
 }
 
 /**

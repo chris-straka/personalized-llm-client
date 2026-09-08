@@ -4,6 +4,7 @@ import {
 	activeChat,
 	newChat,
 	selectChat,
+	setChatReplyLang,
 	deleteChat,
 	deleteAllChats,
 	deleteMessage,
@@ -14,9 +15,12 @@ import {
 	takeBackLastReply,
 	resendLast,
 	tokenTotal,
+	tokenSplit,
 	formatTokens,
 	waypoints,
+	waypointLabel,
 	sendMessage,
+	setPasteFold,
 	buildApiMessages,
 	type ChatState
 } from "./chat";
@@ -60,10 +64,23 @@ describe("chat", () => {
 		await sendMessage(state, scriptedProvider(["hel", "lo"]), "sys", "hi", {}, store);
 		const chat = activeChat(state);
 		expect(chat.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
-		expect(chat.messages[1].content).toBe("hello");
-		expect(chat.messages[1].usage?.total).toBe(2);
+		expect(chat.messages[1]?.content).toBe("hello");
+		expect(chat.messages[1]?.usage?.total).toBe(2);
 		expect(tokenTotal(state)).toBe(2);
 		expect(state.sending).toBe(false);
+	});
+
+	it("splits tokens into input and output", async () => {
+		const { state, store } = stateWith(freshStore());
+		await sendMessage(state, scriptedProvider(["hi"], { prompt: 5, completion: 3, total: 8 }), "sys", "hello", {}, store);
+		await sendMessage(state, scriptedProvider(["yo"], { prompt: 7, completion: 2, total: 9 }), "sys", "again", {}, store);
+		expect(tokenSplit(state)).toEqual({ prompt: 12, completion: 5 });
+		expect(tokenTotal(state)).toBe(17);
+	});
+
+	it("splits zero tokens on an empty chat", () => {
+		const { state } = stateWith(freshStore());
+		expect(tokenSplit(state)).toEqual({ prompt: 0, completion: 0 });
 	});
 
 	it("compacts token counts with K/M/B suffixes", () => {
@@ -95,8 +112,8 @@ describe("chat", () => {
 		await sendMessage(state, failing, "sys", "hi", {}, store);
 		const chat = activeChat(state);
 		const last = chat.messages[chat.messages.length - 1];
-		expect(last.error).toBe("bad key");
-		expect(last.content).toBe("");
+		expect(last?.error).toBe("bad key");
+		expect(last?.content).toBe("");
 
 		dismissFailedAssistant(state, store);
 		expect(activeChat(state).messages.map((m) => m.role)).toEqual(["user"]);
@@ -122,13 +139,40 @@ describe("chat", () => {
 		await sendMessage(state, flaky, "sys", "q", {}, store);
 		expect(activeChat(state).messages).toHaveLength(2);
 		dismissFailedAssistant(state, store);
-		await resendLast(state, flaky, "sys", store);
+		await resendLast(state, flaky, "sys", { store });
 		expect(activeChat(state).messages.map((m) => m.role)).toEqual(["user", "assistant"]);
-		expect(activeChat(state).messages[1].content).toBe("recovered");
+		expect(activeChat(state).messages[1]?.content).toBe("recovered");
 
 		takeBackLastReply(state, store);
-		await resendLast(state, flaky, "sys", store);
+		await resendLast(state, flaky, "sys", { store });
 		expect(activeChat(state).messages).toHaveLength(2);
+	});
+
+	it("aborts the in-flight send when its chat is dropped", async () => {
+		const { state, store } = stateWith(freshStore());
+		let aborted = false;
+		const hanging: ChatProvider = {
+			id: "hang",
+			async chat(): Promise<ChatResult> {
+				throw new Error("unused");
+			},
+			stream(_m, _cb, opts): Promise<ChatResult> {
+				return new Promise<ChatResult>((_resolve, reject) => {
+					opts?.signal?.addEventListener("abort", () => {
+						aborted = true;
+						reject(new DOMException("aborted", "AbortError"));
+					});
+				});
+			}
+		};
+		const sending = sendMessage(state, hanging, "sys", "hi", {}, store);
+		await new Promise((r) => setTimeout(r, 20));
+		expect(state.sending).toBe(true);
+		deleteChat(state, state.activeChatId, store);
+		await sending;
+		expect(aborted).toBe(true);
+		expect(state.sending).toBe(false);
+		expect(activeChat(state).messages).toHaveLength(0);
 	});
 
 	it("reruns from any user message, deleting everything after it", async () => {
@@ -140,7 +184,7 @@ describe("chat", () => {
 
 		truncateToMessage(state, 0, store);
 		expect(activeChat(state).messages.map((m) => m.content)).toEqual(["one"]);
-		await resendLast(state, provider, "sys", store);
+		await resendLast(state, provider, "sys", { store });
 		expect(activeChat(state).messages.map((m) => m.role)).toEqual(["user", "assistant"]);
 
 		// Non-user targets and out-of-range indices are no-ops.
@@ -162,7 +206,7 @@ describe("chat", () => {
 		branchFrom(state, 0, store);
 		expect(state.chats).toHaveLength(2);
 		expect(activeChat(state).messages).toHaveLength(1);
-		expect(activeChat(state).messages[0].content).toBe("one");
+		expect(activeChat(state).messages[0]?.content).toBe("one");
 	});
 
 	it("stages messages last without sending, in order", async () => {
@@ -204,6 +248,64 @@ describe("chat", () => {
 		expect(activeChat(state).messages).toEqual([]);
 	});
 
+	it("appends new and branched chats at the bottom, newest last", async () => {
+		const { state, store } = stateWith(freshStore());
+		const first = state.activeChatId;
+		await sendMessage(state, scriptedProvider(["r"]), "sys", "one", {}, store);
+		newChat(state, store);
+		const second = state.activeChatId;
+		expect(state.chats.map((c) => c.id)).toEqual([first, second]);
+		expect(activeChat(state).messages).toEqual([]);
+		selectChat(state, first);
+		branchFrom(state, 0, store);
+		expect(state.chats.map((c) => c.id)).toEqual([first, second, state.activeChatId]);
+		expect(activeChat(state).messages[0]?.content).toBe("one");
+	});
+
+	it("deleting the active chat lands on the one right below it", () => {
+		const { state, store } = stateWith(freshStore());
+		const first = state.activeChatId;
+		newChat(state, store);
+		const second = state.activeChatId;
+		newChat(state, store);
+		const third = state.activeChatId;
+		expect(state.chats.map((c) => c.id)).toEqual([first, second, third]);
+		selectChat(state, second);
+		deleteChat(state, second, store);
+		expect(state.chats.map((c) => c.id)).toEqual([first, third]);
+		expect(state.activeChatId).toBe(third);
+		selectChat(state, third);
+		deleteChat(state, third, store);
+		expect(state.chats.map((c) => c.id)).toEqual([first]);
+		expect(state.activeChatId).toBe(first);
+	});
+
+	it("folds and unfolds pasted spans by replacing the message", async () => {
+		const { state, store } = stateWith(freshStore());
+		await sendMessage(
+			state,
+			scriptedProvider(["r"]),
+			"sys",
+			"hello world",
+			{ pasteFolds: [{ start: 0, end: 5, chars: 5 }] },
+			store
+		);
+		const msg = activeChat(state).messages[0]!;
+		expect(msg.pasteFolds).toEqual([{ start: 0, end: 5, chars: 5 }]);
+		setPasteFold(state, msg.id, 0, true, store);
+		const updated = activeChat(state).messages[0]!;
+		expect(updated).not.toBe(msg);
+		expect(updated.pasteFolds).toEqual([{ start: 0, end: 5, chars: 5, open: true }]);
+		const again = createChatState(store);
+		const reloaded = again.chats.flatMap((c) => c.messages).find((m) => m.id === msg.id);
+		expect(reloaded?.pasteFolds).toEqual([{ start: 0, end: 5, chars: 5, open: true }]);
+		setPasteFold(state, msg.id, 7, true, store);
+		setPasteFold(state, "missing" as typeof msg.id, 0, true, store);
+		expect(activeChat(state).messages[0]?.pasteFolds).toEqual([
+			{ start: 0, end: 5, chars: 5, open: true }
+		]);
+	});
+
 	it("deletes a single message by index", async () => {
 		const { state, store } = stateWith(freshStore());
 		await sendMessage(state, scriptedProvider(["r"]), "sys", "one", {}, store);
@@ -217,6 +319,29 @@ describe("chat", () => {
 		await sendMessage(state, provider, "sys", "one", {}, store);
 		await sendMessage(state, provider, "sys", "two", {}, store);
 		expect(waypoints(state)).toEqual([0, 2]);
+	});
+
+	it("labels waypoint targets with a collapsed excerpt", () => {
+		expect(waypointLabel("once more")).toBe("once more");
+		expect(waypointLabel("  line one\nline two  ")).toBe("line one line two");
+		expect(waypointLabel("x".repeat(100))).toBe("x".repeat(60));
+		expect(waypointLabel("hello", 3)).toBe("hel");
+		expect(waypointLabel("   ")).toBe("");
+	});
+
+	it("keeps a reply pill per chat and strips it on load", async () => {
+		const { state, store } = stateWith(freshStore());
+		newChat(state, store);
+		const [first, second] = state.chats;
+		expect(first!.replyLang).toBeNull();
+		setChatReplyLang(state, first!.id, null, store);
+		setChatReplyLang(state, second!.id, "ar", store);
+		expect(activeChat(state).replyLang).toBe("ar");
+		selectChat(state, first!.id);
+		expect(activeChat(state).replyLang).toBeNull();
+		const again = createChatState(store);
+		expect(again.chats[0]?.replyLang).toBeNull();
+		expect(again.chats[1]?.replyLang).toBeNull();
 	});
 
 	it("persists across instances and tolerates corruption", async () => {
@@ -234,7 +359,7 @@ describe("chat", () => {
 	it("mock provider streams a canned reply", async () => {
 		const { state, store } = stateWith(freshStore());
 		await sendMessage(state, new MockProvider(), "sys", "ping", {}, store);
-		expect(activeChat(state).messages[1].content).toContain("ping");
+		expect(activeChat(state).messages[1]?.content).toContain("ping");
 	});
 
 	it("sends images as content parts and inlines text files", async () => {
@@ -267,7 +392,7 @@ describe("chat", () => {
 			attachments: [...attachments]
 		}, store);
 		const sent = activeChat(state).messages[0];
-		expect(sent.attachments).toHaveLength(2);
+		expect(sent?.attachments).toHaveLength(2);
 
 		const api = buildApiMessages(activeChat(state), "sys");
 		const user = api.find((m) => m.role === "user");
@@ -308,11 +433,11 @@ describe("chat", () => {
 		await sendMessage(state, scriptedProvider(["one"]), "sys", "first", {
 			attachments: [...attachments]
 		}, store);
-		await resendLast(state, scriptedProvider(["two"]), "sys", store);
-		expect(activeChat(state).messages[0].attachments).toHaveLength(1);
+		await resendLast(state, scriptedProvider(["two"]), "sys", { store });
+		expect(activeChat(state).messages[0]?.attachments).toHaveLength(1);
 
 		branchFrom(state, 1, store);
-		selectChat(state, state.chats[0].id);
-		expect(activeChat(state).messages[0].attachments).toHaveLength(1);
+		selectChat(state, state.chats[0]!.id);
+		expect(activeChat(state).messages[0]?.attachments).toHaveLength(1);
 	});
 });

@@ -7,6 +7,7 @@ import {
 	type TokenUsage,
 	ProviderError
 } from "./types";
+import { thinkingFor, resolveThinkingId } from "./thinking";
 
 export interface OpenAICompatConfig {
 	baseUrl: string;
@@ -39,8 +40,12 @@ export class OpenAICompatProvider implements ChatProvider {
 		};
 	}
 
-	private body(messages: ChatMessage[], stream: boolean): string {
-		return JSON.stringify({ model: this.config.model, messages, stream });
+	private body(messages: ChatMessage[], stream: boolean, thinking?: string): string {
+		// Native thinking knob for this provider + model (unknown ids and
+		// knob-less providers resolve to no extra fields).
+		const support = thinkingFor(this.id, this.config.model);
+		const extra = support.wireFields(resolveThinkingId(support, thinking));
+		return JSON.stringify({ model: this.config.model, messages, stream, ...extra });
 	}
 
 	async chat(messages: ChatMessage[], opts: ChatOptions = {}): Promise<ChatResult> {
@@ -49,8 +54,9 @@ export class OpenAICompatProvider implements ChatProvider {
 			res = await fetch(this.url("/chat/completions"), {
 				method: "POST",
 				headers: this.headers(),
-				body: this.body(messages, false),
-				signal: opts.signal
+				body: this.body(messages, false, opts.thinking),
+				// DOM takes null for absent, not undefined.
+				signal: opts.signal ?? null
 			});
 		} catch (error) {
 			throw new ProviderError(`Network error talking to ${this.id}: ${messageOf(error)}`);
@@ -86,8 +92,9 @@ export class OpenAICompatProvider implements ChatProvider {
 			res = await fetch(this.url("/chat/completions"), {
 				method: "POST",
 				headers: { ...this.headers(), Accept: "text/event-stream" },
-				body: this.body(messages, true),
-				signal: opts.signal
+				body: this.body(messages, true, opts.thinking),
+				// DOM takes null for absent, not undefined.
+				signal: opts.signal ?? null
 			});
 		} catch (error) {
 			throw new ProviderError(`Network error talking to ${this.id}: ${messageOf(error)}`);

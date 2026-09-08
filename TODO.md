@@ -192,3 +192,11 @@ are tiny mock replies + TTS starting at completion by design.
 ## Things I'm thinking about but are undecided on
 
 - [ ] For new chats, it'd be cool if it would show me one thing that I have previously annotated and the answer that the AI chatbot gave for it, with the option to delete it and remove it from my history by clicking a trash can icon right beside. After the first msg in a new chat, this should disappear. It should not show me things that contain an expletive. It should say the usual "What can I do for you?" and then after a 3s pause it should 
+- [ ] Fenced-code composer in the prompt input box: shelved Sep 2026 to keep
+  focus on language learning. Design notes for revival: ```lang +
+  Shift+Enter auto-closes, backticks hidden behind a language bar with
+  Collapse/Copy icon buttons (match message-button glyphs), per-language
+  highlighting, triple-Shift+Enter exits (plain Enter never exits).
+  Parked on WebKit bugs: the empty body row renders no div (caret nowhere
+  to land, cursor invisible, typing unreliable) and block-widget adjacency
+  drops rows — decorations need a rethink before revival.
