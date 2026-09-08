@@ -27,23 +27,23 @@ test("double-click in Japanese keeps the word pick", async ({ page }) => {
 	expect(selected).toBe("テスト");
 });
 
-/** Triple-click grows the pick to the engine's sentence break. */
-test("triple-click in Japanese selects the sentence", async ({ page }) => {
+/** Triple-click keeps native behavior: the whole paragraph is picked. */
+test("triple-click in Japanese selects the paragraph", async ({ page }) => {
 	await clickText(page, 3);
 	await expect(page.locator(".sel-menu")).toBeVisible();
 	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
-	expect(selected).toBe("テストを確認しました。");
+	expect(selected).toBe("テストを確認しました。何かお手伝いできることはありますか？");
 });
 
-/** The sentence grows around the click point, not the paragraph start. */
-test("triple-click on the second sentence selects it", async ({ page }) => {
+/** The paragraph pick holds wherever in it the triple-click lands. */
+test("triple-click on the second sentence selects the paragraph", async ({ page }) => {
 	const body = page.locator("article .rendered").first();
 	const box = await body.boundingBox();
 	if (!box) throw new Error("message has no box");
 	await page.mouse.click(box.x + box.width * 0.7, box.y + box.height / 2, { clickCount: 3 });
 	await expect(page.locator(".sel-menu")).toBeVisible();
 	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
-	expect(selected).toBe("何かお手伝いできることはありますか？");
+	expect(selected).toBe("テストを確認しました。何かお手伝いできることはありますか？");
 });
 
 /** Plain clicks on blank space drop a stale highlight, never re-summon. */
@@ -175,8 +175,8 @@ test("sending clears pending annotations immediately", async ({ page }) => {
 	await expect(page.locator("article.user .ann-refs-pill")).toHaveText("1");
 });
 
-/** The pencil pulls an own message back for a corrected resend. */
-test("pencil edits and resends an own message", async ({ page }) => {
+/** The pencil edits an own message in place: history stays, no reply. */
+test("pencil edits an own message in place", async ({ page }) => {
 	await seedChat(page, [
 		{ role: "user", content: "helo world" },
 		{ role: "assistant", content: "hi" }
@@ -185,18 +185,34 @@ test("pencil edits and resends an own message", async ({ page }) => {
 	const article = page.locator("article.user");
 	await expect(article).toBeVisible();
 	await article.hover();
-	await article.locator('.actions button[aria-label^="Edit and resend"]').click();
-	// The message and its reply are gone; the text is back to edit.
-	await expect(page.locator("article.user")).toHaveCount(0);
-	await expect(page.locator("article.assistant")).toHaveCount(0);
+	await article.locator('.actions button[aria-label="Edit this message"]').click();
+	// Nothing is deleted; the text is in the composer to fix.
+	await expect(page.locator("article.user")).toHaveCount(1);
+	await expect(page.locator("article.assistant")).toHaveCount(1);
 	await expect(page.locator(".cm-content")).toContainText("helo world");
-	// Fix the typo and send a fresh exchange.
+	// Fix the typo and save: the message rewrites, the reply stands.
 	await page.locator(".cm-content").click();
 	await page.keyboard.press("Control+a");
 	await page.keyboard.type("hello world");
 	await page.keyboard.press("Enter");
 	await expect(page.locator("article.user .rendered")).toContainText("hello world");
-	await expect(page.locator("article.assistant .rendered").last()).toContainText("Mock reply");
+	await expect(page.locator("article.user")).toHaveCount(1);
+	await expect(page.locator("article.assistant .rendered")).toContainText("hi");
+});
+
+/** Hovering an own message and hitting E starts editing it. */
+test("E key edits the hovered own message", async ({ page }) => {
+	await seedChat(page, [{ role: "user", content: "helo world" }]);
+	await page.reload();
+	const article = page.locator("article.user");
+	await expect(article).toBeVisible();
+	await article.hover();
+	await page.keyboard.press("e");
+	await expect(page.locator(".cm-content")).toContainText("helo world");
+	// Esc cancels: history untouched, composer empty.
+	await page.keyboard.press("Escape");
+	await expect(page.locator(".cm-content")).not.toContainText("helo world");
+	await expect(page.locator("article.user .rendered")).toContainText("helo world");
 });
 
 /** Clear-all sits at the bottom-right of the review overlay. */

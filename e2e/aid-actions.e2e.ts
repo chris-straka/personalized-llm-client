@@ -54,3 +54,18 @@ test("clicking tashkeel pins it, and show-original restores the text", async ({
 	await expect(aidBtn).toBeVisible();
 	await expect(body).toContainText("مرحبا");
 });
+
+/** Arabic+Japanese+Chinese offers all three aids side by side. */
+test("a trilingual message offers tashkeel, furigana, and pinyin", async ({
+	page
+}) => {
+	await seedChat(page, [
+		{ role: "assistant", content: "مرحبا بالعالم\nこんにちは！\n你好！" }
+	]);
+	await page.goto("/");
+	const actions = page.locator(`${ARTICLE} .actions`);
+	await expect(actions).toBeVisible({ timeout: 60_000 });
+	await expect(actions.locator(`button[data-tip="${AID_TITLE}"]`)).toBeVisible();
+	await expect(actions.locator('button:has-text("読み仮名")')).toBeVisible();
+	await expect(actions.locator('button:has-text("拼音")')).toBeVisible();
+});

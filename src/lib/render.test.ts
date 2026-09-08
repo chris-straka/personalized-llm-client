@@ -141,7 +141,7 @@ describe("applyPasteFolds", () => {
 			{ start: 11, end: 15, chars: 4, open: true }
 		]);
 		expect(out).toContain('data-paste-fold="0"');
-		expect(out).toContain("[Pasted content 4 chars]");
+		expect(out).toContain("[paste 4 chars]");
 		expect(out).toContain("DDDD");
 		expect(out).not.toContain("BBBB");
 		expect(out.startsWith("aa ")).toBe(true);
@@ -177,7 +177,7 @@ describe("foldSegments", () => {
 
 	it("emits the same markers applyPasteFolds splices", () => {
 		expect(pasteFoldButton(2, 128)).toBe(
-			'<button type="button" class="paste-fold" data-paste-fold="2">[Pasted content 128 chars]</button>'
+			'<button type="button" class="paste-fold" data-paste-fold="2">[paste 128 chars]</button>'
 		);
 	});
 });

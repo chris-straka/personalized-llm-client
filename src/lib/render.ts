@@ -160,7 +160,7 @@ export type FoldSegment =
 
 /** Marker button HTML (same label as the composer). Chars/index are numbers — nothing to escape. */
 export function pasteFoldButton(index: number, chars: number): string {
-	return `<button type="button" class="paste-fold" data-paste-fold="${index}">[Pasted content ${chars} chars]</button>`;
+	return `<button type="button" class="paste-fold" data-paste-fold="${index}">[paste ${chars} chars]</button>`;
 }
 
 /**

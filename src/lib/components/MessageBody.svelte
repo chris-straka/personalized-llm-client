@@ -340,14 +340,15 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
-	/* Injected paste-fold marker (sanitized HTML): same line, pill button. */
+	/* Injected paste-fold marker (sanitized HTML): inline bold text in
+	badge blue, never a pill — still a button, so it clicks to expand. */
 	.rendered :global(button.paste-fold) {
 		font: inherit;
-		color: inherit;
-		background: transparent;
-		border: 1px solid currentColor;
-		border-radius: 999px;
-		padding: 0 0.6rem;
+		font-weight: 700;
+		color: #5a9bf7;
+		background: none;
+		border: 0;
+		padding: 0;
 		cursor: pointer;
 	}
 	/* Aid swaps fade the incoming body in, and fresh readings fade in
@@ -552,23 +553,22 @@
 		white-space: nowrap;
 		cursor: pointer;
 	}
-	/* Speech-bubble tail: a square rotated 45 degrees, tucked under
-	the badge's lower edge so its bottom corner juts out as a point
-	aimed down-left at the quote it annotates. The top half hides
-	behind the badge (5px overlap), so the join can never gap — the
-	circle curves away at the sides, which is why the tail sits
-	up-and-right of the old stub instead of off the lower-left rim.
-	Clicks land on the button, so the open still works. */
+	/* Speech-bubble tail: a thin triangle leaning down-left toward the
+	quote it annotates, never straight down. Its wide top tucks 4px
+	under the badge (same color, so the join can never gap — the circle
+	curves away at the sides, which is why the tail seats left of
+	center instead of off the rim). Clip-path corners are sharp, so the
+	tip is a true point. Clicks land on the button, so the open still
+	works. */
 	.rendered :global(button.ccez-ann-badge::after) {
 		content: "";
 		position: absolute;
-		top: calc(100% - 5px);
-		left: 30%;
-		width: 0.4rem;
-		height: 0.4rem;
-		transform: translateX(-15%) rotate(45deg);
-		border-radius: 0.06rem;
+		top: calc(100% - 4px);
+		left: 20%;
+		width: 0.46rem;
+		height: 0.52rem;
 		background: inherit;
+		clip-path: polygon(0 0, 100% 0, 8% 100%);
 	}
 	/* Newly stamped badges fade in; re-stamps skip the class so steady
 	marks never flicker on re-render. */

@@ -11,7 +11,7 @@ import {
 	stageMessage,
 	branchFrom,
 	truncateToMessage,
-	takeBackMessage,
+	editMessageContent,
 	dismissFailedAssistant,
 	takeBackLastReply,
 	resendLast,
@@ -195,21 +195,23 @@ describe("chat", () => {
 		expect(activeChat(state).messages).toHaveLength(2);
 	});
 
-	it("takes back a user message and everything after it for editing", async () => {
+	it("edits an own message in place without touching history", async () => {
 		const { state, store } = stateWith(freshStore());
 		const provider = scriptedProvider(["r"]);
 		await sendMessage(state, provider, "sys", "one", {}, store);
 		await sendMessage(state, provider, "sys", "two", {}, store);
-		expect(activeChat(state).messages.map((m) => m.content)).toEqual(["one", "r", "two", "r"]);
+		const target = activeChat(state).messages[2];
+		if (!target) throw new Error("seed message missing");
 
-		takeBackMessage(state, 2, store);
-		expect(activeChat(state).messages.map((m) => m.content)).toEqual(["one", "r"]);
+		expect(editMessageContent(state, target.id, "TWO!", {}, store)).toBe(true);
+		expect(activeChat(state).messages.map((m) => m.content)).toEqual(["one", "r", "TWO!", "r"]);
 
-		// Non-user targets and out-of-range indices are no-ops.
-		takeBackMessage(state, 1, store);
-		expect(activeChat(state).messages).toHaveLength(2);
-		takeBackMessage(state, 99, store);
-		expect(activeChat(state).messages).toHaveLength(2);
+		// Unknown ids and non-user targets are no-ops.
+		expect(editMessageContent(state, "nope" as never, "x", {}, store)).toBe(false);
+		const reply = activeChat(state).messages[3];
+		if (!reply) throw new Error("seed reply missing");
+		expect(editMessageContent(state, reply.id, "x", {}, store)).toBe(false);
+		expect(activeChat(state).messages.map((m) => m.content)).toEqual(["one", "r", "TWO!", "r"]);
 	});
 
 	it("reruns by dropping the last reply, branches fork history", async () => {

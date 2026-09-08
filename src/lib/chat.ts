@@ -292,16 +292,32 @@ export function truncateToMessage(state: ChatState, index: number, store?: KeyVa
 }
 
 /**
- * Edit-and-resend from any user message: delete it and everything after
- * it, so its text can go back into the composer for a corrected send.
- * Out-of-range indices and non-user targets are no-ops.
+ * In-place edit of an own message (a corrected typo, no resend):
+ * replace its content, attachments, and paste folds without touching
+ * the rest of history. The message object is replaced, never mutated
+ * (proxy signals can hold stale reads). Unknown ids and non-user
+ * targets are no-ops (false).
  */
-export function takeBackMessage(state: ChatState, index: number, store?: KeyValueStore): void {
+export function editMessageContent(
+	state: ChatState,
+	id: ChatMsgId,
+	content: string,
+	opts: { attachments?: Attachment[] | undefined; pasteFolds?: PasteFold[] | undefined } = {},
+	store?: KeyValueStore
+): boolean {
 	const chat = activeChat(state);
-	if (index < 0 || index >= chat.messages.length) return;
-	if (chat.messages[index]?.role !== "user") return;
-	chat.messages = chat.messages.slice(0, index);
+	const index = chat.messages.findIndex((m) => m.id === id);
+	const msg = chat.messages[index];
+	if (!msg || msg.role !== "user") return false;
+	chat.messages = chat.messages.map((m, i) => {
+		if (i !== index) return m;
+		const next: ChatMsg = { ...m, content };
+		if (opts.attachments !== undefined) next.attachments = opts.attachments;
+		if (opts.pasteFolds !== undefined) next.pasteFolds = opts.pasteFolds;
+		return next;
+	});
 	persistChats(state, store);
+	return true;
 }
 
 /** Resend the last user message (used after dismissing a failed reply or taking one back). */

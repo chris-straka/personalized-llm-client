@@ -16,7 +16,7 @@
 		branchFrom,
 		dismissFailedAssistant,
 		truncateToMessage,
-		takeBackMessage,
+		editMessageContent,
 		resendLast,
 		tokenTotal,
 		tokenSplit,
@@ -256,6 +256,9 @@
 	let lastGAt = 0;
 	let editingId: AnnotationId | null = $state(null);
 	let editDraft = $state("");
+	/** Own message loaded into the composer for editing (null when the
+	composer is a fresh send). Enter rewrites it in place; Esc cancels. */
+	let editingMsgId: ChatMsgId | null = $state(null);
 	let highlightAnnId: AnnotationId | null = $state(null);
 	/** Badge currently hovered (paints its quote wash as a preview). */
 	let hoverBadgeId: string | null = $state(null);
@@ -497,6 +500,8 @@
 		reviewOpen = false;
 		editingId = null;
 		editDraft = "";
+		editingMsgId = null;
+		editor?.setPlaceholder(PROMPT_PLACEHOLDER);
 		highlightAnnId = null;
 		settleAnnPop();
 		annPop = null;
@@ -658,70 +663,6 @@
 		let y = rect.top - 47;
 		if (y < 8) y = rect.bottom + 8;
 		selMenu = { x, y, quote: found.quote, messageId: found.messageId };
-	}
-
-	/** Kanji + kana (same ranges as furiganaRuby): spaceless scripts
-	where a native double-click word pick is a meaningless fragment. */
-	const CJKISH = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\u3040-\u309F\u30A0-\u30FF\u3005]/;
-
-	/** Non-standard engine API (WebKit + Chromium): sentence breaks. */
-	interface SelectionModify {
-		modify(action: string, direction: string, granularity: string): void;
-	}
-
-	/** Triple-clicked CJK text selects its sentence, using the engine's
-	own breaks: native word picks stop after a few characters and snag
-	on mark/badge element edges, so "select the sentence" never works.
-	Spaced scripts keep native word/paragraph selection. The span never
-	leaves its article; engines without Selection.modify keep native
-	behavior. */
-	/** Text position under a click, or null over void (or where the
-	engine has no caret API): callers fall back to the selection start. */
-	function pointRange(x: number, y: number): { node: Node; offset: number } | null {
-		try {
-			const at = document.caretRangeFromPoint?.bind(document);
-			const range = typeof at === "function" ? at(x, y) : null;
-			if (!range) return null;
-			return { node: range.startContainer, offset: range.startOffset };
-		} catch {
-			return null;
-		}
-	}
-
-	function expandToSentence(from?: { node: Node; offset: number }): boolean {
-		const live = window.getSelection();
-		if (!live || live.rangeCount === 0 || live.isCollapsed) return false;
-		if (!CJKISH.test(live.toString())) return false;
-		const range = live.getRangeAt(0);
-		const node = from?.node ?? range.startContainer;
-		const offset = from?.offset ?? range.startOffset;
-		const article = articleOf(node);
-		if (!article) return false;
-		try {
-			const sel = live as unknown as SelectionModify;
-			if (typeof sel.modify !== "function") return false;
-			live.collapse(node, offset);
-			sel.modify("extend", "backward", "sentence");
-			const startNode = live.focusNode ?? node;
-			const startOffset = live.focusOffset;
-			live.collapse(node, offset);
-			sel.modify("extend", "forward", "sentence");
-			const endNode = live.focusNode ?? node;
-			const endOffset = live.focusOffset;
-			if (articleOf(startNode) !== article || articleOf(endNode) !== article) {
-				live.collapse(node, offset);
-				return false;
-			}
-			live.setBaseAndExtent(startNode, startOffset, endNode, endOffset);
-			return true;
-		} catch {
-			try {
-				live.collapse(node, offset);
-			} catch {
-				// Collapsing back failed: leave the native selection alone.
-			}
-			return false;
-		}
 	}
 
 	function clearSelection(): void {
@@ -990,7 +931,9 @@
 			const cached = vocalized[msg.id];
 			if (cached !== undefined) return cached;
 		}
-		if (aidPin.has(msg.id)) return vocalized[msg.id] ?? null;
+		// A pinned local aid wins over a pinned model aid: exactly one
+		// aid shows at a time, and switching never drops either cache.
+		if (aidPin.has(msg.id) && !aidKindPin.has(msg.id)) return vocalized[msg.id] ?? null;
 		return null;
 	}
 
@@ -1058,6 +1001,9 @@
 	function pinLocalAid(msg: ChatMsg, kind: LocalAid): void {
 		aidPin.add(msg.id);
 		aidKindPin.set(msg.id, kind);
+		// A model run still in flight must not steal the pin back when
+		// it lands: the local click is the latest intent.
+		pendingPin.delete(msg.id);
 		if (aidPeek?.id === msg.id) aidPeek = null;
 		aidNoPeek.add(msg.id);
 		aidSeen.add(msg.id);
@@ -1122,6 +1068,7 @@
 		if (vocalized[msg.id] !== undefined) {
 			if (pin) {
 				aidPin.add(msg.id);
+				aidKindPin.delete(msg.id);
 				if (aidPeek?.id === msg.id) aidPeek = null;
 				aidNoPeek.add(msg.id);
 			}
@@ -1143,8 +1090,11 @@
 			vocalized = { ...vocalized, [msg.id]: text };
 			const wantPin = pin || pendingPin.has(msg.id);
 			pendingPin.delete(msg.id);
-			if (wantPin) {
+			// A local pin placed mid-flight is the latest intent: the
+			// run still caches, but must not steal the pin back.
+			if (wantPin && !aidKindPin.has(msg.id)) {
 				aidPin.add(msg.id);
+				aidKindPin.delete(msg.id);
 				if (aidPeek?.id === msg.id) aidPeek = null;
 				aidNoPeek.add(msg.id);
 			}
@@ -1361,6 +1311,20 @@
 
 	async function doSend() {
 		if (!canSubmit) return;
+		if (editingMsgId) {
+			// In-place edit: rewrite the message, never a reply. A fresh
+			// reply stays an explicit act (rerun button or a new send). If
+			// the edited message vanished mid-edit, fall through below and
+			// send the composer text as a fresh message instead.
+			const target = chat.messages.find((m) => m.id === editingMsgId);
+			if (target && target.role === "user") {
+				saveMessageEdit();
+				scrollToBottom();
+				return;
+			}
+			editingMsgId = null;
+			editor?.setPlaceholder(PROMPT_PLACEHOLDER);
+		}
 		const provider = resolveProvider();
 		if (!provider) {
 			missingKey = true;
@@ -1455,37 +1419,66 @@
 		void resend();
 	}
 
+	/** Composer placeholder while an own message is being edited. */
+	const EDIT_PLACEHOLDER = "Editing message — Enter saves, Esc cancels";
+
 	/**
-	 * Pencil on an own message: pull its display text back into the
-	 * composer for a corrected send, deleting it and everything after —
-	 * the same destructive family as rerun. The baked annotation block
-	 * is provider context, not composer text, so only the prose returns;
-	 * its refs come back as pending annotations so the resend carries
-	 * the same context. Attachments ride along too. No-op mid-send.
+	 * Pencil (or E) on an own message: pull its display text into the
+	 * composer for editing. Nothing is deleted and nothing resends: Enter
+	 * rewrites the message in place, Esc cancels, and a fresh reply stays
+	 * an explicit act (rerun button). The baked annotation block is
+	 * provider context, not composer text, so only the prose returns; its
+	 * refs come back as pending annotations so saving re-bakes the same
+	 * context. Attachments ride along too. No-op mid-send.
 	 */
 	function editMessage(index: number) {
 		if (chatState.sending) return;
 		const msg = chat.messages[index];
 		if (!msg || msg.role !== "user") return;
 		const refs = annRefsFor(msg.content);
-		if (refs) {
-			annotations = refs.refs.map((r) => ({
-				id: newAnnotationId(),
-				messageId: msg.id,
-				quote: r.quote,
-				comment: r.comment
-			}));
-		}
+		annotations = refs
+			? refs.refs.map((r) => ({
+					id: newAnnotationId(),
+					messageId: msg.id,
+					quote: r.quote,
+					comment: r.comment
+				}))
+			: [];
 		attachments = msg.attachments ? [...msg.attachments] : [];
-		takeBackMessage(chatState, index);
+		editingMsgId = msg.id;
 		reviewOpen = false;
 		editingId = null;
 		highlightAnnId = null;
 		settleAnnPop();
 		annPop = null;
 		editor?.setText(refs ? refs.text : msg.content);
+		editor?.setPlaceholder(EDIT_PLACEHOLDER);
 		editor?.focus();
 		scrollToBottom();
+	}
+
+	/** Esc during an edit: drop the draft, keep history untouched. */
+	function cancelMessageEdit(): void {
+		editor?.clear();
+		resetDraftExtras();
+	}
+
+	/**
+	 * Enter while editing: rewrite the edited message in place (text plus
+	 * re-baked annotations, attachments, folds) and stop — no provider
+	 * call, no reply.
+	 */
+	function saveMessageEdit(): void {
+		const id = editingMsgId;
+		if (id) {
+			const { text, folds } = sendPasteFolds(editor?.getText() ?? "", editor?.getPastes() ?? []);
+			editMessageContent(chatState, id, withAnnotations(text, annotations), {
+				attachments,
+				pasteFolds: folds
+			});
+		}
+		editor?.clear();
+		resetDraftExtras();
 	}
 
 	function scrollToBottom() {
@@ -1718,6 +1711,15 @@
 				shortcutsOpen = false;
 				return;
 			}
+			if (event.key === "Escape" && editingMsgId) {
+				// An in-progress message edit cancels from anywhere,
+				// including inside the prompt (capture phase pre-empts
+				// the editor, which binds nothing to Esc).
+				event.preventDefault();
+				event.stopPropagation();
+				cancelMessageEdit();
+				return;
+			}
 			if (event.key === "Escape" && !inEditor) {
 				selMenu = null;
 				translate = null;
@@ -1938,6 +1940,25 @@
 					return;
 				}
 			}
+			if (
+				(event.key === "e" || event.key === "E") &&
+				!inEditor &&
+				hoveredIdx >= 0 &&
+				!event.metaKey &&
+				!event.ctrlKey &&
+				!event.altKey &&
+				!event.shiftKey &&
+				!(event.target as HTMLElement | null)?.closest("input, textarea, select")
+			) {
+				// E pulls the hovered own message into the composer for
+				// editing — same ownership rule as F, own messages only.
+				const target = chat.messages[hoveredIdx];
+				if (target?.role === "user") {
+					event.preventDefault();
+					editMessage(hoveredIdx);
+					return;
+				}
+			}
 			const inSidebar = (event.target as HTMLElement | null)?.closest("aside");
 			if (!settings.sidebarCollapsed && inSidebar) {
 				// Open chat list owns its keys: j/k walks chats, space/l
@@ -2073,7 +2094,9 @@
 		};
 		// Double-click summons the menu for the native word pick (the
 		// pick finalizes after mouseup, so mouseup alone never sees it).
-		// Triple-click in CJK text grows the pick to its sentence.
+		// Triple-click keeps native paragraph selection: badges are
+		// absolutely-positioned overlays with user-select:none, so they
+		// no longer interrupt it the way inline marks did.
 		const clickGuardsPass = (event: MouseEvent): boolean => {
 			if (event.altKey) return false;
 			const target = event.target instanceof Element ? event.target : null;
@@ -2090,16 +2113,9 @@
 			if (live) lockSelectionToMessage(live, articleOf);
 			placeSelMenu();
 		};
-		const onTripleClick = (event: MouseEvent) => {
-			if (event.detail !== 3 || !clickGuardsPass(event)) return;
-			const live = window.getSelection();
-			if (live) lockSelectionToMessage(live, articleOf);
-			// Grow the sentence under the cursor, not the paragraph's
-			// first: a triple-click on a later line must select (and
-			// anchor the menu to) that line's sentence.
-			if (!expandToSentence(pointRange(event.clientX, event.clientY) ?? undefined)) return;
-			placeSelMenu();
-		};
+		// No triple-click handler: native paragraph selection finalizes
+		// on the third mouseup, where onSelectEnd already locks it to the
+		// message and summons the menu.
 		// Selection text at the last mousedown: a mouseup that changed
 		// nothing started on blank space, so a stale highlight is dropped
 		// instead of re-summoning the menu.
@@ -2259,7 +2275,6 @@
 		window.addEventListener("scroll", onFadeScroll, true);
 		window.addEventListener("mouseup", onMouseUp);
 		window.addEventListener("dblclick", onDoubleClick);
-		window.addEventListener("click", onTripleClick);
 		window.addEventListener("contextmenu", onContextMenu, true);
 		return () => {
 			window.removeEventListener("focus", onWinFocus);
@@ -2275,7 +2290,6 @@
 			window.removeEventListener("scroll", onFadeScroll, true);
 			window.removeEventListener("mouseup", onMouseUp);
 			window.removeEventListener("dblclick", onDoubleClick);
-			window.removeEventListener("click", onTripleClick);
 			window.removeEventListener("contextmenu", onContextMenu, true);
 			window.clearTimeout(scrollIdleTimer);
 			stopSpeaking();
@@ -2591,37 +2605,41 @@
 						</button>
 						{#if msg.role === "assistant" && !streamingThis}
 							<!-- Reading aids live here, right of delete: hover
-							previews, click pins (show original unpins). -->
-							{#if aidId}
-								{#if aidPin.has(msg.id)}
-									<button
-										type="button"
-										data-tip="Show original"
-										onclick={() => unapplyAid(msg)}
-									>
-										show original
-									</button>
-								{:else}
-									{@const aid = MODEL_AIDS[aidId]}
-									{#if aid}
+							previews, click pins (show original unpins). Model
+							and local aids sit side by side on mixed messages;
+							exactly one shows at a time, last click wins. -->
+							{#if aidId || localKinds.length > 0}
+								{#if aidId}
+									{#if aidPin.has(msg.id) && !aidKindPin.has(msg.id)}
 										<button
 											type="button"
-											data-tip={aid.title}
-											disabled={vocalizing.has(msg.id)}
-											aria-busy={vocalizing.has(msg.id)}
-											onmouseenter={() => peekAid(msg, aidId)}
-											onmouseleave={() => unpeekAid(msg)}
-											onclick={() => void runModelAidFor(msg, aidId, true)}
+											data-tip="Show original"
+											onclick={() => unapplyAid(msg)}
 										>
-											{#if vocalizing.has(msg.id)}
-												{aid.button}<span class="tdots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
-											{:else}
-												{aid.button}
-											{/if}
+											show original
 										</button>
+									{:else}
+										{@const aid = MODEL_AIDS[aidId]}
+										{#if aid}
+											<button
+												type="button"
+												data-tip={aid.title}
+												disabled={vocalizing.has(msg.id)}
+												aria-busy={vocalizing.has(msg.id)}
+												onmouseenter={() => peekAid(msg, aidId)}
+												onmouseleave={() => unpeekAid(msg)}
+												onclick={() => void runModelAidFor(msg, aidId, true)}
+											>
+												{#if vocalizing.has(msg.id)}
+													{aid.button}<span class="tdots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
+												{:else}
+													{aid.button}
+												{/if}
+											</button>
+										{/if}
 									{/if}
 								{/if}
-							{:else if localKinds.length > 0}
+								{#if localKinds.length > 0}
 								<!-- Mixed scripts offer one button per aid;
 								each pins (and previews) its own kind. -->
 								{#if aidKindPin.has(msg.id)}
@@ -2659,14 +2677,15 @@
 										</button>
 									{/each}
 								{/if}
+								{/if}
 							{/if}
 						{/if}
 						{#if msg.role === "user"}
 							<button
 								type="button"
 								class="icon-btn"
-								data-tip="Edit and resend — deletes this message and everything after"
-								aria-label="Edit and resend — deletes this message and everything after"
+								data-tip="Edit"
+								aria-label="Edit this message"
 								onclick={() => editMessage(i)}
 							>
 								<ActionIcon kind="pencil" />
