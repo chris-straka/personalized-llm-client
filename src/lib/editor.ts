@@ -301,6 +301,11 @@ function pasteHandling(onImage: ((file: File) => void) | undefined): Extension {
 const appTheme = EditorView.theme({
 	"&": { fontSize: "0.95rem" },
 	".cm-content": { fontFamily: "inherit", padding: "0.6rem 0" },
+	// The prompt grows with the draft, then stops at ~8 lines and scrolls
+	// inside instead of eating the messages list. overflow-y must ride
+	// along: capped without it, long drafts clip with no way to reach
+	// the hidden lines.
+	".cm-scroller": { maxHeight: "12rem", overflowY: "auto" },
 	".cm-focused": { outline: "none" },
 	".cm-paste-marker": {
 		display: "inline-block",

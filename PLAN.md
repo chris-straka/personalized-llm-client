@@ -262,6 +262,14 @@ Still phone-only work (needs a device/emulator; not started):
   assumes Keychain availability; add a mobile-store fallback).
 - System TTS voice inventory on Android (no AVSpeech bridge; enumerate
   via a small Kotlin-free plugin or stay on Web voices).
+- On-device Gemma for offline use: MediaPipe LLM Inference inside our
+  app (a small Kotlin plugin — the one exception to the no-Kotlin rule;
+  AI Edge Gallery exposes no API to other apps, but it uses the same
+  .task model files). Provider gating contract already ships and is
+  unit-tested (`visibleProviderIds` in `platform.ts`): `local-gemma`
+  lists only on Android once its bridge probes true, and it is the sole
+  entry when Android is offline. Wiring the settings list to
+  `navigator.onLine` + online/offline events lands with the bridge.
 - Thumb-sized composer controls, viewport/`100dvh` audit, safe-area
   insets, and a long-press-vs-scroll tuning pass on real hardware.
 

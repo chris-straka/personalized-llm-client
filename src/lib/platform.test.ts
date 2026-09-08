@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isAndroidUserAgent, isCoarsePointer, edgeSwipeTarget } from "./platform";
+import { isAndroidUserAgent, isCoarsePointer, edgeSwipeTarget, visibleProviderIds } from "./platform";
 
 const ANDROID_UA =
 	"Mozilla/5.0 (Linux; Android 14; SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36";
@@ -59,5 +59,27 @@ describe("edgeSwipeTarget", () => {
 	it("honors custom distance and zone", () => {
 		expect(edgeSwipeTarget(30, 0, 100, 0, W, 48, 24)).toBeNull(); // outside zone
 		expect(edgeSwipeTarget(30, 0, 100, 0, W, 48, 32)).toBe("chats");
+	});
+});
+
+describe("visibleProviderIds", () => {
+	const CLOUD = ["muse", "deepseek"];
+	it("lists everything on desktop, online or not", () => {
+		expect(visibleProviderIds(CLOUD, { android: false, online: true, local: false })).toEqual(CLOUD);
+		expect(visibleProviderIds(CLOUD, { android: false, online: false, local: false })).toEqual(CLOUD);
+	});
+	it("hides the local entry where its bridge can't exist", () => {
+		const all = [...CLOUD, "local-gemma"];
+		expect(visibleProviderIds(all, { android: false, online: true, local: true })).toEqual(CLOUD);
+	});
+	it("shows local alongside cloud on online Android once bridged", () => {
+		const all = [...CLOUD, "local-gemma"];
+		expect(visibleProviderIds(all, { android: true, online: true, local: true })).toEqual(all);
+		expect(visibleProviderIds(all, { android: true, online: true, local: false })).toEqual(CLOUD);
+	});
+	it("keeps only local on offline Android", () => {
+		const all = [...CLOUD, "local-gemma"];
+		expect(visibleProviderIds(all, { android: true, online: false, local: true })).toEqual(["local-gemma"]);
+		expect(visibleProviderIds(all, { android: true, online: false, local: false })).toEqual([]);
 	});
 });
