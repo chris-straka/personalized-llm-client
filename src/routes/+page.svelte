@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { SvelteSet } from "svelte/reactivity";
+	import { SvelteMap, SvelteSet } from "svelte/reactivity";
 	import { fade } from "svelte/transition";
 	import {
 		createChatState,
@@ -16,6 +16,7 @@
 		branchFrom,
 		dismissFailedAssistant,
 		truncateToMessage,
+		takeBackMessage,
 		resendLast,
 		tokenTotal,
 		tokenSplit,
@@ -87,7 +88,8 @@
 	import { translateSelection } from "$lib/translate";
 	import {
 		detectScript,
-		localAidFor,
+		detectScripts,
+		localAidsFor,
 		LOCAL_AID_BUTTON,
 		LOCAL_AID_SHOW_ORIGINAL,
 		LOCAL_AID_ADD_TITLE,
@@ -299,8 +301,9 @@
 		messageId: ChatMsgId;
 	} | null>(null);
 	/**
-	 * An unanswered selection menu never lingers: it fades out two
-	 * seconds after opening (clicking away still dismisses instantly).
+	 * An unanswered selection menu never lingers: it fades out two and
+	 * a half seconds after opening (clicking away still dismisses
+	 * instantly).
 	 */
 	let selMenuTimer: ReturnType<typeof setTimeout> | null = null;
 	$effect(() => {
@@ -309,7 +312,7 @@
 		selMenuTimer = setTimeout(() => {
 			selMenuTimer = null;
 			selMenu = null;
-		}, 2000);
+		}, 2500);
 		return () => {
 			if (selMenuTimer) {
 				clearTimeout(selMenuTimer);
@@ -330,10 +333,12 @@
 	let pendingPin = new SvelteSet<string>();
 	/** Messages whose aid is pinned on (model-aid text or local ruby). */
 	let aidPin = new SvelteSet<string>();
+	/** Which local aid a pinned message shows (model pins set no kind). */
+	let aidKindPin = new SvelteMap<string, LocalAid>();
 	/** Messages whose local aid (furigana dictionary) is loading right now. */
 	let aidBusy = new SvelteSet<string>();
 	/** Message currently hover-previewing its aid (null when none). */
-	let aidPeek = $state<{ id: string } | null>(null);
+	let aidPeek = $state<{ id: string; kind?: LocalAid } | null>(null);
 	/**
 	 * Peek lock: clicking swaps the button under a stationary cursor, and the
 	 * browser re-fires mouseenter for the swap — without this, unpinning
@@ -997,12 +1002,14 @@
 	}
 
 	/** Local-aid override: a pinned or hover-peeked aid renders it,
-	otherwise the original stands (aids are per-message only). */
+	otherwise the original stands (aids are per-message only). Mixed
+	scripts offer one button per aid; the pin and the peek each carry
+	their own kind, so furigana and pinyin never fight over a message. */
 	function localAidOverrideFor(msg: ChatMsg): LocalAid | null | undefined {
-		const kind = localAidFor(detectScript(aidDisplayText(msg)));
-		if (!kind) return undefined;
-		if (aidPin.has(msg.id)) return kind;
-		if (aidPeek?.id === msg.id) return kind;
+		const kinds = localAidsFor(detectScripts(aidDisplayText(msg)));
+		if (kinds.length === 0) return undefined;
+		if (aidPin.has(msg.id)) return aidKindPin.get(msg.id) ?? kinds[0];
+		if (aidPeek?.id === msg.id) return aidPeek.kind ?? kinds[0];
 		return undefined;
 	}
 
@@ -1015,19 +1022,18 @@
 	 * everything: right after a click the button under a stationary cursor
 	 * is new, not hovered.
 	 */
-	function peekAid(msg: ChatMsg, aidId: string | null): void {
+	function peekAid(msg: ChatMsg, aidId: string | null, kind?: LocalAid): void {
 		if (aidNoPeek.has(msg.id)) return;
 		if (aidId) {
 			if (vocalized[msg.id] === undefined) return;
 		} else {
 			// First hover is color-only: previews start after a first pin.
 			if (!aidSeen.has(msg.id)) return;
-			const display = aidDisplayText(msg);
-			if (localAidFor(detectScript(display)) === "furigana" && !isFuriganaCached(display)) {
+			if (kind === "furigana" && !isFuriganaCached(aidDisplayText(msg))) {
 				return;
 			}
 		}
-		aidPeek = { id: msg.id };
+		aidPeek = kind === undefined ? { id: msg.id } : { id: msg.id, kind };
 	}
 
 	/**
@@ -1049,8 +1055,9 @@
 	}
 
 	/** Click on a local-aid button: pin its readings on this message. */
-	function pinLocalAid(msg: ChatMsg): void {
+	function pinLocalAid(msg: ChatMsg, kind: LocalAid): void {
 		aidPin.add(msg.id);
+		aidKindPin.set(msg.id, kind);
 		if (aidPeek?.id === msg.id) aidPeek = null;
 		aidNoPeek.add(msg.id);
 		aidSeen.add(msg.id);
@@ -1093,6 +1100,7 @@
 	/** "show original": unpin, back to the untouched message. */
 	function unapplyAid(msg: ChatMsg): void {
 		aidPin.delete(msg.id);
+		aidKindPin.delete(msg.id);
 		if (aidPeek?.id === msg.id) aidPeek = null;
 		aidNoPeek.add(msg.id);
 	}
@@ -1105,6 +1113,7 @@
 	function aidFailed(id: ChatMsgId): void {
 		const pinned = aidPin.has(id);
 		aidPin.delete(id);
+		aidKindPin.delete(id);
 		if (aidPeek?.id === id) aidPeek = null;
 		if (pinned) flashToast("Couldn't load the readings for this message.");
 	}
@@ -1367,8 +1376,17 @@
 		const outgoing = attachments;
 		const outgoingAnnotations = annotations;
 		// The prompt empties the moment the message goes out — not when the
-		// (possibly long) reply finishes streaming in.
+		// (possibly long) reply finishes streaming in. The annotation pill
+		// and count go with it: the block is already baked into the sent
+		// message, so nothing waits on the reply.
 		editor?.clear();
+		annotations = [];
+		pendingAnn = null;
+		reviewOpen = false;
+		editingId = null;
+		highlightAnnId = null;
+		settleAnnPop();
+		annPop = null;
 		scrollToBottom();
 		await sendMessage(
 			chatState,
@@ -1435,6 +1453,39 @@
 	function rerunFrom(index: number) {
 		truncateToMessage(chatState, index);
 		void resend();
+	}
+
+	/**
+	 * Pencil on an own message: pull its display text back into the
+	 * composer for a corrected send, deleting it and everything after —
+	 * the same destructive family as rerun. The baked annotation block
+	 * is provider context, not composer text, so only the prose returns;
+	 * its refs come back as pending annotations so the resend carries
+	 * the same context. Attachments ride along too. No-op mid-send.
+	 */
+	function editMessage(index: number) {
+		if (chatState.sending) return;
+		const msg = chat.messages[index];
+		if (!msg || msg.role !== "user") return;
+		const refs = annRefsFor(msg.content);
+		if (refs) {
+			annotations = refs.refs.map((r) => ({
+				id: newAnnotationId(),
+				messageId: msg.id,
+				quote: r.quote,
+				comment: r.comment
+			}));
+		}
+		attachments = msg.attachments ? [...msg.attachments] : [];
+		takeBackMessage(chatState, index);
+		reviewOpen = false;
+		editingId = null;
+		highlightAnnId = null;
+		settleAnnPop();
+		annPop = null;
+		editor?.setText(refs ? refs.text : msg.content);
+		editor?.focus();
+		scrollToBottom();
 	}
 
 	function scrollToBottom() {
@@ -2056,7 +2107,22 @@
 		const snapSelection = (): void => {
 			downSel = window.getSelection()?.toString() ?? "";
 		};
+		// A drag that starts in message text never highlights its
+		// neighbors: while the button is down, any selection escaping
+		// the anchor article trims back live (mouseup's lock only fixed
+		// it after the fact, flashing two messages blue mid-drag).
+		let selectingInMessage = false;
+		const armMessageDrag = (event: MouseEvent): void => {
+			const target = event.target instanceof Element ? event.target : null;
+			selectingInMessage = !!target?.closest(".messages .rendered");
+		};
+		const trimMessageDrag = (): void => {
+			if (!selectingInMessage) return;
+			const live = window.getSelection();
+			if (live) lockSelectionToMessage(live, articleOf);
+		};
 		const onMouseUp = (event: MouseEvent) => {
+			selectingInMessage = false;
 			// Ignore clicks that start inside the prompt, popups, or buttons —
 			// only freshly selected message text summons the menu.
 			if (event.button === 2) return; // right-click reads aloud instead
@@ -2067,6 +2133,12 @@
 				if (!target?.closest(".lang-menu")) openLangMenu = null;
 			}
 			if (target?.closest(".cm-content, .sel-menu, .review, .translate-panel, button, input, textarea")) {
+				// Clicking away into the prompt or a control clears a dead
+				// highlight's menu with it — but never the menu's own clicks:
+				// the Annotate button's click fires after this mouseup.
+				if ((window.getSelection()?.toString() ?? "") === "" && !target?.closest(".sel-menu")) {
+					selMenu = null;
+				}
 				return;
 			}
 			const live = window.getSelection();
@@ -2164,6 +2236,8 @@
 		window.addEventListener("focusin", onFocusIn);
 		window.addEventListener("mousedown", onBadgePress, true);
 		window.addEventListener("mousedown", snapSelection, true);
+		window.addEventListener("mousedown", armMessageDrag, true);
+		document.addEventListener("selectionchange", trimMessageDrag);
 		// Secondary scrollers share the main chat's fade: scroll events
 		// don't bubble, so catch them on the way down and toggle the
 		// same .scrolling class with the same short hold.
@@ -2196,6 +2270,8 @@
 			window.removeEventListener("focusin", onFocusIn);
 			window.removeEventListener("mousedown", onBadgePress, true);
 			window.removeEventListener("mousedown", snapSelection, true);
+			window.removeEventListener("mousedown", armMessageDrag, true);
+			document.removeEventListener("selectionchange", trimMessageDrag);
 			window.removeEventListener("scroll", onFadeScroll, true);
 			window.removeEventListener("mouseup", onMouseUp);
 			window.removeEventListener("dblclick", onDoubleClick);
@@ -2280,7 +2356,6 @@
 			<button
 				type="button"
 				class="settings-btn"
-				title="Toggle chat list (⌘B)"
 				aria-label="Toggle chat list"
 				onclick={toggleSidebar}
 			>
@@ -2306,7 +2381,6 @@
 				<button
 					type="button"
 					class="settings-btn"
-					title="New chat (⌘N or ⇧⌘N)"
 					aria-label="New chat"
 					onclick={doNewChat}
 				>
@@ -2388,7 +2462,7 @@
 				{@const isFolded = refsOnly ? !foldedIds.has(msg.id) : foldedIds.has(msg.id)}
 				{@const script = detectScript(sentRefs ? sentRefs.text : msg.content)}
 				{@const aidId = script ? MODEL_AID_FOR_SCRIPT[script] : null}
-				{@const localKind = localAidFor(script)}
+				{@const localKinds = localAidsFor(detectScripts(sentRefs ? sentRefs.text : msg.content))}
 				{@const streamingThis =
 					chatState.sending && msg.role === "assistant" && i === chat.messages.length - 1}
 				<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
@@ -2547,40 +2621,56 @@
 										</button>
 									{/if}
 								{/if}
-							{:else if localKind}
-								{@const showOriginal = LOCAL_AID_SHOW_ORIGINAL[localKind]}
-								{#if aidPin.has(msg.id)}
-									{#if aidBusy.has(msg.id)}
-										<button
-											type="button"
-											data-tip="{LOCAL_AID_BUTTON[localKind]}..."
-											onclick={() => unapplyAid(msg)}
-										>
-											{LOCAL_AID_BUTTON[localKind]}<span class="tdots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
-										</button>
-									{:else}
-										<button
-											type="button"
-											data-tip={showOriginal}
-											onclick={() => unapplyAid(msg)}
-										>
-											{showOriginal}
-										</button>
+							{:else if localKinds.length > 0}
+								<!-- Mixed scripts offer one button per aid;
+								each pins (and previews) its own kind. -->
+								{#if aidKindPin.has(msg.id)}
+									{@const pinnedKind = aidKindPin.get(msg.id)}
+									{#if pinnedKind}
+										{@const showOriginal = LOCAL_AID_SHOW_ORIGINAL[pinnedKind]}
+										{#if aidBusy.has(msg.id)}
+											<button
+												type="button"
+												data-tip="{LOCAL_AID_BUTTON[pinnedKind]}..."
+												onclick={() => unapplyAid(msg)}
+											>
+												{LOCAL_AID_BUTTON[pinnedKind]}<span class="tdots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
+											</button>
+										{:else}
+											<button
+												type="button"
+												data-tip={showOriginal}
+												onclick={() => unapplyAid(msg)}
+											>
+												{showOriginal}
+											</button>
+										{/if}
 									{/if}
 								{:else}
-									<button
-										type="button"
-										data-tip={LOCAL_AID_ADD_TITLE[localKind]}
-										onmouseenter={() => peekAid(msg, null)}
-										onmouseleave={() => unpeekAid(msg)}
-										onclick={() => pinLocalAid(msg)}
-									>
-										{LOCAL_AID_BUTTON[localKind]}{#if aidBusy.has(msg.id)}<span class="tdots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>{/if}
-									</button>
+									{#each localKinds as localKind (localKind)}
+										<button
+											type="button"
+											data-tip={LOCAL_AID_ADD_TITLE[localKind]}
+											onmouseenter={() => peekAid(msg, null, localKind)}
+											onmouseleave={() => unpeekAid(msg)}
+											onclick={() => pinLocalAid(msg, localKind)}
+										>
+											{LOCAL_AID_BUTTON[localKind]}{#if aidBusy.has(msg.id)}<span class="tdots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>{/if}
+										</button>
+									{/each}
 								{/if}
 							{/if}
 						{/if}
 						{#if msg.role === "user"}
+							<button
+								type="button"
+								class="icon-btn"
+								data-tip="Edit and resend — deletes this message and everything after"
+								aria-label="Edit and resend — deletes this message and everything after"
+								onclick={() => editMessage(i)}
+							>
+								<ActionIcon kind="pencil" />
+							</button>
 							<button
 								type="button"
 								class="icon-btn"
@@ -2721,16 +2811,6 @@
 							{annotationCountLabel(annotations.length)}
 						</button>
 						<div class="review" role="dialog" aria-label="Annotations" data-fade-scroll>
-							<div class="review-tools">
-								<button
-									type="button"
-									aria-label="Delete all annotations"
-									title="Delete all annotations"
-									onclick={clearAllAnnotations}
-								>
-									Clear all
-								</button>
-							</div>
 							{#each annotations as ann, n (ann.id)}
 								<div class="review-item" class:highlight={highlightAnnId === ann.id}>
 									<div class="review-head">
@@ -2767,18 +2847,30 @@
 											<span class="review-comment">{ann.comment || "—"}</span>
 											<button
 												type="button"
+												class="review-pencil"
 												title="Edit comment"
+												aria-label="Edit comment for annotation {n + 1}"
 												onclick={() => {
 													editingId = ann.id;
 													editDraft = ann.comment;
 												}}
 											>
-												Edit
+												<ActionIcon kind="pencil" />
 											</button>
 										</div>
 									{/if}
 								</div>
 							{/each}
+							<div class="review-tools">
+								<button
+									type="button"
+									aria-label="Delete all annotations"
+									title="Delete all annotations"
+									onclick={clearAllAnnotations}
+								>
+									Clear all
+								</button>
+							</div>
 						</div>
 					</div>
 				{/if}
@@ -3848,13 +3940,16 @@
 	}
 	/* Own-message bubble: shrink-wraps the text (never the wider action
 	row underneath) and docks hard right, so the side padding matches on
-	both sides. Slightly tighter on top, where the text sat low. */
+	both sides. Text stays left-aligned inside the right-docked bubble;
+	the bubble never exceeds the article, so long text wraps instead of
+	spilling. Slightly tighter on top, where the text sat low. */
 	article.user .bubble {
 		background: #f1f1f4;
 		border-radius: 1.75rem;
 		padding: 0.45rem 1rem 0.55rem;
-		text-align: right;
+		text-align: left;
 		width: fit-content;
+		max-width: 100%;
 		margin-left: auto;
 	}
 	/* Structured content stays left-aligned inside own messages: code
@@ -3869,13 +3964,17 @@
 		padding-left: 0;
 		padding-right: 0;
 	}
-	/* Unshaded own messages read like replies: no bubble, same flow. */
+	/* Unshaded own messages read like replies: no bubble, but the same
+	right-docked flow — alignment never changes with the background.
+	Shrink-wrap + auto margin docks short messages hard right (a full
+	width here would strand them left with dead space on the right). */
 	main.plain-user article.user .bubble {
 		background: none;
 		padding: 0.5rem 0 0.6rem;
 		text-align: left;
-		width: auto;
-		margin-left: 0;
+		width: fit-content;
+		max-width: 100%;
+		margin-left: auto;
 	}
 	article.selected {
 		outline: 2px solid #3a3a3c;
@@ -3904,7 +4003,7 @@
 	history. No circle, no border — just the number, quiet. */
 	.ann-refs {
 		position: absolute;
-		top: -0.9rem;
+		top: -1.05rem;
 		left: 0.8rem;
 		display: flex;
 		margin: 0;
@@ -4353,11 +4452,11 @@
 	.ann-pill {
 		font-weight: 650;
 	}
-	/* Clear-all lives at the top of the popup, right-aligned. */
+	/* Clear-all lives at the bottom of the popup, right-aligned. */
 	.review-tools {
 		display: flex;
 		justify-content: flex-end;
-		padding: 0.1rem 0.2rem 0.35rem;
+		padding: 0.35rem 0.2rem 0.1rem;
 	}
 	.review-tools button {
 		border: 0;
@@ -4369,6 +4468,18 @@
 	}
 	.review-tools button:hover {
 		color: #94250a;
+	}
+	/* Per-note edit is a pencil in the message-action style (same
+	stroke icon, same quiet gray) instead of a text button. */
+	.review-head button.review-pencil {
+		display: inline-flex;
+		align-items: center;
+		color: #6e6e73;
+		padding: 0.1rem;
+	}
+	.review-head button.review-pencil:hover {
+		color: #1c1c1e;
+		text-decoration: none;
 	}
 	/* Annotation popover: collapsed to the pill, expands on hover,
 	focus, or pinned click. Beats the centered-column group rule.

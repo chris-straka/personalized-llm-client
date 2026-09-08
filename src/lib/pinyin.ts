@@ -1,5 +1,6 @@
 import { pinyin } from "pinyin-pro";
 import { escapeHtml } from "./render";
+import { RUBY_SCRIPT_RE } from "./reading";
 
 /**
  * Pinyin ruby for Chinese text: per-character readings (pinyin-pro resolves
@@ -44,5 +45,13 @@ export function plainParagraphs(htmlInner: string): string {
 		}
 	}
 	if (current.length) blocks.push(current);
-	return blocks.map((lines) => `<p>${lines.join("<br>")}</p>`).join("");
+	// Same ruby-room mark as the markdown renderer: paragraphs that can
+	// carry ruby reserve it, English ones stay tight (see aid-space).
+	return blocks
+		.map((lines) => {
+			const inner = lines.join("<br>");
+			const cls = RUBY_SCRIPT_RE.test(inner.replace(/<[^>]*>/g, "")) ? ` class="cjk"` : "";
+			return `<p${cls}>${inner}</p>`;
+		})
+		.join("");
 }

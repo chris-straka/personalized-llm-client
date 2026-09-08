@@ -291,6 +291,19 @@ export function truncateToMessage(state: ChatState, index: number, store?: KeyVa
 	persistChats(state, store);
 }
 
+/**
+ * Edit-and-resend from any user message: delete it and everything after
+ * it, so its text can go back into the composer for a corrected send.
+ * Out-of-range indices and non-user targets are no-ops.
+ */
+export function takeBackMessage(state: ChatState, index: number, store?: KeyValueStore): void {
+	const chat = activeChat(state);
+	if (index < 0 || index >= chat.messages.length) return;
+	if (chat.messages[index]?.role !== "user") return;
+	chat.messages = chat.messages.slice(0, index);
+	persistChats(state, store);
+}
+
 /** Resend the last user message (used after dismissing a failed reply or taking one back). */
 export async function resendLast(
 	state: ChatState,

@@ -50,7 +50,7 @@ test("triple-click on the second sentence selects it", async ({ page }) => {
 test("clicking blank space deselects instead of reopening the menu", async ({ page }) => {
 	await clickText(page, 2);
 	await expect(page.locator(".sel-menu")).toBeVisible();
-	await page.waitForTimeout(2100);
+	await page.waitForTimeout(2700);
 	await expect(page.locator(".sel-menu")).toHaveCount(0);
 	await page.mouse.click(10, 300);
 	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
@@ -153,4 +153,68 @@ test("message rows have no download button", async ({ page }) => {
 			page.locator(`article.${role} .actions [aria-label="Download audio for this message"]`)
 		).toHaveCount(0);
 	}
+});
+
+/** Sending files the pending annotations with the message: the composer
+pill is gone while the reply is still on its way. */
+test("sending clears pending annotations immediately", async ({ page }) => {
+	await openAnnotate(page, "確認しました");
+	await page.keyboard.type("meaning?");
+	await page.keyboard.press("Enter");
+	await expect(page.locator(".prompt-tools .ann-pill")).toHaveText("1");
+	await page.locator(".cm-content").click();
+	await page.keyboard.type("go");
+	// The Enter that filed the annotation must not double as a send.
+	await page.waitForTimeout(600);
+	await page.keyboard.press("Enter");
+	// The pill leaves with the send, not with the reply.
+	await expect(page.locator("article.user .rendered")).toContainText("go");
+	await expect(page.locator(".prompt-tools .ann-pill")).toHaveCount(0);
+	await expect(page.locator("article.assistant .rendered").last()).toContainText("Mock reply");
+	// The sent message carries the block (folded with its count).
+	await expect(page.locator("article.user .ann-refs-pill")).toHaveText("1");
+});
+
+/** The pencil pulls an own message back for a corrected resend. */
+test("pencil edits and resends an own message", async ({ page }) => {
+	await seedChat(page, [
+		{ role: "user", content: "helo world" },
+		{ role: "assistant", content: "hi" }
+	]);
+	await page.reload();
+	const article = page.locator("article.user");
+	await expect(article).toBeVisible();
+	await article.hover();
+	await article.locator('.actions button[aria-label^="Edit and resend"]').click();
+	// The message and its reply are gone; the text is back to edit.
+	await expect(page.locator("article.user")).toHaveCount(0);
+	await expect(page.locator("article.assistant")).toHaveCount(0);
+	await expect(page.locator(".cm-content")).toContainText("helo world");
+	// Fix the typo and send a fresh exchange.
+	await page.locator(".cm-content").click();
+	await page.keyboard.press("Control+a");
+	await page.keyboard.type("hello world");
+	await page.keyboard.press("Enter");
+	await expect(page.locator("article.user .rendered")).toContainText("hello world");
+	await expect(page.locator("article.assistant .rendered").last()).toContainText("Mock reply");
+});
+
+/** Clear-all sits at the bottom-right of the review overlay. */
+test("clear-all lives at the bottom of the review", async ({ page }) => {
+	await openAnnotate(page, "確認しました");
+	await page.keyboard.press("Enter");
+	await page.locator(".prompt-tools .ann-pill").click();
+	const review = page.locator(".prompt-tools .review");
+	await expect(review).toBeVisible();
+	const tools = review.locator(".review-tools");
+	await expect(tools).toContainText("Clear all");
+	const reviewBox = await review.boundingBox();
+	const toolsBox = await tools.boundingBox();
+	if (!reviewBox || !toolsBox) throw new Error("review lost its box");
+	// Bottom edge: the tools row ends where the overlay ends.
+	expect(reviewBox.y + reviewBox.height - (toolsBox.y + toolsBox.height)).toBeLessThan(24);
+	// Right edge: the tools row ends where the overlay ends.
+	expect(reviewBox.x + reviewBox.width - (toolsBox.x + toolsBox.width)).toBeLessThan(40);
+	await tools.locator("button").click();
+	await expect(page.locator(".prompt-tools .ann-pill")).toHaveCount(0);
 });

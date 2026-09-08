@@ -89,6 +89,12 @@ describe("markdown rendering", () => {
 		expect(html).toContain('data-code-index="1"');
 	});
 
+	it("marks only ruby-capable paragraphs for aid room", () => {
+		const { html } = renderMarkdown("hello\n\n漢字を読む");
+		expect(html).toContain("<p>hello</p>");
+		expect(html).toContain('<p class="cjk">');
+	});
+
 	it("converts rendered html back to plain text", () => {
 		const { html } = renderMarkdown("# Title\n\nsome **bold** text");
 		const text = htmlToText(html);

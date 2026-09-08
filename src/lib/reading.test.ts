@@ -2,6 +2,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
 	detectScript,
+	detectScripts,
 	extractWordAt,
 	ttsLangFor,
 	speakWord,
@@ -12,6 +13,7 @@ import {
 	MODEL_AIDS,
 	MODEL_AID_FOR_SCRIPT,
 	localAidFor,
+	localAidsFor,
 	LOCAL_AID_BUTTON,
 	LOCAL_AID_SHOW_ORIGINAL,
 	LOCAL_AID_ADD_TITLE
@@ -30,6 +32,24 @@ describe("script detection", () => {
 		expect(detectScript("カタカナと漢字")).toBe("ja");
 		// Arabic wins over anything mixed in.
 		expect(detectScript("hello مرحبا")).toBe("ar");
+	});
+
+	it("reports every aid script present, in priority order", () => {
+		expect(detectScripts("hello world")).toEqual([]);
+		expect(detectScripts("你好世界")).toEqual(["zh"]);
+		// Kanji share lines with kana: pure Japanese stays Japanese-only.
+		expect(detectScripts("漢字を読む")).toEqual(["ja"]);
+		// A Han-only line beside kana lines: both scripts present.
+		expect(detectScripts("こんにちは！\n你好！")).toEqual(["ja", "zh"]);
+		// Same-line mixing falls back to Japanese-only (as before).
+		expect(detectScripts("こんにちは！你好！")).toEqual(["ja"]);
+		expect(detectScripts("hello مرحبا\n你好")).toEqual(["ar", "zh"]);
+		// Mixed messages offer both local aids, furigana first.
+		expect(localAidsFor(detectScripts("こんにちは！\n你好！"))).toEqual(["furigana", "pinyin"]);
+		expect(localAidsFor(detectScripts("你好世界"))).toEqual(["pinyin"]);
+		expect(localAidsFor(detectScripts("漢字を読む"))).toEqual(["furigana"]);
+		expect(localAidsFor(detectScripts("hello world"))).toEqual([]);
+		expect(localAidsFor(detectScripts("مرحبا بالعالم"))).toEqual([]);
 	});
 });
 

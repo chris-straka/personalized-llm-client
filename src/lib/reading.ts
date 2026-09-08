@@ -16,16 +16,40 @@ import type { ChatProvider } from "./providers/types";
 
 /** Scripts with a dedicated ruby reading aid. */
 export type AidScript = "zh" | "ja" | "ar";
+
+/**
+ * Characters that can carry ruby: kana plus Han (kanji are Han), with
+ * the CJK iteration mark. Marks which rendered paragraphs reserve
+ * ruby's vertical room — English paragraphs never do, so their text
+ * selection stays tight.
+ */
+export const RUBY_SCRIPT_RE =
+	/[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\u3040-\u309F\u30A0-\u30FF\u3005]/;
 /** Kept for existing import sites. */
 export type DetectedScript = AidScript;
 
-/** Arabic first (its block is distinct), then kana (Japanese always mixes
- * kana with kanji), then Han (Chinese). */
+/**
+ * Every aid script present in the text, in aid priority order. Arabic
+ * and kana are message-wide signals, but Han is shared: kanji are Han
+ * characters, so a Han run only counts as Chinese on a line with no
+ * kana. Pure Japanese (kana mixed through every line) reports just
+ * `ja`, while a message with its own Chinese section reports both —
+ * so the row can offer furigana and pinyin side by side.
+ */
+export function detectScripts(text: string): AidScript[] {
+	const scripts: AidScript[] = [];
+	if (/[\u0600-\u06FF\u0750-\u077F]/.test(text)) scripts.push("ar");
+	const kana = /[\u3040-\u309F\u30A0-\u30FF]/;
+	if (kana.test(text)) scripts.push("ja");
+	if (text.split("\n").some((line) => /\p{Script=Han}/u.test(line) && !kana.test(line))) {
+		scripts.push("zh");
+	}
+	return scripts;
+}
+
+/** Arabic first (its block is distinct), then kana, then Han. */
 export function detectScript(text: string): DetectedScript | null {
-	if (/[\u0600-\u06FF\u0750-\u077F]/.test(text)) return "ar";
-	if (/[\u3040-\u309F\u30A0-\u30FF]/.test(text)) return "ja";
-	if (/\p{Script=Han}/u.test(text)) return "zh";
-	return null;
+	return detectScripts(text)[0] ?? null;
 }
 
 export const SCRIPT_LABEL: Record<DetectedScript, string> = {
@@ -166,6 +190,15 @@ export function localAidFor(script: DetectedScript | null): LocalAid | null {
 	if (script === "zh") return "pinyin";
 	if (script === "ja") return "furigana";
 	return null;
+}
+
+/** Local aids for every script present: furigana before pinyin, matching
+ * detectScripts priority. Arabic (model aid) contributes none. */
+export function localAidsFor(scripts: AidScript[]): LocalAid[] {
+	const aids: LocalAid[] = [];
+	if (scripts.includes("ja")) aids.push("furigana");
+	if (scripts.includes("zh")) aids.push("pinyin");
+	return aids;
 }
 
 const aidCache = new Map<string, string>();

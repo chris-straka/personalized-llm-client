@@ -11,6 +11,7 @@ import {
 	stageMessage,
 	branchFrom,
 	truncateToMessage,
+	takeBackMessage,
 	dismissFailedAssistant,
 	takeBackLastReply,
 	resendLast,
@@ -191,6 +192,23 @@ describe("chat", () => {
 		truncateToMessage(state, 1, store);
 		expect(activeChat(state).messages).toHaveLength(2);
 		truncateToMessage(state, 99, store);
+		expect(activeChat(state).messages).toHaveLength(2);
+	});
+
+	it("takes back a user message and everything after it for editing", async () => {
+		const { state, store } = stateWith(freshStore());
+		const provider = scriptedProvider(["r"]);
+		await sendMessage(state, provider, "sys", "one", {}, store);
+		await sendMessage(state, provider, "sys", "two", {}, store);
+		expect(activeChat(state).messages.map((m) => m.content)).toEqual(["one", "r", "two", "r"]);
+
+		takeBackMessage(state, 2, store);
+		expect(activeChat(state).messages.map((m) => m.content)).toEqual(["one", "r"]);
+
+		// Non-user targets and out-of-range indices are no-ops.
+		takeBackMessage(state, 1, store);
+		expect(activeChat(state).messages).toHaveLength(2);
+		takeBackMessage(state, 99, store);
 		expect(activeChat(state).messages).toHaveLength(2);
 	});
 

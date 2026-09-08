@@ -365,11 +365,15 @@
 		animation: aid-swap 0.18s ease;
 	}
 	/* Ruby's vertical room is always reserved where a local aid exists,
-	so previewing or pinning it never reflows the message. WebKit sizes
-	in-flow ruby annotations by glyphs (no line-height trick contains
-	them), so the reservation itself must cover base plus annotation:
-	2.7 swallows the measured overhang with headroom for other stacks. */
-	.rendered.aid-space :global(p) {
+	so previewing or pinning it never reflows the message — but only on
+	paragraphs that can actually carry ruby (marked cjk at render). An
+	English paragraph in a mixed message keeps its normal leading, so
+	its selection highlight hugs the text instead of spanning the ruby
+	void above. WebKit sizes in-flow ruby annotations by glyphs (no
+	line-height trick contains them), so the reservation itself must
+	cover base plus annotation: 2.7 swallows the measured overhang with
+	headroom for other stacks. */
+	.rendered.aid-space :global(p.cjk) {
 		line-height: 2.7;
 	}
 	.rendered :global(ruby) {
@@ -548,21 +552,22 @@
 		white-space: nowrap;
 		cursor: pointer;
 	}
-	/* Speech-bubble tail: a rounded stub off the badge's lower-left,
-	leaning down-left toward the quote it annotates. Never a point.
-	Overlaps the badge edge by 2px so no gap ever shows (the circle
-	curves away at the sides). Clicks land on the button, so the open
-	still works. */
+	/* Speech-bubble tail: a square rotated 45 degrees, tucked under
+	the badge's lower edge so its bottom corner juts out as a point
+	aimed down-left at the quote it annotates. The top half hides
+	behind the badge (5px overlap), so the join can never gap — the
+	circle curves away at the sides, which is why the tail sits
+	up-and-right of the old stub instead of off the lower-left rim.
+	Clicks land on the button, so the open still works. */
 	.rendered :global(button.ccez-ann-badge::after) {
 		content: "";
 		position: absolute;
-		top: calc(100% - 2px);
-		left: 18%;
-		transform: translateX(-50%) rotate(28deg);
-		transform-origin: top center;
-		width: 0.34rem;
-		height: 0.38rem;
-		border-radius: 0.12rem;
+		top: calc(100% - 5px);
+		left: 30%;
+		width: 0.4rem;
+		height: 0.4rem;
+		transform: translateX(-15%) rotate(45deg);
+		border-radius: 0.06rem;
 		background: inherit;
 	}
 	/* Newly stamped badges fade in; re-stamps skip the class so steady

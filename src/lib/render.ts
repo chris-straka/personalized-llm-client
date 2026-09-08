@@ -1,6 +1,7 @@
-import { Marked } from "marked";
+import { Marked, type Renderer, type Tokens } from "marked";
 import DOMPurify from "dompurify";
 import { createHighlighter, type Highlighter } from "shiki";
+import { RUBY_SCRIPT_RE } from "./reading";
 
 /**
  * Message rendering: markdown → sanitized HTML with code chrome, collapsed
@@ -107,6 +108,19 @@ function renderInto(markdownText: string, codes: Array<{ lang: string; code: str
 	const instance = new Marked({ breaks: true });
 	instance.use({
 		renderer: {
+			// Paragraphs that can carry ruby reserve its vertical room
+			// (see aid-space): English paragraphs stay tight so their
+			// selection highlight hugs the text. Only paragraphs get the
+			// mark — list and heading renderers keep their defaults (task
+			// checkboxes, loose-list wrapping) untouched.
+			paragraph(this: Renderer, { tokens }: Tokens.Paragraph): string {
+				// Block tokens arrive unparsed: inline markup (bold, code
+				// spans) still needs the parser before detection.
+				const inner = this.parser.parseInline(tokens);
+				const bare = inner.replace(/<[^>]*>/g, "");
+				const cls = RUBY_SCRIPT_RE.test(bare) ? ` class="cjk"` : "";
+				return `<p${cls}>${inner}</p>\n`;
+			},
 			code({ text, lang }: { text: string; lang?: string }): string {
 				const language = (lang ?? "").trim() || "text";
 				const index = codes.length;
