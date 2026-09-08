@@ -8,7 +8,8 @@ import {
 	formatAnnotations,
 	withAnnotations,
 	splitAnnotationBlock,
-	locateQuote
+	locateQuote,
+	occurrenceAtPosition
 } from "./annotations";
 import { buildTranslateMessages, translateSelection } from "./translate";
 import type { ChatProvider } from "./providers/types";
@@ -132,6 +133,59 @@ describe("locateQuote", () => {
 		expect(locateQuote(["hello"], "")).toBeNull();
 		expect(locateQuote(["hello"], "bye")).toBeNull();
 		expect(locateQuote(["first message"], "first message second message")).toBeNull();
+	});
+
+	it("picks the requested repeat of a repeated quote", () => {
+		expect(locateQuote(["ccc"], "c", 0)).toEqual({
+			startNode: 0,
+			startOffset: 0,
+			endNode: 0,
+			endOffset: 1
+		});
+		expect(locateQuote(["ccc"], "c", 2)).toEqual({
+			startNode: 0,
+			startOffset: 2,
+			endNode: 0,
+			endOffset: 3
+		});
+		// Multi-char repeats across nodes: the second "bc".
+		expect(locateQuote(["ab", "cbc"], "bc", 1)).toEqual({
+			startNode: 1,
+			startOffset: 1,
+			endNode: 1,
+			endOffset: 3
+		});
+	});
+
+	it("falls back to the first match past the end", () => {
+		expect(locateQuote(["ccc"], "c", 9)).toEqual({
+			startNode: 0,
+			startOffset: 0,
+			endNode: 0,
+			endOffset: 1
+		});
+	});
+});
+
+describe("occurrenceAtPosition", () => {
+	it("finds the repeat holding a node offset", () => {
+		expect(occurrenceAtPosition(["ccc"], "c", 0, 0)).toBe(0);
+		expect(occurrenceAtPosition(["ccc"], "c", 0, 1)).toBe(1);
+		expect(occurrenceAtPosition(["ccc"], "c", 0, 2)).toBe(2);
+		expect(occurrenceAtPosition(["ccc"], "c", 0, 3)).toBe(0);
+	});
+
+	it("maps multi-node positions through whitespace", () => {
+		// "a b c", selecting "b c" from raw offset 2.
+		expect(occurrenceAtPosition(["a b ", "c"], "b c", 0, 2)).toBe(0);
+		// Second "bc" in "abcbc", range starting at raw offset 3.
+		expect(occurrenceAtPosition(["abcbc"], "bc", 0, 3)).toBe(1);
+	});
+
+	it("returns 0 for empty quotes, misses, and unknown nodes", () => {
+		expect(occurrenceAtPosition(["abc"], "", 0, 1)).toBe(0);
+		expect(occurrenceAtPosition(["abc"], "z", 0, 1)).toBe(0);
+		expect(occurrenceAtPosition(["abc"], "b", 4, 0)).toBe(0);
 	});
 });
 

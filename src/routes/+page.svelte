@@ -80,6 +80,8 @@
 		newAnnotationId,
 		annRefsFor,
 		lockSelectionToMessage,
+		quoteTextNodes,
+		occurrenceAtPosition,
 		type Annotation,
 		type AnnotationId,
 		type AnnotationMark
@@ -710,6 +712,46 @@
 		window.getSelection()?.removeAllRanges();
 	}
 
+	/**
+	 * Which repeat of a quote the live selection starts in: resolves the
+	 * range start against the message's rendered text nodes and counts
+	 * the stripped occurrence holding it. Never throws — selection APIs
+	 * disagree across engines, and anything odd keeps 0 (first match).
+	 */
+	function occurrenceFromSelection(messageId: ChatMsgId, quote: string): number {
+		try {
+			const selection = window.getSelection();
+			if (!selection || selection.rangeCount === 0) return 0;
+			const range = selection.getRangeAt(0);
+			let node: Node | null = range.startContainer;
+			let offset = range.startOffset;
+			// Whole-node starts (triple-click paragraphs) resolve to
+			// their first text: the occurrence holding the span's start.
+			if (!(node instanceof Text)) {
+				const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+				const firstText = walker.nextNode();
+				if (!(firstText instanceof Text)) return 0;
+				node = firstText;
+				offset = 0;
+			}
+			const index = chat.messages.findIndex((m) => m.id === messageId);
+			if (index === -1) return 0;
+			const root = document.querySelector(`article#msg-${index} .rendered`);
+			if (!(root instanceof HTMLElement)) return 0;
+			const nodes = quoteTextNodes(root);
+			const nodeIndex = node instanceof Text ? nodes.indexOf(node) : -1;
+			if (nodeIndex === -1) return 0;
+			return occurrenceAtPosition(
+				nodes.map((n) => n.textContent ?? ""),
+				quote,
+				nodeIndex,
+				offset
+			);
+		} catch {
+			return 0;
+		}
+	}
+
 	/** Annotate at the cursor: the comment pill opens where the selection
 	was — never down in the composer. Enter saves, Escape cancels. The
 	annotation stays pending (no badge, no count) until submit. */
@@ -723,11 +765,17 @@
 		// Starting over submits whatever is being composed first: typed
 		// comments are never silently dropped.
 		if (pendingAnn) commitPending();
+		const quote = selMenu.quote.trim();
 		const pending: Annotation = {
 			id: newAnnotationId(),
 			messageId: selMenu.messageId,
-			quote: selMenu.quote.trim(),
-			comment: ""
+			quote,
+			comment: "",
+			// Repeats disambiguate here, from the live selection: the
+			// last "c" in "ccc" records occurrence 2, so its badge
+			// lands where the highlight was. Anything unresolvable
+			// keeps 0 (first match, the old behavior).
+			at: occurrenceFromSelection(selMenu.messageId, quote)
 		};
 		pendingAnn = pending;
 		clearSelection();
@@ -947,12 +995,12 @@
 	 * render would re-run every message body on any parent change.
 	 */
 	const memoMarks = createRefMemo<AnnotationMark>(
-		(m) => `${m.id}:${m.number}:${m.quote}:${m.preview === true ? "preview" : "saved"}`
+		(m) => `${m.id}:${m.number}:${m.quote}:${m.at ?? 0}:${m.preview === true ? "preview" : "saved"}`
 	);
 	function marksFor(messageId: ChatMsgId): AnnotationMark[] {
 		const saved: AnnotationMark[] = annotations
 			.filter((a) => a.messageId === messageId)
-			.map((a) => ({ id: a.id, number: annotationNumber(annotations, a.id), quote: a.quote }));
+			.map((a) => ({ id: a.id, number: annotationNumber(annotations, a.id), quote: a.quote, at: a.at ?? 0 }));
 		// A composed-but-unsubmitted annotation washes while its pill is
 		// open, but stamps no badge (badges appear on submit only).
 		if (pendingAnn && pendingAnn.messageId === messageId) {
@@ -960,6 +1008,7 @@
 				id: pendingAnn.id,
 				number: annotations.length + 1,
 				quote: pendingAnn.quote,
+				at: pendingAnn.at ?? 0,
 				preview: true
 			});
 		}
@@ -4699,11 +4748,14 @@
 	focus, or pinned click. Beats the centered-column group rule.
 	Flush against the pill (no gap): the pointer travels straight
 	from badge to popup without crossing dead hover space. */
+	/* The pill sits at the prompt's right edge, so the card anchors
+	right and grows up-and-left — growing right would run it off the
+	column (and over the send button's airspace). */
 	.ann-wrap .review {
 		display: none;
 		position: absolute;
 		bottom: 100%;
-		left: 0;
+		right: 0;
 		z-index: 60;
 		width: max-content;
 		min-width: 16rem;

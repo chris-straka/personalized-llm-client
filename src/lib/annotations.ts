@@ -14,6 +14,14 @@ export interface Annotation {
 	messageId: ChatMsgId;
 	quote: string;
 	comment: string;
+	/**
+	 * Which repeat of the quote was selected (0-based, default 0):
+	 * annotating the last "c" in "ccc" stores 2, so the badge lands
+	 * where the selection was instead of the first match. Memory-only
+	 * (never baked into message text) — badges stamp from live
+	 * annotations, cleared on send.
+	 */
+	at?: number;
 }
 
 export function newAnnotationId(): AnnotationId {
@@ -98,9 +106,13 @@ export interface QuoteLocation {
  * Whitespace-insensitive on both sides, so quotes spanning element
  * boundaries, block breaks, or reshaped punctuation still match. Returns null
  * when the quote isn't contained in these nodes (e.g. cross-message
- * selections stay review-only).
+ * selections stay review-only). `occurrence` picks among repeats: the
+ * nth full, non-overlapping match (0-based). Annotating the last "c" in
+ * "ccc" stores occurrence 2 at creation, so the badge lands where the
+ * selection was instead of always the first "c". Missing occurrences
+ * fall back to the first match — same as before.
  */
-export function locateQuote(nodeTexts: string[], quote: string): QuoteLocation | null {
+export function locateQuote(nodeTexts: string[], quote: string, occurrence = 0): QuoteLocation | null {
 	const q = stripForMatch(quote);
 	if (!q.stripped) return null;
 	let hay = "";
@@ -115,8 +127,18 @@ export function locateQuote(nodeTexts: string[], quote: string): QuoteLocation |
 			hay += ch;
 		}
 	});
-	const at = hay.indexOf(q.stripped);
-	if (at === -1) return null;
+	let at = -1;
+	let from = 0;
+	for (let seen = 0; seen <= occurrence; seen++) {
+		at = hay.indexOf(q.stripped, from);
+		if (at === -1) break;
+		from = at + q.stripped.length;
+	}
+	if (at === -1) {
+		// Asked past the end (edited text): first match, like before.
+		at = hay.indexOf(q.stripped);
+		if (at === -1) return null;
+	}
 	const first = map[at];
 	const last = map[at + q.stripped.length - 1];
 	if (!first || !last) return null;
@@ -128,11 +150,63 @@ export function locateQuote(nodeTexts: string[], quote: string): QuoteLocation |
 	};
 }
 
+/**
+ * Which occurrence of a quote holds a node position: counts full,
+ * non-overlapping occurrences of the stripped quote in the stripped
+ * haystack and returns the index of the one containing the stripped
+ * offset of (`nodeIndex`, `nodeOffset`). Positions between matches —
+ * or anything unresolvable — return 0, the historical behavior.
+ * Pure (strings in, index out) so it unit-tests without a DOM.
+ */
+export function occurrenceAtPosition(
+	nodeTexts: string[],
+	quote: string,
+	nodeIndex: number,
+	nodeOffset: number
+): number {
+	const q = stripForMatch(quote);
+	if (!q.stripped) return 0;
+	let hay = "";
+	let pos = -1;
+	nodeTexts.forEach((text, node) => {
+		const s = stripForMatch(text);
+		for (let i = 0; i < s.stripped.length; i++) {
+			const offset = s.offsets[i];
+			if (offset === undefined) continue;
+			if (node === nodeIndex && offset >= nodeOffset && pos === -1) {
+				pos = hay.length;
+			}
+			hay += s.stripped[i];
+		}
+		if (node === nodeIndex && pos === -1) {
+			// Offset past the node's last kept char (end of text):
+			// the position sits at whatever the haystack holds now.
+			pos = hay.length;
+		}
+	});
+	if (pos === -1) return 0;
+	const starts: number[] = [];
+	let from = 0;
+	for (;;) {
+		const at = hay.indexOf(q.stripped, from);
+		if (at === -1) break;
+		starts.push(at);
+		from = at + q.stripped.length;
+	}
+	for (let i = 0; i < starts.length; i++) {
+		const at = starts[i];
+		if (at !== undefined && at <= pos && pos < at + q.stripped.length) return i;
+	}
+	return 0;
+}
+
 /** Badge to stamp onto a message's quoted span. */
 export interface AnnotationMark {
 	id: AnnotationId;
 	number: number;
 	quote: string;
+	/** Repeat of the quote to stamp (see Annotation.at). */
+	at?: number;
 	/**
 	 * Preview (unsaved) annotation: washes like a real mark when it is
 	 * the open one, but stamps no badge — badges appear on submit only.
@@ -239,7 +313,7 @@ export function applyMarks(
 		// its parts) only locate on the current DOM.
 		const nodes = quoteTextNodes(root);
 		const texts = nodes.map((n) => n.textContent ?? "");
-		const loc = locateQuote(texts, item.quote);
+		const loc = locateQuote(texts, item.quote, item.at ?? 0);
 		if (!loc) continue;
 		// Preview (unsaved) annotations wash when open but stamp no
 		// badge: badges appear on submit only.
@@ -252,7 +326,8 @@ export function applyMarks(
 		const freshNodes = quoteTextNodes(root);
 		const freshLoc = locateQuote(
 			freshNodes.map((node) => node.textContent ?? ""),
-			item.quote
+			item.quote,
+			item.at ?? 0
 		);
 		if (!freshLoc) continue;
 		const anchor = anchorSpan(freshNodes, freshLoc);
@@ -277,7 +352,8 @@ export function applyMarks(
 			const fnodes = quoteTextNodes(root);
 			const floc = locateQuote(
 				fnodes.map((node) => node.textContent ?? ""),
-				gone.quote
+				gone.quote,
+				gone.at ?? 0
 			);
 			if (floc) {
 				wrapRange(fnodes, floc, "leaving");

@@ -123,6 +123,70 @@ test("fourth click clears the paragraph pick and the menu", async ({ page }) => 
 	await expect(page.locator(".sel-menu")).toHaveCount(0);
 });
 
+/** Repeats anchor where selected: annotating the last "c" in "ccc"
+stamps the badge on the last "c", not the first. */
+test("annotating a repeated character anchors the selected repeat", async ({ page }) => {
+	await seedChat(page, [{ role: "assistant", content: "ccc" }]);
+	await page.goto("/");
+	const body = page.locator("article .rendered").first();
+	await expect(body).toBeVisible();
+	const box = await body.boundingBox();
+	if (!box) throw new Error("message has no box");
+	const y = box.y + box.height / 2;
+	// Real press to normalize the click guard, then a real range over
+	// the last "c" before the matching mouseup summons the menu.
+	await page.mouse.click(box.x + 10, y);
+	await page.mouse.move(box.x + box.width - 2, y);
+	await page.mouse.down();
+	await page.evaluate(() => {
+		const text = document.querySelector("article .rendered p")?.firstChild;
+		if (!(text instanceof Text)) throw new Error("no message text");
+		window.getSelection()?.setBaseAndExtent(text, 2, text, 3);
+	});
+	await page.mouse.up();
+	await expect(page.locator(".sel-menu")).toBeVisible();
+	await page.locator('.sel-menu button:has-text("Annotate")').click();
+	await expect(page.locator(".ann-pop")).toBeVisible();
+	await page.keyboard.press("Enter");
+	const offset = await page.evaluate(() => {
+		const badge = document.querySelector("article .rendered [data-ann-badge]");
+		const anchor = badge?.parentElement;
+		const host = anchor?.closest("p") ?? undefined;
+		if (!anchor || !host) return -1;
+		let n = 0;
+		const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+		while (walker.nextNode()) {
+			const node = walker.currentNode;
+			if (anchor.contains(node)) return n;
+			n += node.textContent?.length ?? 0;
+		}
+		return -1;
+	});
+	expect(offset).toBe(2);
+});
+
+/** The prompt's review card grows up and to the left of its pill —
+never right over the send button's airspace. */
+test("prompt review card opens up and to the left", async ({ page }) => {
+	await openAnnotate(page, "確認しました");
+	await page.keyboard.press("Enter");
+	const pill = page.locator(".ann-pill");
+	await expect(pill).toBeVisible();
+	await pill.hover();
+	const card = page.locator(".ann-wrap .review");
+	await expect(card).toBeVisible();
+	const boxes = await page.evaluate(() => {
+		const rect = (sel: string) => document.querySelector(sel)?.getBoundingClientRect();
+		const r = rect(".ann-wrap .review");
+		const w = rect(".ann-wrap");
+		if (!r || !w) return null;
+		return { cardRight: r.right, cardBottom: r.bottom, wrapRight: w.right, wrapTop: w.top };
+	});
+	if (!boxes) throw new Error("review card missing boxes");
+	expect(boxes.cardBottom).toBeLessThanOrEqual(boxes.wrapTop + 1);
+	expect(Math.abs(boxes.cardRight - boxes.wrapRight)).toBeLessThanOrEqual(2);
+});
+
 /** Select a quote and open its comment box through the real UI. */
 async function openAnnotate(page: Page, quote: string): Promise<void> {
 	await page.locator(`article .rendered:has-text("${quote}")`).first().selectText();
