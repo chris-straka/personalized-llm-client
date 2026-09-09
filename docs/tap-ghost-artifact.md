@@ -40,6 +40,13 @@ chats). `shownActionsId` drives only an opacity attribute — nothing renders
 conditionally on tap state.
 
 ## Fix log
+- 2026-09-07 — Android gets a plain-textarea composer
+  (`src/lib/textarea-editor.ts`, same `PromptEditor` interface; wired in
+  `+page.svelte` behind the existing `androidUI` flag). No measurement
+  cache (collapse gone by construction), no compositor layer (ghost region
+  gets normal repaints). Drops: typing-coloring, undo history, paste
+  collapsing. Keeps: Enter-to-send, image attach, annotations, all prompt
+  buttons. Pending: on-device tap test.
 - `f00b998` tap-reveal double-rAF `remeasure()` — FAILED on device.
   Lesson: editor-rect repaint doesn't clear it; the tile sits outside the
   editor box (toolbar zone) or remeasure doesn't invalidate it.
@@ -52,6 +59,11 @@ conditionally on tap state.
 5. Fresh chat, keyboard never opened, tap — no ghost = keyboard trigger.
 6. Rendering → Paint flashing while tapping — composer region must flash;
    flashing-but-stuck = driver bug, no-flash = invalidation gap (ours).
+   (2026-09-07: reporter confirmed Paint flashing is ON in the emulator's
+   Rendering tab; Layout shift regions still OFF — tick it too. RESULT:
+   tapping a message flashes green ONLY on the tapped message; the ghost
+   region at the bottom NEVER flashes. Verdict: invalidation gap — our
+   code never asks that spot to repaint. Fixable on our side.)
 7. Console, ghost up — manual invalidate, clears = automatable cure:
    `P('.prompt').style.opacity='0.999'` then back over two rAFs.
 8. Settings: turn the hide-buttons toggle OFF (rows always visible, no

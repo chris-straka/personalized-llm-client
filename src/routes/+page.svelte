@@ -61,6 +61,7 @@
 		type PromptEditorOptions,
 		type SubmitKind
 	} from "$lib/editor";
+	import { createTextareaEditor } from "$lib/textarea-editor";
 	import { isEjected } from "$lib/session";
 	import { hydrateSecrets, persistSecrets, tauriBackendAvailable, withBlankedKeys } from "$lib/secrets";
 	import type { ChatProvider } from "$lib/providers/types";
@@ -2541,7 +2542,11 @@
 			{ passive: true }
 		);
 		if (!promptEl) return;
-		editor = createPromptEditor(promptEl, promptOptions());
+		// Android gets the plain-textarea composer: no measurement cache
+		// (no collapse) and no compositor layer games (no tap ghost).
+		editor = androidUI
+			? createTextareaEditor(promptEl, promptOptions())
+			: createPromptEditor(promptEl, promptOptions());
 		editor.setPlaceholder(promptPlaceholder());
 		// Desktop lands in the prompt on launch; phones don't — popping
 		// the keyboard on every cold start is the mobile annoyance.
@@ -2558,7 +2563,7 @@
 		requestAnimationFrame(() => requestAnimationFrame(() => editor?.remeasure()));
 
 		const onKey = (event: KeyboardEvent) => {
-			const inEditor = (event.target as HTMLElement | null)?.closest(".cm-content");
+			const inEditor = (event.target as HTMLElement | null)?.closest(".cm-content, .ta-input");
 			if ((event.metaKey || event.ctrlKey) && (event.key === "t" || event.key === "T")) {
 				// Translate lookup only hijacks the combo over message text —
 				// the prompt and the browser keep it everywhere else.
@@ -6326,6 +6331,35 @@
 		past this the editor scrolls internally. */
 		max-height: 40vh;
 	}
+	/* Android textarea composer: same seat as .cm-content above. */
+	.prompt :global(.ta-input) {
+		font-family:
+			-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+		font-size: calc(0.95rem * var(--font-scale, 1));
+		padding: 0.6rem 4.6rem 0.6rem 0;
+		caret-color: #1c1c1e;
+		width: 100%;
+		box-sizing: border-box;
+		border: 0;
+		background: transparent;
+		color: inherit;
+		resize: none;
+		overflow-y: auto;
+		max-height: 40vh;
+		outline: none;
+	}
+	.prompt :global(.ta-input::placeholder) {
+		color: #8e8e93;
+	}
+	.prompt.has-mic :global(.ta-input) {
+		padding-right: 6.5rem;
+	}
+	.prompt.has-anns :global(.ta-input) {
+		padding-right: 7rem;
+	}
+	.prompt.has-mic.has-anns :global(.ta-input) {
+		padding-right: 8.9rem;
+	}
 	.prompt :global(.cm-placeholder) {
 		color: #8e8e93;
 		/* Clicks pass through to the editor so the caret lands by
@@ -6352,6 +6386,12 @@
 	instead of the OS query, so the settings switch can pin it. */
 	:global(html[data-theme="dark"]) .prompt :global(.cm-content) {
 		caret-color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .prompt :global(.ta-input) {
+		caret-color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .prompt :global(.ta-input::placeholder) {
+		color: #636366;
 	}
 	:global(html[data-theme="dark"]) .prompt :global(.cm-placeholder) {
 		color: #636366;

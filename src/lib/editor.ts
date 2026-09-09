@@ -33,7 +33,6 @@ export const ANDROID_PROMPT_PLACEHOLDER = "Type a message";
 export const ANDROID_SCROLL_PLACEHOLDER = "Tap to write again";
 
 export interface PromptEditor {
-	readonly view: EditorView;
 	getText(): string;
 	/** Collapsed-paste spans in document coordinates (for send-time folds). */
 	getPastes(): PasteSpan[];
@@ -392,7 +391,6 @@ export function createPromptEditor(
 	parent.prepend(view.dom);
 
 	return {
-		view,
 		getText: () => view.state.doc.toString(),
 		getPastes: () => pasteSpans(view.state),
 		setText: (text: string) =>
