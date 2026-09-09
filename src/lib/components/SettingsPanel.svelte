@@ -497,10 +497,8 @@
 	</label>
 	<!-- One row for both hover toggles: the label names the behavior once,
 	each box names whose buttons it covers. Touch has no hover, so the
-	phone shows a note instead of the toggles. -->
-	{#if androidUI}
-		<p class="note">Message buttons show when you tap a message — no hover to wait for.</p>
-	{:else}
+	phone hides the whole row. -->
+	{#if !androidUI}
 		<fieldset class="hover-row">
 			<legend>Message buttons only on hover for…</legend>
 			<label class="check">
@@ -688,21 +686,23 @@
 	{/if}
 </section>
 
-<section aria-labelledby="keys-heading">
-	<h2 id="keys-heading">{androidUI ? "Touch gestures" : "Keyboard shortcuts"}</h2>
-	<button type="button" onclick={onShortcuts}>
-		Show all {androidUI ? "gestures" : "shortcuts"}
-		{#if !androidUI}<span class="key-hint" aria-hidden="true">⇧⌘/</span>{/if}
-	</button>
-</section>
+<div class="keys-updates">
+	<section aria-labelledby="keys-heading">
+		<h2 id="keys-heading">{androidUI ? "Touch gestures" : "Keyboard shortcuts"}</h2>
+		<button type="button" onclick={onShortcuts}>
+			Show all {androidUI ? "gestures" : "shortcuts"}
+			{#if !androidUI}<span class="key-hint" aria-hidden="true">⇧⌘/</span>{/if}
+		</button>
+	</section>
 
-<section aria-labelledby="updates-heading">
-	<h2 id="updates-heading">Updates</h2>
-	<button type="button" onclick={() => void checkUpdates()} disabled={checkingUpdate}>
-		{checkingUpdate ? "Checking…" : "Check for updates"}
-	</button>
-	{#if updateStatus}<p class="result" role="status">{updateStatus}</p>{/if}
-</section>
+	<section aria-labelledby="updates-heading">
+		<h2 id="updates-heading">Updates</h2>
+		<button type="button" onclick={() => void checkUpdates()} disabled={checkingUpdate}>
+			{checkingUpdate ? "Checking…" : "Check for updates"}
+		</button>
+		{#if updateStatus}<p class="result" role="status">{updateStatus}</p>{/if}
+	</section>
+</div>
 
 <style>
 	/* The header is the close target and the window drag strip:
@@ -781,6 +781,16 @@
 	section {
 		border-top: 1px solid #e5e5ea;
 		padding: 1.1rem 0;
+	}
+	/* Touch gestures and Updates share one row instead of stacking;
+	wrap keeps narrow panels readable. */
+	.keys-updates {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0 1.5rem;
+	}
+	.keys-updates > section {
+		flex: 1 1 11rem;
 	}
 	h2 {
 		font-size: 0.95rem;

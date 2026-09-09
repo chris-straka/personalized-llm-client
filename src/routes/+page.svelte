@@ -4294,13 +4294,13 @@
 					<div><dt>Newer / older chat</dt><dd>Two-finger swipe right / left</dd></div>
 					<div><dt>Delete current chat</dt><dd>Double three-finger tap</dd></div>
 						<div><dt>Settings</dt><dd>Swipe left from the right edge to open (swipe right to close)</dd></div>
-						<div><dt>Send</dt><dd>The ↑ button (newline is your keyboard's return key)</dd></div>
+						<div><dt>Send</dt><dd>The ↑ button or your keyboard's Enter</dd></div>
 						<div><dt>Select text</dt><dd>Touch and hold a word, then drag the handles</dd></div>
 						<div><dt>Annotate</dt><dd>The Annotate menu appears by the selection</dd></div>
+						<div><dt>Message buttons</dt><dd>Tap a message to show its buttons</dd></div>
+						<div><dt>Edit a message</dt><dd>Its pencil button, then resend</dd></div>
 						<div><dt>Fold a message</dt><dd>Swipe left on the message (again to unfold)</dd></div>
 						<div><dt>Speak text</dt><dd>Select it, then Read Aloud in the system menu</dd></div>
-						<div><dt>Message buttons</dt><dd>Always visible on touch — no hover needed</dd></div>
-						<div><dt>Edit a message</dt><dd>Its pencil button, then resend</dd></div>
 						<div><dt>Reply language</dt><dd>The language menu in the prompt</dd></div>
 						<div><dt>Stop voice</dt><dd>Skip in the voice bar; menus fade or close on tap-away</dd></div>
 					</dl>
@@ -5300,7 +5300,12 @@
 		/* Open upward over the composer, never down past it. */
 		bottom: calc(100% + 0.35rem);
 		left: 0;
-		min-width: 13rem;
+		/* Shrink-wrap the longest name: a fixed min-width leaves dead
+		space right of every short option and pushes right-edge menus
+		(like African) off-screen. */
+		min-width: 0;
+		width: max-content;
+		max-width: calc(100vw - 1rem);
 		/* Full extent, never a scrollbar: the longest menu is 15 items
 		and the list opens upward over the messages. */
 		display: flex;
@@ -5319,6 +5324,13 @@
 			max-height: 52vh;
 			overflow-y: auto;
 		}
+		/* Every phone menu right-anchors to its own button: a
+		left-anchored list trails off the right edge (African did).
+		The button is always on-screen, so the list is too. */
+		.lang-menu .lang-list {
+			left: auto;
+			right: 0;
+		}
 	}
 	/* The last menu (Classics) hugs the right edge: a left-anchored
 	list of long nowrap names trails off the page there. Right-anchor
@@ -5330,13 +5342,13 @@
 	.lang-list button {
 		display: flex;
 		align-items: center;
-		gap: 0.6rem;
+		gap: 0.5rem;
 		font-size: 0.82rem;
 		border: 0;
 		border-radius: 7px;
 		background: none;
 		cursor: pointer;
-		padding: 0.4rem 0.6rem;
+		padding: 0.35rem 0.45rem;
 		text-align: left;
 		color: #1c1c1e;
 		white-space: nowrap;
