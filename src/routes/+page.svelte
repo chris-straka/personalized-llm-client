@@ -1023,11 +1023,18 @@
 		pendingAnn = pending;
 		clearSelection();
 		const width = popWidth();
-		const x = Math.min(Math.max(8, selMenu.x), window.innerWidth - width - 8);
 		// The comment box sits a breath below the Annotate menu's
 		// anchor: sharing selMenu.y leaves it floating high above tall
 		// CJK lines.
-		const y = Math.min(Math.max(8, selMenu.y + 2), window.innerHeight - 72);
+		let x = Math.min(Math.max(8, selMenu.x), window.innerWidth - width - 8);
+		let y = Math.min(Math.max(8, selMenu.y + 2), window.innerHeight - 72);
+		if (androidUI) {
+			// Phone: the keyboard eats the lower screen, so the composer
+			// pins high and centered instead of at the selection — it is
+			// never covered, wherever the quote sits.
+			x = Math.max(8, (window.innerWidth - width) / 2);
+			y = Math.max(8, window.innerHeight * 0.12);
+		}
 		selMenu = null;
 		highlightAnnId = pending.id;
 		annDraft = "";
@@ -1159,10 +1166,16 @@
 		// Narrow phones are narrower than the desktop card: clamp first
 		// or x goes negative and the popover runs off-screen.
 		const width = popWidth();
-		const x = Math.min(Math.max(8, anchor.x - width / 2), window.innerWidth - width - 8);
+		let x = Math.min(Math.max(8, anchor.x - width / 2), window.innerWidth - width - 8);
 		const height = 240;
 		let y = anchor.y + 8;
 		if (y + height > window.innerHeight - 8) y = Math.max(8, anchor.y - height - 8);
+		if (androidUI) {
+			// Same keyboard rule as the create composer: high and
+			// centered, never under the keyboard.
+			x = Math.max(8, (window.innerWidth - width) / 2);
+			y = Math.max(8, window.innerHeight * 0.12);
+		}
 		annPop = { id, x, y, fresh: false };
 	}
 
