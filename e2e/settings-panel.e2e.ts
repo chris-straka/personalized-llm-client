@@ -24,6 +24,11 @@ test("own-bubble toggle reads as Enable background on my messages", async ({ pag
 	await expect(page.locator(".settings-panel").getByText("Enable background on my messages")).toBeVisible();
 });
 
+/** Tap-to-show is a touch idiom: desktops never see its checkbox. */
+test("no hide-buttons checkbox on desktop", async ({ page }) => {
+	await expect(page.locator(".settings-panel").getByText("Hide message buttons until tapped")).toHaveCount(0);
+});
+
 /** Bubble background is decor only: turning it off never changes the
 message alignment (left, right-docked, both ways). */
 test("own-bubble off keeps left alignment, drops background", async ({ page }) => {
