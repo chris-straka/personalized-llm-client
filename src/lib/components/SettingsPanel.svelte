@@ -955,6 +955,15 @@
 	textarea:hover {
 		border-color: #8e8e93;
 	}
+	/* iOS zooms into text fields under 16px on focus: floor phone
+	fields at 16px so tapping one never re-scales the sheet. The
+	ancestor gate keeps every desktop size exactly as-is. */
+	:global(.app[data-android]) input[type="url"],
+	:global(.app[data-android]) input[type="text"],
+	:global(.app[data-android]) input[type="password"],
+	:global(.app[data-android]) textarea {
+		font-size: max(16px, 1em);
+	}
 	input[type="url"]:focus,
 	input[type="text"]:focus,
 	input[type="password"]:focus,

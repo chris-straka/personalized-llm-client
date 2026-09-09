@@ -4942,6 +4942,12 @@
 	it more rows: the empty state's hero layout keeps its own rhythm.
 	No font-size here — CodeMirror caches line metrics, and a size
 	change out from under it collapses the editor to zero height. */
+	/* iOS zooms into any text field under 16px on focus (and the
+	zoom is what unlocks sideways panning): phone fields floor at
+	16px. Desktop keeps its optical sizes. */
+	.app[data-android] .prompt :global(.ta-input) {
+		font-size: max(16px, calc(0.95rem * var(--font-scale, 1)));
+	}
 	.app[data-android] main:not(.empty) .prompt {
 		margin-bottom: 1.8rem;
 		min-height: 7.25rem;
