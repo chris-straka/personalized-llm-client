@@ -2313,13 +2313,15 @@
 			androidUI = false;
 		}
 		// Android has no native-TTS bridge (macOS-only): a persisted
-		// "native" choice from another machine would fail every read, so
-		// correct it to web voices once, up front. The settings panel
-		// repeats the probe for its picker; this is the silent path.
-		if (androidUI && settings.voiceEngine === "native") {
+		// The web engine does not exist in this shell, so Android pins
+		// to native when the bridge is up (and falls back when it is
+		// not). The settings panel repeats the probe for its picker;
+		// this is the silent path.
+		if (androidUI) {
 			void nativeTtsSupported().then((supported) => {
-				if (!supported && settings.voiceEngine === "native") {
-					settings.voiceEngine = "web";
+				const want = supported ? "native" : "web";
+				if (settings.voiceEngine !== want) {
+					settings.voiceEngine = want;
 					persistSettings();
 				}
 			});

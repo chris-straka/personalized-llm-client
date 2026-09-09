@@ -523,7 +523,26 @@
 			</label>
 		</fieldset>
 	{/if}
-	{#if nativeVoice}
+	{#if nativeVoice && androidUI}
+		<fieldset class="voice-engine">
+			<legend>Voice engine</legend>
+			<div class="segmented" role="radiogroup" aria-label="Voice engine">
+				<button
+					type="button"
+					role="radio"
+					aria-checked={settings.voiceEngine === "native"}
+					class:selected={settings.voiceEngine === "native"}
+					title="Read replies with device voices"
+					onclick={() => (settings.voiceEngine = "native")}>System voices</button
+				>
+			</div>
+			<p class="note">
+				Web voices don't exist in this app — System voices (your
+				device's text-to-speech) is the only engine.
+			</p>
+		</fieldset>
+	{/if}
+	{#if nativeVoice && !androidUI}
 		<fieldset class="voice-engine">
 			<legend>Voice engine</legend>
 			<div class="segmented" role="radiogroup" aria-label="Voice engine">
