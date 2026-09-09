@@ -192,7 +192,10 @@
 		selMenu = null;
 		scrollBox?.classList.add("scrolling");
 		window.clearTimeout(scrollIdleTimer);
-		scrollIdleTimer = window.setTimeout(() => scrollBox?.classList.remove("scrolling"), 200);
+		scrollIdleTimer = window.setTimeout(() => {
+			scrollBox?.classList.remove("scrolling");
+			updateWpPos();
+		}, 200);
 	}
 	let focusMode: "edit" | "scroll" = $state("edit");
 	let selectedIdx = $state(-1);
@@ -215,6 +218,26 @@
 	/** Waypoint menu pinned open (hover/focus reveal it without pinning). */
 	let wpOpen = $state(false);
 	let wpWrap: HTMLElement | undefined = $state();
+	/** 1-based position of the nearest waypoint at/above the viewport top
+	(feeds the touch pill and the sheet's current-item highlight). */
+	let wpPos = $state(1);
+	/** Touch Y at swipe start for the sheet's pull-down-to-dismiss. */
+	let wpTouchY: number | null = null;
+	function updateWpPos(): void {
+		const box = scrollBox;
+		if (!box || points.length === 0) {
+			wpPos = 1;
+			return;
+		}
+		const top = box.scrollTop;
+		let n = 0;
+		for (let k = 0; k < points.length; k++) {
+			const el = box.querySelector<HTMLElement>(`#msg-${points[k]}`);
+			if (el && el.offsetTop - top <= 120) n = k + 1;
+			else break;
+		}
+		wpPos = Math.max(1, n);
+	}
 	/** Pinned menu dismisses on outside press: the trigger hides while
 	the panel is up, so there is nothing left to toggle it shut. */
 	$effect(() => {
@@ -231,6 +254,17 @@
 	// rail above drops hover, and this closes a pinned menu with it.
 	$effect(() => {
 		if (settingsOpen) wpOpen = false;
+	});
+	// The pill's position tracks the chat itself (new messages, chat
+	// switches), not just scrolls: the synchronous reads subscribe the
+	// effect, and the DOM re-read settles after paint, when article
+	// boxes are final.
+	$effect(() => {
+		const total = points.length + viewChat.messages.length;
+		requestAnimationFrame(() => {
+			if (total === 0) wpPos = 1;
+			else updateWpPos();
+		});
 	});
 	/**
 	 * Ticks stay invisible until the pointer comes near the stack (64px):
@@ -3357,6 +3391,11 @@
 
 		{#if points.length > 3 && !settingsOpen && !previewing}
 			<nav aria-label="Waypoints">
+				{#if wpOpen}
+					<!-- Sheet backdrop: a press outside the sheet (which is
+					outside .wp-wrap) also trips the pinned-menu closer. -->
+					<button type="button" class="wp-veil" tabindex={-1} aria-label="Close message list" transition:fade={{ duration: 150 }} onclick={() => (wpOpen = false)}></button>
+				{/if}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div
 					class="wp-wrap"
@@ -3380,18 +3419,53 @@
 							<span class="wp-tick" aria-hidden="true"></span>
 						{/each}
 					</button>
-					<div class="wp-menu" role="menu" aria-label="Waypoints" data-fade-scroll>
-						{#each points as index (index)}
+					<!-- Touch trigger: position pill in the thumb zone (the
+					tick strip is pointer-sized and lives on the wrong edge
+					for thumbs, so touch gets this instead). -->
+					<button
+						type="button"
+						class="wp-pill"
+						data-fade-scroll
+						aria-label="Jump to a message"
+						aria-haspopup="true"
+						aria-expanded={wpOpen}
+						onclick={() => (wpOpen = !wpOpen)}
+					>
+						{wpPos} / {points.length}
+					</button>
+					<div
+						class="wp-menu"
+						role="menu"
+						aria-label="Waypoints"
+						data-fade-scroll
+						ontouchstart={(e) => (wpTouchY = e.touches[0]?.clientY ?? null)}
+						ontouchend={(e) => {
+							const start = wpTouchY;
+							wpTouchY = null;
+							const end = e.changedTouches[0]?.clientY;
+							if (start == null || end == null) return;
+							const menu = e.currentTarget as HTMLElement;
+							if (menu.scrollTop <= 0 && end - start > 56) wpOpen = false;
+						}}
+					>
+						<div class="wp-sheet-head">
+							<span>Jump to a message</span>
+							<button type="button" aria-label="Close message list" onclick={() => (wpOpen = false)}>×</button>
+						</div>
+						{#each points as index, n (index)}
+							{@const target = chat.messages[index]}
 							<button
 								type="button"
 								role="menuitem"
-								title={waypointLabel(chat.messages[index]?.content ?? "", 200)}
+								aria-current={n === wpPos - 1}
+								title={waypointLabel(target?.content ?? "", 200)}
 								onclick={() => {
 									jumpTo(index);
 									wpOpen = false;
 								}}
 							>
-								{waypointLabel(chat.messages[index]?.content ?? "") || `Message ${index + 1}`}
+								<span class="wp-dot" data-role={target?.role ?? "user"} aria-hidden="true"></span>
+								{waypointLabel(target?.content ?? "") || `Message ${index + 1}`}
 							</button>
 						{/each}
 					</div>
@@ -4499,10 +4573,41 @@
 		opacity: 0;
 		pointer-events: none;
 	}
-	@media (hover: none) {
-		.wp-btn {
-			opacity: 0.35;
-			pointer-events: auto;
+	/* Touch-only waypoint chrome: pill trigger, sheet backdrop, sheet
+	head, current-item mark. Display none on pointer devices, where the
+	hover ticks and floating card stay. Role dots ride both menus. */
+	.wp-pill,
+	.wp-veil,
+	.wp-sheet-head {
+		display: none;
+	}
+	.wp-dot {
+		display: inline-block;
+		flex-shrink: 0;
+		width: 0.5rem;
+		height: 0.5rem;
+		border-radius: 50%;
+		margin-right: 0.55rem;
+		transform: translateY(-1px);
+		background: #0a84ff;
+	}
+	.wp-dot[data-role="assistant"] {
+		background: #30d158;
+	}
+	.wp-menu button[aria-current="true"] {
+		background: #f1f1f4;
+		font-weight: 600;
+	}
+	/* Touch waypoint rules live after the base waypoint block (later in
+	this file): equal-specificity overrides must come second to win. */
+	@keyframes wp-sheet-in {
+		from {
+			transform: translateY(1rem);
+			opacity: 0;
+		}
+		to {
+			transform: none;
+			opacity: 1;
 		}
 	}
 	/* Anchor for the reply-language pill: the pill floats beside the
@@ -4923,6 +5028,109 @@
 			opacity 0.18s ease,
 			visibility 0s linear 0.18s,
 			scrollbar-color 0.12s ease;
+	}
+	/* Touch waypoint: the tick strip is pointer-sized and parked on the
+	wrong edge for thumbs, so touch gets a position pill in the thumb
+	zone (bottom-right, above the composer) opening a bottom sheet.
+	Desktop keeps its hover ticks and floating card untouched. Later
+	than the base waypoint rules, so equal-specificity ties win. */
+	@media (hover: none) {
+		.wp-btn {
+			display: none;
+		}
+		/* Touch has no hover intent: a tap's sticky :hover/:focus would
+		paint the sheet over the pill before the click lands, stealing
+		it. Closed-only (the :not guard), so the open sheet survives the
+		sticky hover + pill focus that opening by tap leaves behind. The
+		sheet opens on wpOpen only; keyboard/AT activation is a click,
+		so it still opens. */
+		.wp-wrap:not(.open):hover .wp-menu,
+		.wp-wrap:not(.open):focus-within .wp-menu {
+			opacity: 0;
+			visibility: hidden;
+			transition:
+				opacity 0.18s ease,
+				visibility 0s linear 0.18s;
+		}
+		nav[aria-label="Waypoints"] {
+			top: auto;
+			right: 0;
+			left: 0;
+			bottom: 0;
+			transform: none;
+			pointer-events: none;
+		}
+		.wp-pill {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			position: fixed;
+			right: 1rem;
+			bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px));
+			z-index: 61;
+			min-width: 3.5rem;
+			min-height: 2.75rem;
+			padding: 0.4rem 0.9rem;
+			border: 0;
+			border-radius: 999px;
+			background: #1c1c1e;
+			color: #f2f2f7;
+			font-size: 0.85rem;
+			font-variant-numeric: tabular-nums;
+			box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+			pointer-events: auto;
+			user-select: none;
+			-webkit-user-select: none;
+		}
+		.wp-veil {
+			display: block;
+			position: fixed;
+			inset: 0;
+			z-index: 60;
+			border: 0;
+			background: rgba(0, 0, 0, 0.32);
+			pointer-events: auto;
+		}
+		.wp-menu {
+			position: fixed;
+			left: 0.75rem;
+			right: 0.75rem;
+			bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+			top: auto;
+			z-index: 62;
+			min-width: 0;
+			max-width: none;
+			max-height: 55vh;
+			border-radius: 20px;
+			padding: 0.25rem 0.4rem 0.5rem;
+			pointer-events: auto;
+		}
+		.wp-wrap.open .wp-menu {
+			animation: wp-sheet-in 0.18s ease-out;
+		}
+		.wp-sheet-head {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			padding: 0.35rem 0.1rem 0.35rem 0.7rem;
+			font-size: 0.8rem;
+			color: #8e8e93;
+		}
+		.wp-menu .wp-sheet-head button {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: 2.75rem;
+			height: 2.75rem;
+			padding: 0;
+			font-size: 1.4rem;
+			line-height: 1;
+			color: inherit;
+		}
+		.wp-menu button[role="menuitem"] {
+			padding: 0.75rem 0.7rem;
+			font-size: 0.9rem;
+		}
 	}
 	main.empty .messages {
 		justify-content: center;
@@ -5859,6 +6067,9 @@
 			animation: none;
 			transition: opacity 0.12s ease 2s;
 		}
+		.wp-wrap.open .wp-menu {
+			animation: none;
+		}
 		aside,
 		.settings-panel {
 			transition: none;
@@ -6261,6 +6472,16 @@
 	}
 	:global(html[data-theme="dark"]) .wp-menu button:hover {
 		background: #2c2c2e;
+	}
+	:global(html[data-theme="dark"]) .wp-menu button[aria-current="true"] {
+		background: #2c2c2e;
+	}
+	:global(html[data-theme="dark"]) .wp-pill {
+		background: #f2f2f7;
+		color: #1c1c1e;
+	}
+	:global(html[data-theme="dark"]) .wp-sheet-head {
+		color: #98989f;
 	}
 	:global(html[data-theme="dark"]) article.user .bubble {
 		background: #2c2c2e;
