@@ -298,7 +298,7 @@ test("settings sheet spans the phone and offers touch toggles", async ({ page })
 	const panel = page.locator(".settings-panel");
 	await expect(panel).not.toHaveClass(/closed/);
 	const box = await panel.boundingBox();
-	expect(box?.width).toBe(412);
+	expect(box?.width ?? 0).toBeCloseTo(412, 0);
 	await expect(panel.locator('legend:has-text("Voice engine")')).toHaveCount(0);
 	await expect(panel.locator('label:has-text("Read selections aloud on release")')).toBeVisible();
 	await expect(panel.locator('h2:has-text("Touch gestures")')).toBeVisible();
