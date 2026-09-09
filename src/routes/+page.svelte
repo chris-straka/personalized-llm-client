@@ -6206,9 +6206,14 @@
 	later than the hover rules and outranking them, so it wins ties. */
 	.app[data-android] main.hide-buttons article .actions {
 		opacity: 0;
+		/* Invisible rows must not eat taps: without this, hidden
+		buttons fire under the finger. Reveals tap the article, not
+		the row, so nothing is lost. */
+		pointer-events: none;
 	}
 	.app[data-android] main.hide-buttons article[data-actions-open="true"] .actions {
 		opacity: 1;
+		pointer-events: auto;
 	}
 	/* Own messages pack to the right edge: block, text column, and row. */
 	article.user .actions {
