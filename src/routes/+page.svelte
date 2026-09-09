@@ -5380,6 +5380,12 @@
 		position: relative;
 		border-radius: 10px;
 		padding: 0.6rem 0.8rem;
+		/* Text starts only at the message body: dragging anywhere else
+		(empty space, action rows) is a plain pointer drag, never an
+		I-beam selection. .rendered re-enables both below. */
+		user-select: none;
+		-webkit-user-select: none;
+		cursor: default;
 	}
 	/* A user message opens a new pair, so it carries the
 	between-pair separation on top; replies hug underneath. */
@@ -5388,13 +5394,6 @@
 	}
 	article:first-of-type {
 		margin-top: 0;
-	}
-		/* Text starts only at the message body: dragging anywhere else
-		(empty space, action rows) is a plain pointer drag, never an
-		I-beam selection. .rendered re-enables both below. */
-		user-select: none;
-		-webkit-user-select: none;
-		cursor: default;
 	}
 	article.user {
 		align-self: flex-end;
