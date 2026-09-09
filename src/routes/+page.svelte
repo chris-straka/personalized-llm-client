@@ -98,6 +98,7 @@
 	import { translateSelection } from "$lib/translate";
 	import {
 	isAndroidUserAgent,
+	isIOSUserAgent,
 	edgeSwipeTarget,
 	contentSwipeTarget,
 	twoFingerSwipeDir,
@@ -2308,13 +2309,14 @@
 			flashToast(`Rejection: ${reason instanceof Error ? reason.message : String(reason)}`);
 		});
 		try {
-			androidUI = isAndroidUserAgent(navigator.userAgent);
+			// iOS rides the same phone UI (touch composer, no hover,
+			// native voice picker): the name is historical.
+			androidUI = isAndroidUserAgent(navigator.userAgent) || isIOSUserAgent(navigator.userAgent);
 		} catch {
 			androidUI = false;
 		}
-		// Android has no native-TTS bridge (macOS-only): a persisted
-		// The web engine does not exist in this shell, so Android pins
-		// to native when the bridge is up (and falls back when it is
+		// The web engine does not exist in this shell, so phones pin
+		// to native when the bridge is up (and fall back when it is
 		// not). The settings panel repeats the probe for its picker;
 		// this is the silent path.
 		if (androidUI) {

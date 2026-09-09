@@ -11,6 +11,15 @@ export function isAndroidUserAgent(ua: string): boolean {
 }
 
 /**
+ * iPhone/iPad WebView or browser, by user agent string. (iPads in
+ * desktop-mode Safari report "Macintosh" and stay on the desktop UI;
+ * the Tauri shell reports a real iPhone/iPad token.)
+ */
+export function isIOSUserAgent(ua: string): boolean {
+	return /iphone|ipad|ipod/i.test(ua);
+}
+
+/**
  * Primary input is touch (no hover to wait for). The query runner is
  * injected so tests can stub it: pass `(q) => window.matchMedia(q)`.
  */

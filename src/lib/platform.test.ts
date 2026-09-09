@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
 	isAndroidUserAgent,
+	isIOSUserAgent,
 	isCoarsePointer,
 	edgeSwipeTarget,
 	contentSwipeTarget,
@@ -27,6 +28,20 @@ describe("isAndroidUserAgent", () => {
 		expect(isAndroidUserAgent(IPHONE_UA)).toBe(false);
 		expect(isAndroidUserAgent(MAC_UA)).toBe(false);
 		expect(isAndroidUserAgent("")).toBe(false);
+	});
+});
+
+describe("isIOSUserAgent", () => {
+	it("matches iPhone and iPad agents", () => {
+		expect(isIOSUserAgent(IPHONE_UA)).toBe(true);
+		expect(
+			isIOSUserAgent("Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1")
+		).toBe(true);
+	});
+	it("rejects Android and desktop agents", () => {
+		expect(isIOSUserAgent(ANDROID_UA)).toBe(false);
+		expect(isIOSUserAgent(MAC_UA)).toBe(false);
+		expect(isIOSUserAgent("")).toBe(false);
 	});
 });
 

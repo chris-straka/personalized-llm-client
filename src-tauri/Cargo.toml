@@ -29,14 +29,17 @@ serde_json = "1"
 # install_tls_provider in lib.rs.
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
 
-# macOS-only native TTS (AVSpeechSynthesizer). Pure-Rust bindings via
-# objc2 — no Objective-C is written anywhere in this project.
-[target.'cfg(target_os = "macos")'.dependencies]
+# Native TTS (AVSpeechSynthesizer) on macOS and iOS. Pure-Rust
+# bindings via objc2 — no Objective-C is written anywhere in this
+# project. AppKit stays macOS-only: it does not exist on iOS.
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 objc2 = "0.6"
 objc2-foundation = "0.3"
-objc2-app-kit = "0.3"
 objc2-avf-audio = "0.3"
 objc2-natural-language = "0.3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = "0.3"
 
 # Android-only native TTS (TextToSpeech over JNI into Tts.kt).
 # jni matches wry's version so JNI types unify (see cargo tree).
