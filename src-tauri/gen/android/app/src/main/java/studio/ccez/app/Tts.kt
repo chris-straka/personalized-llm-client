@@ -1,0 +1,167 @@
+package studio.ccez.app
+
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
+import java.util.Locale
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+
+/**
+ * Minimal TextToSpeech driver for the Rust bridge (`tts_android.rs`).
+ *
+ * Everything engine-side runs on the main thread — the engine needs a
+ * Looper — so every entry posts there and returns at once. [init] runs
+ * from `MainActivity.onCreate`, so the Rust side never passes contexts
+ * through JNI. Completion (done / error / stopped) reports back through
+ * [nativeOnTtsDone], implemented in Rust, which emits the `tts-done`
+ * window event the frontend matches by utterance id.
+ */
+object Tts {
+    private lateinit var appContext: Context
+    private val main = Handler(Looper.getMainLooper())
+
+    /** Main thread only. Null until the first speak initializes it. */
+    private var engine: TextToSpeech? = null
+
+    private val listener = object : UtteranceProgressListener() {
+        override fun onStart(id: String) {}
+        override fun onDone(id: String) {
+            nativeOnTtsDone(id.toLongOrNull() ?: -1, null)
+        }
+        override fun onError(id: String) {
+            nativeOnTtsDone(id.toLongOrNull() ?: -1, "speech error")
+        }
+        @Deprecated("Deprecated in Java")
+        override fun onError(id: String, code: Int) {
+            nativeOnTtsDone(id.toLongOrNull() ?: -1, "speech error $code")
+        }
+        override fun onStop(id: String?, cancel: Boolean) {
+            if (id != null) nativeOnTtsDone(id.toLongOrNull() ?: -1, if (cancel) "canceled" else null)
+        }
+    }
+
+    private external fun nativeOnTtsDone(id: Long, error: String?)
+
+    private external fun nativeInit(activity: Activity)
+
+    /** Called once from `MainActivity.onCreate` (UI thread). */
+    @JvmStatic
+    fun init(activity: Activity) {
+        appContext = activity.applicationContext
+        // Hand the JVM to Rust: VM + this class for later commands.
+        nativeInit(activity)
+    }
+
+    private fun ensure() {
+        if (engine != null) return
+        engine = TextToSpeech(appContext, { _ ->
+            engine?.setOnUtteranceProgressListener(listener)
+        })
+    }
+
+    /** A TTS engine is installed when something answers the data check. */
+    @JvmStatic
+    fun supported(): Boolean {
+        if (!::appContext.isInitialized) return false
+        val intent = Intent(TextToSpeech.Engine.ACTION_CHECK_TTS_DATA)
+        return appContext.packageManager
+            .queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+            .isNotEmpty()
+    }
+
+    /**
+     * Queue [text] for speech, flushing anything in flight (Skip semantics).
+     * Never blocks the caller; completion arrives via [nativeOnTtsDone].
+     */
+    @JvmStatic
+    fun speak(text: String, lang: String, voiceName: String?, id: Long) {
+        main.post {
+            ensure()
+            val tts = engine
+            if (tts == null) {
+                nativeOnTtsDone(id, "engine unavailable")
+                return@post
+            }
+            val locale = try {
+                Locale.forLanguageTag(lang)
+            } catch (_: Exception) {
+                Locale.getDefault()
+            }
+            try {
+                if (tts.isLanguageAvailable(locale) >= TextToSpeech.LANG_AVAILABLE) {
+                    tts.language = locale
+                }
+            } catch (_: Exception) {
+                // Engine default stands in; still speak.
+            }
+            if (voiceName != null) {
+                try {
+                    tts.voices?.firstOrNull { it.name == voiceName }?.let { tts.voice = it }
+                } catch (_: Exception) {
+                    // Named voice gone; engine default stands in.
+                }
+            }
+            try {
+                tts.speak(text, TextToSpeech.QUEUE_FLUSH, Bundle(), id.toString())
+            } catch (_: Exception) {
+                nativeOnTtsDone(id, "speak failed")
+            }
+        }
+    }
+
+    @JvmStatic
+    fun stop() {
+        main.post {
+            try {
+                engine?.stop()
+            } catch (_: Exception) {
+                // Already stopped or gone; nothing to report.
+            }
+        }
+    }
+
+    /**
+     * Installed voices as newline-joined `name|bcp47|quality` rows
+     * (quality 1 = engine default, else 0 — Android has no premium
+     * tier). One string dodges array marshaling. Called rarely
+     * (settings probe), so blocking the caller briefly is acceptable.
+     */
+    @JvmStatic
+    fun voices(): String {
+        var text = ""
+        val latch = CountDownLatch(1)
+        main.post {
+            try {
+                ensure()
+                val tts = engine
+                val defaultName = try {
+                    tts?.defaultVoice?.name
+                } catch (_: Exception) {
+                    null
+                }
+                text = tts?.voices
+                    ?.map { voice ->
+                        val tag = try {
+                            voice.locale.toLanguageTag()
+                        } catch (_: Exception) {
+                            "und"
+                        }
+                        "${voice.name}|$tag|${if (voice.name == defaultName) 1 else 0}"
+                    }
+                    ?.joinToString("\n") ?: ""
+            } catch (_: Exception) {
+                text = ""
+            } finally {
+                latch.countDown()
+            }
+        }
+        latch.await(4, TimeUnit.SECONDS)
+        return text
+    }
+}

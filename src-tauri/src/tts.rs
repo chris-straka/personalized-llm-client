@@ -634,7 +634,9 @@ mod imp {
 pub fn tts_supported() -> bool {
     #[cfg(target_os = "macos")]
     return imp::supported();
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "android")]
+    return super::tts_android::supported();
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     return false;
 }
 
@@ -654,7 +656,9 @@ pub fn tts_speak(
 ) -> Result<u64, String> {
     #[cfg(target_os = "macos")]
     return imp::speak(&app, text, lang, voice);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "android")]
+    return super::tts_android::speak(&app, text, lang, voice);
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     {
         let _ = (app, text, lang, voice);
         return Err("native TTS requires macOS".into());
@@ -666,7 +670,9 @@ pub fn tts_speak(
 pub fn tts_stop(app: AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     return imp::stop(&app);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "android")]
+    return super::tts_android::stop(&app);
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     {
         let _ = app;
         return Err("native TTS requires macOS".into());
@@ -694,7 +700,9 @@ pub fn tts_identify_lang(text: String) -> Option<String> {
 pub fn tts_voices(app: AppHandle) -> Result<Vec<imp::NativeVoice>, String> {
     #[cfg(target_os = "macos")]
     return imp::voices(&app);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "android")]
+    return super::tts_android::voices(&app);
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     {
         let _ = app;
         return Err("native TTS requires macOS".into());
@@ -702,9 +710,10 @@ pub fn tts_voices(app: AppHandle) -> Result<Vec<imp::NativeVoice>, String> {
 }
 
 // The stub build has no `imp` module; the error type must still name a
-// concrete serializable type.
+// concrete serializable type. (Android reuses the stub shape and fills it
+// from the engine; hence pub(crate).)
 #[cfg(not(target_os = "macos"))]
-mod imp {
+pub(crate) mod imp {
     #[derive(Clone, serde::Serialize)]
     pub struct NativeVoice {
         pub id: String,

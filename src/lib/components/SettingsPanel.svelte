@@ -173,7 +173,10 @@
 				return;
 			}
 			qualityVoices = hasQualityVoices(installed);
-			if (!qualityVoices && settings.voiceEngine === "native") settings.voiceEngine = "web";
+			// Premium/enhanced/Siri tiers are macOS-only: Android voices
+			// never pass the quality gate, so it must not force web there.
+			if (!androidUI && !qualityVoices && settings.voiceEngine === "native")
+				settings.voiceEngine = "web";
 			installedVoices = installed;
 			// A picked voice that is no longer installed falls back to auto.
 			if (settings.nativeVoiceId && !installed.some((v) => v.id === settings.nativeVoiceId)) {

@@ -6,6 +6,8 @@ mod keyboard;
 #[cfg(desktop)]
 mod menu;
 mod tts;
+#[cfg(target_os = "android")]
+mod tts_android;
 
 /// macOS Keychain (via the `keyring` crate) backing for API keys.
 /// Service name matches the Tauri bundle identifier.

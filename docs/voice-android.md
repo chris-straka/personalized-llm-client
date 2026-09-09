@@ -17,12 +17,25 @@
 - Speak-failure error now distinguishes "no voices on device" from a
   thrown speak. Phones never auto-read selections (toggle removed).
 
-## Real fix (planned): native TTS bridge
+## Real fix (built 2026-09-09, NOT yet device-tested): native TTS bridge
 
-- Read-aloud needs an Android `TextToSpeech` bridge (Tauri plugin, no
-  permission required for output).
-- Mic dictation additionally needs `RECORD_AUDIO` + a native
-  `SpeechRecognizer` bridge — Web SpeechRecognition never exists in
-  WebViews, and the app deliberately hides mic buttons in-shell
+- `src-tauri/gen/android/.../studio/ccez/app/Tts.kt` (new): UI-thread
+  `TextToSpeech` driver — speak/stop/voices/supported + completion
+  callbacks. `MainActivity.onCreate` calls `Tts.init`.
+- `src-tauri/src/tts_android.rs` (new): JNI (0.21, matching wry — NOT
+  ndk-context, which nothing initializes here) implementing the same
+  `tts_speak` / `tts_stop` / `tts_voices` / `tts_supported` commands and
+  forwarding completion as `tts-done` events. No new frontend contract:
+  the Mac path's invokes and events drive it unchanged.
+- `SettingsPanel.svelte`: the premium-voice quality gate is desktop-only
+  (Android voices never pass it, which forced web).
+- Verified: `cargo check` on aarch64-linux-android clean, host build
+  clean, `bun run check`/`test`/eslint clean. Kotlin compiles only under
+  Gradle — first `tauri android dev` after this will prove it.
+- To use on device: settings → Voice engine → System voices (default
+  stays web until switched), then tap a speaker.
+- Mic dictation still needs `RECORD_AUDIO` + a native `SpeechRecognizer`
+  bridge — Web SpeechRecognition never exists in WebViews, and the app
+  deliberately hides mic buttons in-shell
   (`canMic = micAvailable() && !tauriBackendAvailable()`).
 - Until then: the GBoard mic button is the dictation workaround.
