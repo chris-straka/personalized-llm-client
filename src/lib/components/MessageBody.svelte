@@ -56,9 +56,10 @@
 		/**
 		 * Furigana conversion failed (worker or dictionary): the caller
 		 * releases the pin so the button falls back to the aid name instead
-		 * of a "show original" with nothing applied.
+		 * of a "show original" with nothing applied. Carries the short
+		 * failure reason for the toast — swallowed errors can't be fixed.
 		 */
-		onAidError?: (id: ChatMsgId) => void;
+		onAidError?: (id: ChatMsgId, reason?: string) => void;
 		/** Model-aid text replacing the message body when present. */
 		textOverride?: string | null;
 		/**
@@ -217,7 +218,9 @@
 						// callback identity is safe to touch here.
 						if (run !== aidRun) return;
 						console.warn("[furigana] conversion failed:", error);
-						onAidError?.(message.id);
+						const first =
+							error instanceof Error ? error.message.split("\n")[0] : String(error);
+						onAidError?.(message.id, (first ?? "").slice(0, 140) || undefined);
 					}
 				)
 				.finally(() => {

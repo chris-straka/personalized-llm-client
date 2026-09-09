@@ -1464,7 +1464,7 @@
 	 * releases the pin, falling back to the aid name instead of a "show
 	 * original" with nothing applied. Only an explicit pin earns a toast.
 	 */
-	function aidFailed(id: ChatMsgId): void {
+	function aidFailed(id: ChatMsgId, reason?: string): void {
 		const kinds = pinnedKinds(id);
 		const had = kinds.includes("furigana");
 		const kept = kinds.filter((kind) => kind !== "furigana");
@@ -1473,7 +1473,14 @@
 			aidPin.delete(id);
 		} else aidKindPin.set(id, kept);
 		if (aidPeek?.id === id) aidPeek = null;
-		if (had) flashToast("Couldn't load the readings for this message.");
+		// The reason ships in the toast: a bare failure gives nothing to
+		// report back when it only reproduces on a phone.
+		if (had)
+			flashToast(
+				reason
+					? `Couldn't load the readings for this message (${reason}).`
+					: "Couldn't load the readings for this message."
+			);
 	}
 
 	async function runModelAidFor(msg: ChatMsg, aidId: string, pin: boolean): Promise<void> {
@@ -3742,7 +3749,7 @@
 							aidPreview={aidPeek?.id === msg.id && !aidPin.has(msg.id)}
 							aidKinds={localAidsOverrideFor(msg)}
 							onAidLoadingChange={(loading: boolean) => setAidBusy(msg.id, loading)}
-							onAidError={() => aidFailed(msg.id)}
+							onAidError={(_id: ChatMsgId, reason?: string) => aidFailed(msg.id, reason)}
 						/>
 					</div>
 					{#if msg.attachments && msg.attachments.length > 0}
