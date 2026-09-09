@@ -740,7 +740,9 @@
 		resetDraftExtras();
 		newChat(chatState);
 		scrollBox?.scrollTo({ top: 0, behavior: "smooth" });
-		editor?.focus();
+		// Phones stay out of the prompt: auto-focus pops the keyboard
+		// over the composer instead of pushing it up. Tap in when ready.
+		if (!androidUI) editor?.focus();
 	}
 
 	const useMock = mockProviderEnabled();
@@ -1539,7 +1541,8 @@
 	let webVoiceVersion = $state(0);
 	/** Installed web voices (best-effort: [] reads as "unknown"). */
 	function webVoices(): Array<{ lang: string }> {
-		webVoiceVersion;
+		// Reactive subscription to the inventory bump (never negative).
+		if (webVoiceVersion < 0) return [];
 		try {
 			if (typeof speechSynthesis === "undefined") return [];
 			return speechSynthesis.getVoices();
@@ -1615,7 +1618,16 @@
 		const ok = useNative ? speakNat(callbacks) : speakWeb(callbacks);
 		if (!ok) {
 			resetVoice();
-			if (!quiet) setVoiceError("Voice not available.");
+			// An empty inventory means no TTS engine/data on the device
+			// (check the OS text-to-speech settings); voices present but
+			// throwing is a different fault. Say which.
+			if (!quiet) {
+				setVoiceError(
+					!useNative && webVoices().length === 0
+						? "No voices on this device — check its text-to-speech settings."
+						: "Voice not available."
+				);
+			}
 		}
 	}
 
@@ -2493,7 +2505,8 @@
 				// Headphones in: the fresh selection reads itself aloud
 				// on release (when a voice fits). The menu stays up, so
 				// Annotate is still one tap away after listening.
-				if (settings.autoSpeakSelection) {
+				// Phones never do this: every selection would talk.
+				if (!androidUI && settings.autoSpeakSelection) {
 					const fresh = currentQuote();
 					if (fresh) void speakQuote(fresh.quote, fresh.messageId, true);
 				}
@@ -2616,6 +2629,8 @@
 						else if (androidUI && twoTapAt > 0 && moved <= 12 && now - twoTapAt <= 400) {
 							if (now - lastTwoTapAt < 600) {
 								lastTwoTapAt = 0;
+								// The open keyboard would cover the sidebar.
+								(document.activeElement as HTMLElement | null)?.blur?.();
 								toggleSidebar();
 							} else lastTwoTapAt = now;
 						}

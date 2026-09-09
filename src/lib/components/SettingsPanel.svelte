@@ -593,14 +593,7 @@
 				</p>
 			</fieldset>
 	{/if}
-	{#if androidUI}
-		<!-- Phones only have web voices (no engine to pick): the useful
-		voice control is whether selections read themselves aloud. -->
-		<label class="check">
-			<input type="checkbox" bind:checked={settings.autoSpeakSelection} />
-			Read selections aloud on release
-		</label>
-	{/if}
+
 	<!-- Plain div + aria, not a <label>: label clicks yank focus into the
 		field, which fights selecting this text. -->
 	<div class="field">
