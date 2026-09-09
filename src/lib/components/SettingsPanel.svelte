@@ -491,6 +491,15 @@
 			</div>
 		</fieldset>
 	{/if}
+	{#if androidUI}
+		<fieldset>
+			<legend>Messages</legend>
+			<label class="check">
+				<input type="checkbox" bind:checked={settings.hideButtons} />
+				Hide message buttons until tapped
+			</label>
+		</fieldset>
+	{/if}
 	<label class="check">
 		<input type="checkbox" bind:checked={settings.ownBubble} />
 		Enable background on my messages
@@ -661,15 +670,6 @@
 			>
 		</div>
 	</fieldset>
-	{#if androidUI}
-		<fieldset>
-			<legend>Messages</legend>
-			<label class="check">
-				<input type="checkbox" bind:checked={settings.hideButtons} />
-				Hide message buttons until tapped
-			</label>
-		</fieldset>
-	{/if}
 </section>
 
 <div class="keys-updates">
