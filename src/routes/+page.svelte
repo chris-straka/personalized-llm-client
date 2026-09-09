@@ -1530,8 +1530,16 @@
 		}
 	}
 
+	/**
+	 * Bumped when the voice inventory arrives: getVoices() returns []
+	 * until the engine loads (notably slow in phone WebViews), and every
+	 * speak gate reads through webVoices, so the bump re-renders them
+	 * from disabled to live.
+	 */
+	let webVoiceVersion = $state(0);
 	/** Installed web voices (best-effort: [] reads as "unknown"). */
 	function webVoices(): Array<{ lang: string }> {
+		webVoiceVersion;
 		try {
 			if (typeof speechSynthesis === "undefined") return [];
 			return speechSynthesis.getVoices();
@@ -3338,6 +3346,21 @@
 		// WKWebView (and there is no native dictation path), so the
 		// Mic buttons hide there instead of toasting an error.
 		canMic = micAvailable() && !tauriBackendAvailable();
+		// Voice inventory arrives async (slow on phones): the first
+		// getVoices() kicks the load, voiceschanged bumps the gates.
+		try {
+			if (typeof speechSynthesis !== "undefined") {
+				speechSynthesis.getVoices();
+				speechSynthesis.onvoiceschanged = () => {
+					webVoiceVersion++;
+				};
+				// Already loaded (desktop): still re-render once so the
+				// gates read the real inventory, not the first empty one.
+				if (speechSynthesis.getVoices().length > 0) webVoiceVersion++;
+			}
+		} catch {
+			// Speech stays gated off, as before.
+		}
 		window.addEventListener("focus", onWinFocus);
 		// Soft-keyboard transitions resize the visual viewport without
 		// ever touching the document, and old phone WebViews time
