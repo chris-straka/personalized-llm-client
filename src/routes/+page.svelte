@@ -293,32 +293,6 @@
 	let annPopTimer: ReturnType<typeof setTimeout> | null = null;
 	let annDraft = $state("");
 	let annPopBox: HTMLTextAreaElement | undefined = $state();
-	/**
-	 * First-message landing animation (empty → chat glides down). Skips
-	 * the first run: chats restore synchronously from storage, so without
-	 * this every load with history would replay the glide on mount.
-	 */
-	let landTick = $state(false);
-	let wasEmpty = true;
-	let hydrated = false;
-	$effect(() => {
-		const empty = chat.messages.length === 0;
-		if (hydrated && wasEmpty && !empty) {
-			landTick = false;
-			const kick = requestAnimationFrame(() => {
-				landTick = true;
-			});
-			const clear = setTimeout(() => {
-				landTick = false;
-			}, 650);
-			return () => {
-				cancelAnimationFrame(kick);
-				clearTimeout(clear);
-			};
-		}
-		hydrated = true;
-		wasEmpty = empty;
-	});
 	/** The Enter that saves an annotation must never double as a send. */
 	let sendGuardUntil = 0;
 	let selMenu = $state<{
@@ -3350,7 +3324,6 @@
 		class:empty={viewChat.messages.length === 0}
 		class:hide-messages={settings.hideMessages}
 		class:hide-buttons={settings.hideButtons}
-		class:land={landTick}
 		class:plain-user={!settings.ownBubble}
 		class:hover-user={settings.hoverUserActions}
 		class:hover-assistant={settings.hoverAssistantActions}
@@ -6001,20 +5974,9 @@
 		/* Ease the outline both in and out of hover. */
 		transition: border-color 0.18s ease;
 	}
-	/* First message: glide the composer down instead of snapping. */
-	@keyframes composer-land {
-		from {
-			opacity: 0.2;
-			transform: translateY(-26px);
-		}
-		to {
-			opacity: 1;
-			transform: translateY(0);
-		}
-	}
-	main.land .prompt {
-		animation: composer-land 0.55s cubic-bezier(0.22, 0.9, 0.3, 1);
-	}
+	/* No entrance animation on the composer: it used to glide down on the
+	first message, exactly while the first tokens streamed in — on a slow
+	phone GPU the overlap reads as flicker. The composer just stays put. */
 	.send-btn {
 		position: absolute;
 		right: 0.6rem;
