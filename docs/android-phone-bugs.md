@@ -22,3 +22,51 @@ viewport (overflows horizontally).
 Suspects: the annotation composer / review dialog width rules in
 `src/routes/+page.svelte` (fixed widths or padding tuned for desktop;
 check `.review`, annotation popover, and any `min-width`).
+
+## 3. Annotation edit flash-closes the overlay
+
+Review overlay → tap an annotation's edit button → the edit form pops in
+but the overlay immediately disappears. Reopening the overlay shows the
+edit box open with the text. So the edit click also fires the
+overlay-close path (propagation? focus-out?); the pending edit state
+survives and restores on reopen. Fix: the edit click must not close the
+overlay.
+
+## 4. Cancel close animates strangely
+
+Tapping cancel in the review overlay does not smoothly fade — odd
+animation. Check the overlay close transition.
+
+## 5. Review overlay position
+
+Not centered; should move right and cover the paperclip more (anchor to
+the right side of the composer, not the left).
+
+## 6. Settings swipe direction
+
+Swipe-left mid-screen opens settings; with settings open, swipe-left
+closes it again. Wanted: once open, ONLY swipe-right closes it.
+
+## 7. Keyboard resize is intermittent + new-chat focus covers composer
+
+Sometimes GBoard pushes the prompt up perfectly, sometimes not. Opening a
+new chat from the sidebar ALWAYS brings the keyboard covering the
+composer (never resizes). Prime suspect: the `<activity>` has no
+`android:windowSoftInputMode` (defaults to adjustUnspecified = the OS
+guesses = intermittent). Fix: `adjustResize` so the WebView always
+shrinks. Then re-test the new-chat focus path.
+
+## 8. Mobile gesture redesign
+
+- Two-finger DOUBLE TAP opens the chats sidebar (replaces swipe-right).
+- Two-finger swipe right → newer chat; two-finger swipe left → older
+  chat (two-finger swipe nav exists via `stepChat` — confirm directions).
+- Single-finger swipe left ON A MESSAGE folds that message.
+- Conflicts to resolve: swipe-left currently opens settings (see #6);
+  three-finger tap currently deletes chats (dangerous — revisit).
+
+## 9. Rename: "ccez studio" → "ccez llm"
+
+Display name only — keep package identifiers (`applicationId`, bundle
+id) untouched. Touch: `@string/app_name`, Tauri product name/window
+titles, frontend header strings.

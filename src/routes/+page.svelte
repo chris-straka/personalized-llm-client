@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from "svelte";
+	import { onMount, tick } from "svelte";
 	import { SvelteMap, SvelteSet } from "svelte/reactivity";
 	import { fade } from "svelte/transition";
 	import {
@@ -216,6 +216,15 @@
 	 */
 	let pendingAnn = $state<Annotation | null>(null);
 	let reviewOpen = $state(false);
+	/** Focus refs: the review overlay opens through CSS :focus-within on
+	touch, so focus must always land on a live node inside .ann-wrap —
+	never on an unmounting button (focus drops to <body> and the whole
+	overlay closes). */
+	let annPill: HTMLButtonElement | null = $state(null);
+	let editBox: HTMLTextAreaElement | null = $state(null);
+	function focusPill(): void {
+		annPill?.focus({ preventScroll: true });
+	}
 	/** Waypoint menu pinned open (hover/focus reveal it without pinning). */
 	let wpOpen = $state(false);
 	let wpWrap: HTMLElement | undefined = $state();
@@ -1137,7 +1146,9 @@
 		highlightAnnId = id;
 		annDraft = current.comment;
 		settleAnnPop();
-		const width = 384;
+		// Narrow phones are narrower than the desktop card: clamp first
+		// or x goes negative and the popover runs off-screen.
+		const width = Math.min(384, window.innerWidth - 16);
 		const x = Math.min(Math.max(8, anchor.x - width / 2), window.innerWidth - width - 8);
 		const height = 240;
 		let y = anchor.y + 8;
@@ -1149,6 +1160,9 @@
 		annotations = editAnnotationComment(annotations, id, editDraft);
 		editingId = null;
 		highlightAnnId = null;
+		// The Save button unmounts with the edit box: park focus on the
+		// pill or the overlay drops on touch (see focus refs above).
+		focusPill();
 	}
 
 	function removeAnnotation(id: string): void {
@@ -2345,6 +2359,9 @@
 					if (settingsOpen) toggleSettingsPanel();
 					else toggleSidebar();
 				} else if (target === "settings") {
+					// A leftward stroke never closes settings once open —
+					// only a rightward stroke (the "chats" branch) dismisses.
+					if (settingsOpen) return;
 					if (!settings.sidebarCollapsed) {
 						settings.sidebarCollapsed = true;
 						persistSettings();
@@ -3318,7 +3335,7 @@
 </script>
 
 <svelte:head>
-	<title>Ccez Studio</title>
+	<title>Ccez LLM</title>
 </svelte:head>
 
 <div
@@ -3850,6 +3867,7 @@
 						<button
 							type="button"
 							class="ann-pill"
+							bind:this={annPill}
 							title="Review annotations"
 							aria-label={annotations.length === 1 ? "1 annotation" : `${annotations.length} annotations`}
 							aria-expanded={reviewOpen}
@@ -3874,7 +3892,7 @@
 									{#if editingId === ann.id}
 										<label>
 											<span class="review-label">note:</span>
-											<textarea rows="2" bind:value={editDraft} placeholder="Add an optional comment…"
+											<textarea rows="2" bind:this={editBox} bind:value={editDraft} placeholder="Add an optional comment…"
 											></textarea>
 										</label>
 										<div class="review-edit-actions">
@@ -3884,6 +3902,10 @@
 												onclick={() => {
 													editingId = null;
 													highlightAnnId = null;
+													// Cancel unmounts the focused textarea:
+													// park focus on the pill or the
+													// overlay drops on touch.
+													focusPill();
 												}}>Cancel</button
 											>
 										</div>
@@ -3899,6 +3921,13 @@
 												onclick={() => {
 													editingId = ann.id;
 													editDraft = ann.comment;
+													// The pencil unmounts with the edit
+													// box: move focus into the new
+													// textarea or it drops to <body>
+													// and the overlay closes on touch.
+													void tick().then(() =>
+														editBox?.focus({ preventScroll: true })
+													);
 												}}
 											>
 												<ActionIcon kind="pencil" />
@@ -4209,7 +4238,7 @@
 						<div><dt>Chats list</dt><dd>Swipe right from the left edge (tap the chat to close)</dd></div>
 					<div><dt>Newer / older chat</dt><dd>Two-finger swipe down / up</dd></div>
 					<div><dt>Delete current chat</dt><dd>Double three-finger tap</dd></div>
-						<div><dt>Settings</dt><dd>Swipe left from the right edge (toggles)</dd></div>
+						<div><dt>Settings</dt><dd>Swipe left from the right edge to open (swipe right to close)</dd></div>
 						<div><dt>Send</dt><dd>The ↑ button (newline is your keyboard's return key)</dd></div>
 						<div><dt>Select text</dt><dd>Touch and hold a word, then drag the handles</dd></div>
 						<div><dt>Annotate</dt><dd>The Annotate menu appears by the selection</dd></div>
@@ -5952,6 +5981,11 @@
 		visibility: visible;
 		opacity: 1;
 		pointer-events: auto;
+	}
+	/* Phone: the card anchors left of the paperclip by default — nudge
+	it right so it covers the tools cluster instead of the draft. */
+	.app[data-android="true"] .ann-wrap .review {
+		right: -2.4rem;
 	}
 	.muted {
 		font-size: 0.82rem;
