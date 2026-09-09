@@ -5389,6 +5389,10 @@
 		position: relative;
 		border-radius: 10px;
 		padding: 0.6rem 0.8rem;
+		/* Flex items default to min-width:auto: a nowrap folded preview
+		refuses to shrink and shoves the whole chat sideways (stray
+		scrollbars). Zero lets the ellipsis bite instead. */
+		min-width: 0;
 		/* Text starts only at the message body: dragging anywhere else
 		(empty space, action rows) is a plain pointer drag, never an
 		I-beam selection. .rendered re-enables both below. */
