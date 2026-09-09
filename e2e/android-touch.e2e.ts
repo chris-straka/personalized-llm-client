@@ -430,3 +430,34 @@ test.describe("dark phone", () => {
 		await expect(page.locator(".ann-pop")).toBeVisible();
 	});
 });
+
+/** Sending in a new chat leaves a one-line composer: the reply's layout
+churn (and the keyboard's viewport churn on phones) must never strand
+the emptied editor at zero height until the next keystroke heals it. */
+test("composer holds one line after the reply lands", async ({ page }) => {
+	await seedEmpty(page);
+	await page.locator(".cm-content").click();
+	await page.keyboard.type("hello world");
+	await page.keyboard.press("Enter");
+	await expect(page.locator('article .rendered:has-text("Mock reply to:")')).toBeVisible({ timeout: 15000 });
+	const heights = await page.evaluate(() => {
+		const h = (sel: string): number => {
+			const el = document.querySelector(sel);
+			return el instanceof HTMLElement ? el.getBoundingClientRect().height : -1;
+		};
+		return { content: h(".prompt .cm-content"), placeholder: h(".prompt .cm-placeholder") };
+	});
+	// One empty line plus the editor's vertical padding (~40px): the
+	// stranded state measured ~0 here with no placeholder at all.
+	expect(heights.content).toBeGreaterThan(30);
+	expect(heights.placeholder).toBeGreaterThan(10);
+	// A keyboard transition settles through the same re-measure path
+	// without disturbing the healthy composer.
+	await page.evaluate(() => window.visualViewport?.dispatchEvent(new Event("resize")));
+	await page.waitForTimeout(500);
+	const after = await page.evaluate(() => {
+		const el = document.querySelector(".prompt .cm-content");
+		return el instanceof HTMLElement ? el.getBoundingClientRect().height : -1;
+	});
+	expect(after).toBeGreaterThan(30);
+});

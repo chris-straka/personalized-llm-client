@@ -1809,6 +1809,11 @@
 		}
 		scrollToBottom();
 		maybeSpeakReply();
+		// The reply's layout churn (hero unmount, list growth, keyboard
+		// transitions on phones) can strand the emptied composer's cached
+		// line boxes at zero height: settle a re-measure after paint, like
+		// the mount path does, so it holds one line without a keystroke.
+		requestAnimationFrame(() => requestAnimationFrame(() => editor?.remeasure()));
 	}
 
 	async function resend() {
@@ -1824,6 +1829,9 @@
 		});
 		scrollToBottom();
 		maybeSpeakReply();
+		// Same settle as a fresh send: the reply's layout churn can
+		// strand the composer's cached line boxes at zero height.
+		requestAnimationFrame(() => requestAnimationFrame(() => editor?.remeasure()));
 	}
 
 	function onSubmit(kind: SubmitKind) {
@@ -3205,6 +3213,22 @@
 		// Mic buttons hide there instead of toasting an error.
 		canMic = micAvailable() && !tauriBackendAvailable();
 		window.addEventListener("focus", onWinFocus);
+		// Soft-keyboard transitions resize the visual viewport without
+		// ever touching the document, and old phone WebViews time
+		// CodeMirror's own ResizeObserver unreliably around them — the
+		// emptied composer can strand at zero height after send until
+		// the next keystroke re-measures. A settled viewport re-measures
+		// up front instead (typing would heal it anyway; this heals it
+		// before the next keystroke).
+		let viewportTimer: number | undefined;
+		const onViewportResize = (): void => {
+			if (viewportTimer !== undefined) window.clearTimeout(viewportTimer);
+			viewportTimer = window.setTimeout(() => {
+				viewportTimer = undefined;
+				editor?.remeasure();
+			}, 250);
+		};
+		window.visualViewport?.addEventListener("resize", onViewportResize);
 		void listenMenuActions();
 		window.addEventListener("keydown", onKey, true);
 		window.addEventListener("keydown", onAlt);
@@ -3238,6 +3262,8 @@
 		window.addEventListener("dblclick", onDoubleClick);
 		window.addEventListener("contextmenu", onContextMenu, true);
 		return () => {
+			window.visualViewport?.removeEventListener("resize", onViewportResize);
+			if (viewportTimer !== undefined) window.clearTimeout(viewportTimer);
 			window.removeEventListener("focus", onWinFocus);
 			window.removeEventListener("keydown", onKey, true);
 			window.removeEventListener("keydown", onAlt);
