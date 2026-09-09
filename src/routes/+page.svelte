@@ -3978,6 +3978,7 @@
 			class="sel-menu"
 			style="left: {selMenu.x}px; top: {selMenu.y}px"
 			role="menu"
+			tabindex="-1"
 			transition:fade={{ duration: 150 }}
 			onmousedown={noteMenuPress}
 			ontouchstart={noteMenuPress}
