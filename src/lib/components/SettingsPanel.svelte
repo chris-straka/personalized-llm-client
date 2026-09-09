@@ -99,6 +99,10 @@
 	// A picked voice never reads another language: when the tag moves on
 	// from the saved pick, fall back to Auto instead of a blank field.
 	$effect(() => {
+		// Never wipe during load or bridge failure: on boot the restored
+		// pick briefly matches an empty inventory, and a failed probe is
+		// not evidence the voice is gone (speak time falls back to Auto).
+		if (!voicesLoaded || voiceLoadError) return;
 		const options = androidUI ? androidVoiceOptions : voiceOptions;
 		if (settings.nativeVoiceId && !options.some((v) => v.id === settings.nativeVoiceId)) {
 			settings.nativeVoiceId = null;
