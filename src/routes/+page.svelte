@@ -188,6 +188,8 @@
 	let editor: PromptEditor | null = $state(null);
 	let promptEl: HTMLElement | undefined = $state();
 	let scrollBox: HTMLElement | undefined = $state();
+	/** App root (pinned to the visual height while the phone keyboard is up). */
+	let appEl: HTMLElement | undefined = $state();
 	/** Scrollbar thumb shows while a scroll is in flight, then fades. */
 	let scrollIdleTimer: number | undefined;
 	function noteScrolling(): void {
@@ -675,6 +677,7 @@
 			newChat(chatState);
 			scrollBox?.scrollTo({ top: 0, behavior: "smooth" });
 			if (focus) enterEditMode();
+			restartStepSlide(direction);
 			return;
 		}
 		const target = chats[next];
@@ -685,6 +688,22 @@
 		// stepping older used to jump with no motion at all.
 		scrollBox?.scrollTo({ top: 0, behavior: "smooth" });
 		if (focus) enterEditMode();
+		restartStepSlide(direction);
+	}
+
+	/**
+	 * Chat-step slide (touch swipes): the incoming chat glides in from
+	 * the swipe side instead of jumping. Null-then-frame restarts the
+	 * keyframes even for same-direction repeats; the animationend
+	 * handler clears the class. Phone-only via the classes below —
+	 * desktop steps instant.
+	 */
+	let chatStepDir: 1 | -1 | null = $state(null);
+	function restartStepSlide(direction: 1 | -1): void {
+		chatStepDir = null;
+		requestAnimationFrame(() => {
+			chatStepDir = direction;
+		});
 	}
 
 	/** Enter the cursor chat from the keyboard, close the list, and land in its prompt. */
@@ -3393,6 +3412,17 @@
 			if (viewportTimer !== undefined) window.clearTimeout(viewportTimer);
 			viewportTimer = window.setTimeout(() => {
 				viewportTimer = undefined;
+				// Phone keyboard: the layout viewport doesn't shrink, so
+				// the full-height flex column (and the latest messages)
+				// slides under the keyboard with no way to reach it. Pin
+				// .app to the visual height while the keyboard eats 100px+,
+				// and everything reflows into the visible area instead.
+				// Desktop and keyboard-closed phones keep stylesheet height.
+				if (androidUI && appEl && window.visualViewport) {
+					const visible = window.visualViewport.height;
+					appEl.style.height =
+						visible < window.innerHeight - 100 ? `${visible}px` : "";
+				}
 				editor?.remeasure();
 			}, 250);
 		};
@@ -3462,6 +3492,7 @@
 
 <div
 	class="app"
+	bind:this={appEl}
 	data-focus-mode={focusMode}
 	data-shell={tauriBackendAvailable() ? "tauri" : "browser"}
 	data-android={androidUI || null}
@@ -3620,7 +3651,17 @@
 			</nav>
 		{/if}
 
-		<div class="messages" bind:this={scrollBox} onscroll={noteScrolling} ondblclick={gutterDoubleClick}>
+		<div
+			class="messages"
+			class:step-newer={androidUI && chatStepDir === 1}
+			class:step-older={androidUI && chatStepDir === -1}
+			bind:this={scrollBox}
+			onscroll={noteScrolling}
+			ondblclick={gutterDoubleClick}
+			onanimationend={(e) => {
+				if (e.target === e.currentTarget) chatStepDir = null;
+			}}
+		>
 			{#if viewChat.messages.length === 0}
 				<div class="empty-state">
 					<h1 class="hero">What can I do for you?</h1>
@@ -5383,12 +5424,23 @@
 			max-height: 52vh;
 			overflow-y: auto;
 		}
-		/* Every phone menu right-anchors to its own button: a
-		left-anchored list trails off the right edge (African did).
-		The button is always on-screen, so the list is too. */
+		/* Phone menus must not trail off-screen: middle menus center
+		under their button, while the edge menus hug their own edge
+		(Europe's list spilled left, Classics' right). The capped
+		max-width still bounds every list to the viewport. */
 		.lang-menu .lang-list {
+			left: 50%;
+			right: auto;
+			transform: translateX(-50%);
+		}
+		.lang-menu:first-child .lang-list {
+			left: 0;
+			transform: none;
+		}
+		.lang-menu:last-child .lang-list {
 			left: auto;
 			right: 0;
+			transform: none;
 		}
 	}
 	/* The last menu (Classics) hugs the right edge: a left-anchored
@@ -6223,16 +6275,84 @@
 	(the open row shows for 3s). Bodies always show — only hideMessages
 	hides those. Android-scoped, so desktop keeps its hover rhythm;
 	later than the hover rules and outranking them, so it wins ties. */
+	/* Phones sit the row tighter under the text. */
+	.app[data-android] .actions {
+		margin-top: 0.2rem;
+	}
+	/* Closed rows collapse instead of reserving an invisible ~23px per
+	message (the dead space between messages and the stray scroll
+	height). Open settles in one quick rise; will-change keeps the
+	fade shimmer-free, same as the hover rows. Invisible rows must
+	not eat taps: reveals tap the article, not the row. */
 	.app[data-android] main.hide-buttons article .actions {
 		opacity: 0;
-		/* Invisible rows must not eat taps: without this, hidden
-		buttons fire under the finger. Reveals tap the article, not
-		the row, so nothing is lost. */
 		pointer-events: none;
+		will-change: opacity;
+		max-height: 0;
+		margin-top: 0;
+		overflow: hidden;
+		transition:
+			opacity 0.18s ease,
+			max-height 0.18s ease,
+			margin-top 0.18s ease;
 	}
 	.app[data-android] main.hide-buttons article[data-actions-open="true"] .actions {
 		opacity: 1;
 		pointer-events: auto;
+		max-height: 3rem;
+		overflow-x: auto;
+	}
+	/* No bubble, no bubble padding: text keeps its horizontal place
+	(only the background disappears), and the tighter vertical rhythm
+	drops the text closer to its buttons. */
+	.app[data-android] main.plain-user article.user .bubble {
+		padding: 0.25rem 1rem 0.3rem;
+	}
+	/* Message text never spills sideways off a phone: inner scrollers
+	(code blocks, aid-label rows) keep their own axes. */
+	.app[data-android] .messages {
+		overflow-x: clip;
+	}
+	/* Chat-step slide: the incoming chat glides in from the swipe
+	side (newer from the right, older from the left). Phone-only;
+	reduced-motion keeps the instant switch. */
+	@keyframes step-in-right {
+		from {
+			transform: translateX(2.5rem);
+			opacity: 0;
+		}
+		to {
+			transform: none;
+			opacity: 1;
+		}
+	}
+	@keyframes step-in-left {
+		from {
+			transform: translateX(-2.5rem);
+			opacity: 0;
+		}
+		to {
+			transform: none;
+			opacity: 1;
+		}
+	}
+	.app[data-android] .messages.step-newer {
+		animation: step-in-right 0.18s ease-out;
+	}
+	.app[data-android] .messages.step-older {
+		animation: step-in-left 0.18s ease-out;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.app[data-android] .messages.step-newer,
+		.app[data-android] .messages.step-older {
+			animation: none;
+		}
+	}
+	/* dir=auto puts Arabic paragraphs at the right edge; the chat
+	reads left-aligned, so alignment follows the column while the
+	base direction (selection, drag) stays with the text. */
+	.app[data-android] :global(.rendered [dir="auto"]) {
+		text-align: left;
 	}
 	/* Own messages pack to the right edge: block, text column, and row. */
 	article.user .actions {

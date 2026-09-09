@@ -3,7 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- viewport-fit=cover lets the app paint under the status bar and
+    home indicator (no letterbox black bars); safe-area insets in the
+    stylesheet keep content clear of them. Ignored off iOS. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Tauri + SvelteKit + Typescript App</title>
     <style>
       /* Bundled coding font (OFL): identical rendering on desktop and
