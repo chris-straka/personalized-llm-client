@@ -4291,11 +4291,6 @@
 					</button>
 				</div>
 				{#if androidUI}
-				<p class="modal-note">
-					Every action here is a swipe, tap, or touch-hold — no keyboard needed.
-				</p>
-			{/if}
-				{#if androidUI}
 					<!-- Android milestone: key chords don't exist on a phone,
 					so the same modal teaches the touch equivalents. -->
 					<dl class="keys">
