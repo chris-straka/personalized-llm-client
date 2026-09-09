@@ -493,23 +493,23 @@
 	{/if}
 	<label class="check">
 		<input type="checkbox" bind:checked={settings.ownBubble} />
-		enable bg on my msgs
+		Enable background on my messages
 	</label>
 	<!-- One row for both hover toggles: the label names the behavior once,
 	each box names whose buttons it covers. Touch has no hover, so the
 	phone shows a note instead of the toggles. -->
 	{#if androidUI}
-		<p class="note">Message buttons always show on touch — no hover to wait for.</p>
+		<p class="note">Message buttons show when you tap a message — no hover to wait for.</p>
 	{:else}
 		<fieldset class="hover-row">
 			<legend>Message buttons only on hover for…</legend>
 			<label class="check">
 				<input type="checkbox" bind:checked={settings.hoverUserActions} />
-				my msgs
+				My messages
 			</label>
 			<label class="check">
 				<input type="checkbox" bind:checked={settings.hoverAssistantActions} />
-				AI msgs
+				AI messages
 			</label>
 		</fieldset>
 	{/if}

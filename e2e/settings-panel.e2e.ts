@@ -20,6 +20,18 @@ test("thinking pills fit on one line", async ({ page }) => {
 	expect(new Set(tops).size).toBe(1);
 });
 
-test("own-bubble toggle reads as enable bg on my msgs", async ({ page }) => {
-	await expect(page.locator(".settings-panel").getByText("enable bg on my msgs")).toBeVisible();
+test("own-bubble toggle reads as Enable background on my messages", async ({ page }) => {
+	await expect(page.locator(".settings-panel").getByText("Enable background on my messages")).toBeVisible();
+});
+
+/** Bubble background is decor only: turning it off never changes the
+message alignment (left, right-docked, both ways). */
+test("own-bubble off keeps left alignment, drops background", async ({ page }) => {
+	const bubble = page.locator("article.user .bubble");
+	await expect(bubble).toHaveCSS("background-color", "rgb(241, 241, 244)");
+	await expect(bubble).toHaveCSS("text-align", "left");
+	await page.locator(".settings-panel").getByText("Enable background on my messages").click();
+	await expect(bubble).toHaveCSS("text-align", "left");
+	const bg = await bubble.evaluate((el) => getComputedStyle(el).backgroundColor);
+	expect(bg).toBe("rgba(0, 0, 0, 0)");
 });

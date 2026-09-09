@@ -5001,6 +5001,13 @@
 			overflow-y: auto;
 		}
 	}
+	/* The last menu (Classics) hugs the right edge: a left-anchored
+	list of long nowrap names trails off the page there. Right-anchor
+	it instead (all viewports — narrow desktop windows clip it too). */
+	.lang-menu:last-child .lang-list {
+		left: auto;
+		right: 0;
+	}
 	.lang-list button {
 		display: flex;
 		align-items: center;
