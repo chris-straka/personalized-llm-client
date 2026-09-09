@@ -680,6 +680,9 @@
 		if (!target) return;
 		sideIdx = next;
 		selectChat(chatState, target.id);
+		// Every switch lands at the top the same way minting one does —
+		// stepping older used to jump with no motion at all.
+		scrollBox?.scrollTo({ top: 0, behavior: "smooth" });
 		if (focus) enterEditMode();
 	}
 
@@ -2488,12 +2491,12 @@
 			const live = window.getSelection();
 			if (!live || live.isCollapsed || live.toString() === "") selMenu = null;
 		});
-		// Two-finger swipe steps chats along the dominant axis (right or
-		// down = newer, left or up = older, no focus: the keyboard stays
-		// down); a two-finger double tap toggles the chats sidebar on
-		// Android; a double three-finger tap deletes the current chat.
-		// All start away from controls, drawers, and the modal, and the
-		// swipe's pinch veto (see twoFingerSwipeDir) keeps page zoom.
+		// Two-finger horizontal swipe steps chats (right = newer, left =
+		// older, no focus: the keyboard stays down); a two-finger double
+		// tap toggles the chats sidebar on Android; a double three-finger
+		// tap deletes the current chat. All start away from controls,
+		// drawers, and the modal, and the swipe's pinch veto (see
+		// twoFingerSwipeDir) keeps page zoom.
 		let twoTrack: { start: [FingerTrack, FingerTrack]; end: [FingerTrack, FingerTrack] } | null =
 			null;
 		let threeTrack: { x: number; y: number; moved: number; at: number } | null = null;
@@ -4295,7 +4298,7 @@
 					so the same modal teaches the touch equivalents. -->
 					<dl class="keys">
 						<div><dt>Chats list</dt><dd>Two-finger double-tap</dd></div>
-					<div><dt>Newer / older chat</dt><dd>Two fingers: right or down, left or up</dd></div>
+					<div><dt>Newer / older chat</dt><dd>Two-finger swipe right / left</dd></div>
 					<div><dt>Delete current chat</dt><dd>Double three-finger tap</dd></div>
 						<div><dt>Annotate</dt><dd>Select text and click the popup</dd></div>
 						<div><dt>Message buttons</dt><dd>Tap a message</dd></div>
