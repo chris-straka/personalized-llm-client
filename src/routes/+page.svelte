@@ -4297,16 +4297,16 @@
 						<div><dt>Chats list</dt><dd>Two-finger double-tap</dd></div>
 					<div><dt>Newer / older chat</dt><dd>Two-finger swipe right / left</dd></div>
 					<div><dt>Delete current chat</dt><dd>Double three-finger tap</dd></div>
-						<div><dt>Settings</dt><dd>Swipe right to left from anywhere to open, left to right to close</dd></div>
-						<div><dt>Send</dt><dd>The ↑ button or your keyboard's Enter</dd></div>
-						<div><dt>Select text</dt><dd>Touch and hold a word, then drag the handles</dd></div>
-						<div><dt>Annotate</dt><dd>The Annotate menu appears by the selection</dd></div>
-						<div><dt>Message buttons</dt><dd>Tap a message to show its buttons</dd></div>
-						<div><dt>Edit a message</dt><dd>Its pencil button, then resend</dd></div>
-						<div><dt>Fold a message</dt><dd>Swipe right on the message (again to unfold)</dd></div>
-						<div><dt>Speak text</dt><dd>Select it, then Read Aloud in the system menu</dd></div>
-						<div><dt>Reply language</dt><dd>The language menu in the prompt</dd></div>
-						<div><dt>Stop voice</dt><dd>Skip in the voice bar; menus fade or close on tap-away</dd></div>
+						<div><dt>Settings</dt><dd>Swipe right to left from anywhere</dd></div>
+						<div><dt>Send</dt><dd>↑ button or Enter</dd></div>
+						<div><dt>Select text</dt><dd>Touch and hold a word</dd></div>
+						<div><dt>Annotate</dt><dd>Select text and click the popup</dd></div>
+						<div><dt>Message buttons</dt><dd>Tap a message</dd></div>
+						<div><dt>Edit a message</dt><dd>Pencil button, then resend</dd></div>
+						<div><dt>Fold a message</dt><dd>Swipe right on it</dd></div>
+						<div><dt>Speak text</dt><dd>Select it, then Read Aloud</dd></div>
+						<div><dt>Reply language</dt><dd>Menu in the prompt</dd></div>
+						<div><dt>Stop voice</dt><dd>Skip in the voice bar</dd></div>
 					</dl>
 				{:else}
 				<dl class="keys">
