@@ -13,7 +13,7 @@
 		nativeVoices,
 		openVoiceSettings
 	} from "$lib/nativeTts";
-	import { hasQualityVoices, voicesForLang, autoVoiceForLang } from "$lib/voiceTiers";
+	import { hasQualityVoices, voicesForLang, allVoicesForLang, autoVoiceForLang } from "$lib/voiceTiers";
 	import type { NativeVoice } from "$lib/nativeTts";
 	import { onMount } from "svelte";
 
@@ -88,6 +88,8 @@
 	/** Picker options follow the Latin-script voice language field. */
 	const voiceLangTag = $derived(settings.voiceLang?.trim() || "en-US");
 	const voiceOptions = $derived(voicesForLang(installedVoices, voiceLangTag));
+	/** Android picker: no quality gate — Android has no premium/enhanced tiers. */
+	const androidVoiceOptions = $derived(allVoicesForLang(installedVoices, voiceLangTag));
 	/** The voice Auto would use next for the tag above (label only —
 	the bridge stays authoritative at speak time). */
 	const autoVoice = $derived(autoVoiceForLang(installedVoices, voiceLangTag, settings.nativeVoiceId));
@@ -97,7 +99,7 @@
 	// A picked voice never reads another language: when the tag moves on
 	// from the saved pick, fall back to Auto instead of a blank field.
 	$effect(() => {
-		const options = voiceOptions;
+		const options = androidUI ? androidVoiceOptions : voiceOptions;
 		if (settings.nativeVoiceId && !options.some((v) => v.id === settings.nativeVoiceId)) {
 			settings.nativeVoiceId = null;
 		}
@@ -501,12 +503,17 @@
 				<input type="checkbox" bind:checked={settings.hideButtons} />
 				Hide message buttons until tapped
 			</label>
+			<label class="check">
+				<input type="checkbox" bind:checked={settings.ownBubble} />
+				Enable background on my messages
+			</label>
 		</fieldset>
+	{:else}
+		<label class="check">
+			<input type="checkbox" bind:checked={settings.ownBubble} />
+			Enable background on my messages
+		</label>
 	{/if}
-	<label class="check">
-		<input type="checkbox" bind:checked={settings.ownBubble} />
-		Enable background on my messages
-	</label>
 	<!-- One row for both hover toggles: the label names the behavior once,
 	each box names whose buttons it covers. Touch has no hover, so the
 	phone hides the whole row. -->
@@ -536,6 +543,39 @@
 					onclick={() => (settings.voiceEngine = "native")}>System voices</button
 				>
 			</div>
+			{#if voiceLoadError}
+				<p class="note" role="alert">Couldn't load the voice list: {voiceLoadError}</p>
+			{/if}
+			{#if !voiceLoadError}
+				{#if androidVoiceOptions.length > 0}
+					<div class="voice-pick">
+						<span class="voice-pick-label" id="system-voice-label-android"
+							>System voice ({voiceLangTag})</span
+						>
+						<select
+							value={settings.nativeVoiceId ?? ""}
+							aria-labelledby="system-voice-label-android"
+							onchange={(e) => {
+								settings.nativeVoiceId = e.currentTarget.value || null;
+							}}
+						>
+							<option value="">{autoLabel}</option>
+							{#each androidVoiceOptions as option (option.id)}
+								<option value={option.id}>
+									{option.name}{option.lang.toLowerCase() === voiceLangTag.toLowerCase()
+										? ""
+										: ` · ${option.lang}`}
+								</option>
+							{/each}
+						</select>
+					</div>
+				{:else if voicesLoaded}
+					<p class="note">
+						No voices installed for {voiceLangTag} — Auto uses your
+						system default.
+					</p>
+				{/if}
+			{/if}
 		</fieldset>
 	{/if}
 	{#if nativeVoice && !androidUI}

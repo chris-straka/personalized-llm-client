@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { hasQualityVoices, tierLabel, voicesForLang, autoVoiceForLang } from "./voiceTiers";
+import {
+	hasQualityVoices,
+	tierLabel,
+	voicesForLang,
+	allVoicesForLang,
+	autoVoiceForLang
+} from "./voiceTiers";
 import type { NativeVoice } from "./nativeTts";
 
 const voice = (id: string, lang: string, quality: number, name?: string): NativeVoice => ({
@@ -85,6 +91,27 @@ describe("voicesForLang", () => {
 			lang: "en-GB",
 			tier: "premium"
 		});
+	});
+});
+
+describe("allVoicesForLang", () => {
+	const voices = [
+		voice("com.google.android.tts.en-GB", "en-GB", 0, "English (UK)"),
+		voice("com.google.android.tts.en-US", "en-US", 0, "English (US)"),
+		voice("com.google.android.tts.de-DE", "de-DE", 0, "Deutsch"),
+		voice("com.apple.voice.premium.en-GB.Malcolm", "en-GB", 3, "Jamie")
+	];
+
+	it("lists every tier, exact locale first, then the same language", () => {
+		expect(allVoicesForLang(voices, "en-US").map((v) => v.name)).toEqual([
+			"English (US)",
+			"English (UK)",
+			"Jamie"
+		]);
+	});
+
+	it("is empty when the language has no voices at all", () => {
+		expect(allVoicesForLang(voices, "fr-FR")).toEqual([]);
 	});
 });
 

@@ -75,12 +75,25 @@ function byName(a: VoiceOption, b: VoiceOption): number {
  * auto-pick at speak time. Pure and unit-tested.
  */
 export function voicesForLang(voices: NativeVoice[], lang: string): VoiceOption[] {
+	return groupByLang(voices, lang, 2);
+}
+
+/**
+ * Installed voices for the Android settings picker: same exact-locale-
+ * then-language grouping, but no quality gate — Android has no
+ * premium/enhanced tiers, so the gate would hide every voice.
+ */
+export function allVoicesForLang(voices: NativeVoice[], lang: string): VoiceOption[] {
+	return groupByLang(voices, lang, 0);
+}
+
+function groupByLang(voices: NativeVoice[], lang: string, minQuality: number): VoiceOption[] {
 	const exactTag = lang.trim().toLowerCase();
 	const primary = exactTag.split(/[-_]/)[0] ?? "";
 	const exact: VoiceOption[] = [];
 	const related: VoiceOption[] = [];
 	for (const voice of voices) {
-		if (voice.quality < 2) continue;
+		if (voice.quality < minQuality) continue;
 		const tag = voice.lang.toLowerCase();
 		if (tag === exactTag) exact.push(toOption(voice));
 		else if (tag.split(/[-_]/)[0] === primary) related.push(toOption(voice));
