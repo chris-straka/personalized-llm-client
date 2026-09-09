@@ -4297,7 +4297,7 @@
 						<div><dt>Chats list</dt><dd>Two-finger double-tap</dd></div>
 					<div><dt>Newer / older chat</dt><dd>Two-finger swipe right / left</dd></div>
 					<div><dt>Delete current chat</dt><dd>Double three-finger tap</dd></div>
-						<div><dt>Settings</dt><dd>Swipe left from the right edge to open (swipe right to close)</dd></div>
+						<div><dt>Settings</dt><dd>Swipe right to left from anywhere to open, left to right to close</dd></div>
 						<div><dt>Send</dt><dd>The ↑ button or your keyboard's Enter</dd></div>
 						<div><dt>Select text</dt><dd>Touch and hold a word, then drag the handles</dd></div>
 						<div><dt>Annotate</dt><dd>The Annotate menu appears by the selection</dd></div>
