@@ -1755,14 +1755,19 @@
 	async function doSend() {
 		if (!canSubmit) return;
 		if (editingMsgId) {
-			// In-place edit: rewrite the message, never a reply. A fresh
-			// reply stays an explicit act (rerun button or a new send). If
+			// Saving an edit rewrites the message in place and resends it:
+			// everything from the edited message on is answered fresh. If
 			// the edited message vanished mid-edit, fall through below and
 			// send the composer text as a fresh message instead.
 			const target = chat.messages.find((m) => m.id === editingMsgId);
 			if (target && target.role === "user") {
+				const index = chat.messages.indexOf(target);
 				saveMessageEdit();
-				scrollToBottom();
+				// A reply already streaming keeps its run: truncating under
+				// it would orphan the stream, so the resend waits for quiet
+				// (the save itself still lands).
+				if (!chatState.sending) rerunFrom(index);
+				else scrollToBottom();
 				return;
 			}
 			editingMsgId = null;
@@ -1871,16 +1876,16 @@
 	}
 
 	/** Composer placeholder while an own message is being edited. */
-	const EDIT_PLACEHOLDER = "Editing message — Enter saves, Esc cancels";
+	const EDIT_PLACEHOLDER = "Editing message — Enter saves + resends, Esc cancels";
 
 	/**
 	 * Pencil (or E) on an own message: pull its display text into the
-	 * composer for editing. Nothing is deleted and nothing resends: Enter
-	 * rewrites the message in place, Esc cancels, and a fresh reply stays
-	 * an explicit act (rerun button). The baked annotation block is
-	 * provider context, not composer text, so only the prose returns; its
-	 * refs come back as pending annotations so saving re-bakes the same
-	 * context. Attachments ride along too. No-op mid-send.
+	 * composer for editing. Enter rewrites the message in place and
+	 * resends it (later messages are replaced by the fresh reply); Esc
+	 * cancels. The baked annotation block is provider context, not
+	 * composer text, so only the prose returns; its refs come back as
+	 * pending annotations so saving re-bakes the same context.
+	 * Attachments ride along too. No-op mid-send.
 	 */
 	function editMessage(index: number) {
 		if (chatState.sending) return;
@@ -1916,8 +1921,8 @@
 
 	/**
 	 * Enter while editing: rewrite the edited message in place (text plus
-	 * re-baked annotations, attachments, folds) and stop — no provider
-	 * call, no reply.
+	 * re-baked annotations, attachments, folds). The caller resends from
+	 * it unless a reply is already streaming.
 	 */
 	function saveMessageEdit(): void {
 		const id = editingMsgId;

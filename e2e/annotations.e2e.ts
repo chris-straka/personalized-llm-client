@@ -357,8 +357,9 @@ test("sending clears pending annotations immediately", async ({ page }) => {
 	await expect(page.locator("article.user .ann-refs-pill")).toHaveText("1");
 });
 
-/** The pencil edits an own message in place: history stays, no reply. */
-test("pencil edits an own message in place", async ({ page }) => {
+/** The pencil edits an own message, then resends it: the message
+rewrites and the stale reply is replaced by a fresh one. */
+test("pencil edit saves and resends", async ({ page }) => {
 	await seedChat(page, [
 		{ role: "user", content: "helo world" },
 		{ role: "assistant", content: "hi" }
@@ -372,14 +373,16 @@ test("pencil edits an own message in place", async ({ page }) => {
 	await expect(page.locator("article.user")).toHaveCount(1);
 	await expect(page.locator("article.assistant")).toHaveCount(1);
 	await expect(page.locator(".cm-content")).toContainText("helo world");
-	// Fix the typo and save: the message rewrites, the reply stands.
+	// Fix the typo and save: the message rewrites, the stale reply is
+	// replaced by a fresh answer to the edit.
 	await page.locator(".cm-content").click();
 	await page.keyboard.press("Control+a");
 	await page.keyboard.type("hello world");
 	await page.keyboard.press("Enter");
 	await expect(page.locator("article.user .rendered")).toContainText("hello world");
 	await expect(page.locator("article.user")).toHaveCount(1);
-	await expect(page.locator("article.assistant .rendered")).toContainText("hi");
+	await expect(page.locator("article.assistant")).toHaveCount(1);
+	await expect(page.locator("article.assistant .rendered")).toContainText("Mock reply");
 });
 
 /** Hovering an own message and hitting E starts editing it. */
