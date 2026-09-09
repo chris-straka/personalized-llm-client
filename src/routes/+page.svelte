@@ -925,7 +925,8 @@
 		// wins and may share space with the OS bar.
 		let y: number;
 		if (androidUI) {
-			y = rect.bottom + 8;
+			// Well clear of the selection handles (~24px below text).
+			y = rect.bottom + 30;
 			if (y + 44 > window.innerHeight) y = Math.max(8, rect.top - 47);
 		} else {
 			y = rect.top - 47;
@@ -1018,7 +1019,7 @@
 		};
 		pendingAnn = pending;
 		clearSelection();
-		const width = 384;
+		const width = popWidth();
 		const x = Math.min(Math.max(8, selMenu.x), window.innerWidth - width - 8);
 		// The comment box sits a breath below the Annotate menu's
 		// anchor: sharing selMenu.y leaves it floating high above tall
@@ -1126,6 +1127,12 @@
 		};
 	}
 
+	/** Annotation popover width: the desktop card, clamped to fit narrow
+	phones — without the clamp x goes negative and it runs off-screen. */
+	function popWidth(): number {
+		return Math.min(384, window.innerWidth - 16);
+	}
+
 	/**
 	 * Badge click edits in place: the annotation popover opens at the
 	 * badge with the saved comment loaded. Cancel leaves it untouched,
@@ -1148,7 +1155,7 @@
 		settleAnnPop();
 		// Narrow phones are narrower than the desktop card: clamp first
 		// or x goes negative and the popover runs off-screen.
-		const width = Math.min(384, window.innerWidth - 16);
+		const width = popWidth();
 		const x = Math.min(Math.max(8, anchor.x - width / 2), window.innerWidth - width - 8);
 		const height = 240;
 		let y = anchor.y + 8;
