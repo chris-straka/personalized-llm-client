@@ -30,13 +30,13 @@ test("retry keeps previous articles mounted", async ({ page }) => {
 	await page.evaluate(() => {
 		document
 			.querySelectorAll("article")
-			.forEach((a, i) => ((a as unknown as { __mark?: number }).__mark = i));
+			.forEach((a, i) => (a.__mark = i));
 	});
 	await retry.click();
 	await expect(page.locator("article .rendered").first()).toBeVisible();
 	await page.waitForTimeout(1500);
 	const marks = await page.evaluate(() =>
-		[...document.querySelectorAll("article")].map((a) => (a as unknown as { __mark?: number }).__mark ?? "lost")
+		[...document.querySelectorAll("article")].map((a) => a.__mark ?? "lost")
 	);
 	expect(marks[0]).toBe(0);
 	expect(await page.locator("article .rendered").count()).toBeGreaterThan(0);

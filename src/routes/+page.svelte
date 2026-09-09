@@ -5094,6 +5094,9 @@
 			inset: 0;
 			z-index: 60;
 			border: 0;
+			/* Full-bleed square corners: without this the legacy
+			`nav button` pill radius turns the backdrop into an oval. */
+			border-radius: 0;
 			background: rgba(0, 0, 0, 0.32);
 			pointer-events: auto;
 		}

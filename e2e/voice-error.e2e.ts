@@ -50,8 +50,8 @@ test("background readback failure stays silent", async ({ page }) => {
 		// so a final absence proves nothing — only "never shown" does.
 		// Deferred past document readiness (init scripts can run before
 		// documentElement exists); the spec asserts the ready flag.
-		(window as unknown as { voiceToastSeen: number }).voiceToastSeen = 0;
-		(window as unknown as { voiceToastWatching: boolean }).voiceToastWatching = false;
+		window.voiceToastSeen = 0;
+		window.voiceToastWatching = false;
 		const watch = (): void => {
 			if (!document.documentElement) {
 				requestAnimationFrame(watch);
@@ -61,12 +61,12 @@ test("background readback failure stays silent", async ({ page }) => {
 				for (const m of mutations) {
 					for (const n of m.addedNodes) {
 						if (n instanceof Element && n.classList.contains("voice-error")) {
-							(window as unknown as { voiceToastSeen: number }).voiceToastSeen++;
+							window.voiceToastSeen++;
 						}
 					}
 				}
 			}).observe(document.documentElement, { childList: true, subtree: true });
-			(window as unknown as { voiceToastWatching: boolean }).voiceToastWatching = true;
+			window.voiceToastWatching = true;
 		};
 		watch();
 	});
@@ -76,7 +76,7 @@ test("background readback failure stays silent", async ({ page }) => {
 		.poll(
 			async () =>
 				page.evaluate(
-					() => (window as unknown as { voiceToastWatching: boolean }).voiceToastWatching === true
+					() => window.voiceToastWatching === true
 				),
 			{ timeout: 10_000 }
 		)
@@ -91,7 +91,7 @@ test("background readback failure stays silent", async ({ page }) => {
 	// Past the reply and any failure banner's full auto-expiry.
 	await page.waitForTimeout(12_000);
 	const seen = await page.evaluate(
-		() => (window as unknown as { voiceToastSeen: number }).voiceToastSeen ?? -1
+		() => window.voiceToastSeen ?? -1
 	);
 	expect(seen).toBe(0);
 });

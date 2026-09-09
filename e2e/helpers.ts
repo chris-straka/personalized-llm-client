@@ -1,5 +1,16 @@
 import type { Page } from "@playwright/test";
 
+/** Test-only window/element fields (replaces `as unknown` casts). */
+declare global {
+	interface Window {
+		voiceToastSeen: number;
+		voiceToastWatching: boolean;
+	}
+	interface Element {
+		__mark?: number;
+	}
+}
+
 export interface SeedMessage {
 	role: "user" | "assistant";
 	content: string;
