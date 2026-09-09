@@ -4421,6 +4421,13 @@
 			opacity: 1;
 			pointer-events: auto;
 		}
+		/* Thumb-sized new-chat button (44px target). */
+		aside .new {
+			width: 100%;
+			min-height: 2.75rem;
+			font-size: 1.15rem;
+			padding: 0.6rem;
+		}
 	}
 	aside button {
 		font: inherit;
