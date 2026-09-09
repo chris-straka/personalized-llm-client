@@ -610,6 +610,9 @@
 	 * closes itself after 3s. Tapping controls never toggles.
 	 */
 	let shownActionsId: string | null = $state(null);
+	/** The floating row flips above its message when the last rows have
+	no room below (scroll containers clip the overlay otherwise). */
+	let actionsAbove = $state(false);
 	let shownActionsTimer: ReturnType<typeof setTimeout> | null = null;
 	function toggleMessageActions(id: ChatMsgId, event: MouseEvent): void {
 		if (!settings.hideMessages && !(androidUI && settings.hideButtons)) return;
@@ -619,14 +622,21 @@
 		shownActionsTimer = null;
 		if (shownActionsId === id) {
 			shownActionsId = null;
+			actionsAbove = false;
 			return;
 		}
 		shownActionsId = id;
-		// The row's layout shift lands mid-frame with any keyboard or
-		// viewport churn the tap caused: settle a re-measure after paint
-		// (same settle the send paths use) so the composer can't strand
-		// at zero height, and the extra paint invalidates a stale tile
-		// the transition left behind on phone GPUs.
+		const el = event.currentTarget;
+		const boxRect = scrollBox?.getBoundingClientRect();
+		actionsAbove =
+			el instanceof HTMLElement &&
+			boxRect !== undefined &&
+			el.getBoundingClientRect().bottom + 64 > boxRect.bottom;
+		// The tap can land mid-frame with keyboard or viewport churn:
+		// settle a re-measure after paint (same settle the send paths
+		// use) so the composer can't strand at zero height, and the
+		// extra paint invalidates a stale tile the fade left behind
+		// on phone GPUs.
 		requestAnimationFrame(() => requestAnimationFrame(() => editor?.remeasure()));
 		shownActionsTimer = setTimeout(() => {
 			if (shownActionsId === id) shownActionsId = null;
@@ -3696,6 +3706,7 @@
 					class:speaking={speakingId === msg.id}
 					class:speaking-sel={speakingSelection === msg.id}
 					data-actions-open={shownActionsId === msg.id}
+					data-actions-above={actionsAbove || null}
 					onclick={(e) => {
 						if (e.altKey) toggleFold(msg.id);
 						toggleMessageActions(msg.id, e);
@@ -4904,6 +4915,13 @@
 	}
 	.app[data-android] main {
 		padding-bottom: env(safe-area-inset-bottom, 0px);
+	}
+	/* The chat header is an empty strip in this view, so its own
+	safe-area padding guards nothing: the message list carries the
+	top inset instead, or the first message slides up under the
+	status clock (viewport-fit=cover paints right under it). */
+	.app[data-android] .messages {
+		padding-top: calc(1rem + env(safe-area-inset-top, 0px));
 	}
 	/* Full-width settings sheet on phones: no sliver to tap, no
 	weird one-tap-close strip. left+right with auto width fills
@@ -6286,28 +6304,48 @@
 	.app[data-android] .actions {
 		margin-top: 0.2rem;
 	}
-	/* Closed rows collapse instead of reserving an invisible ~23px per
-	message (the dead space between messages and the stray scroll
-	height). Open settles in one quick rise; will-change keeps the
-	fade shimmer-free, same as the hover rows. Invisible rows must
-	not eat taps: reveals tap the article, not the row. */
+	/* Hide-buttons rows float: never in flow, so closed rows reserve
+	no space and open rows push nothing — the row fades over the
+	content below for its 3s instead. will-change keeps the fade
+	shimmer-free, same as the hover rows. Invisible rows must not
+	eat taps: reveals tap the article, not the row. The gap comes
+	from the overlay's own offset, so toggling the bubble never
+	moves the text. */
+	.app[data-android] main.hide-buttons article {
+		position: relative;
+	}
 	.app[data-android] main.hide-buttons article .actions {
+		position: absolute;
+		top: 100%;
+		left: 0;
+		right: 0;
+		z-index: 5;
+		margin-top: 0.15rem;
+		padding: 0.2rem 0.3rem;
+		background: #fff;
+		border: 1px solid #e5e5ea;
+		border-radius: 12px;
+		box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
 		opacity: 0;
 		pointer-events: none;
 		will-change: opacity;
-		max-height: 0;
-		margin-top: 0;
-		overflow: hidden;
-		transition:
-			opacity 0.18s ease,
-			max-height 0.18s ease,
-			margin-top 0.18s ease;
+		transition: opacity 0.18s ease;
 	}
 	.app[data-android] main.hide-buttons article[data-actions-open="true"] .actions {
 		opacity: 1;
 		pointer-events: auto;
-		max-height: 3rem;
 		overflow-x: auto;
+	}
+	/* Last rows have no room below (scroll containers clip the
+	overlay): the row flips above the message instead. */
+	.app[data-android]
+		main.hide-buttons
+		article[data-actions-open="true"][data-actions-above="true"]
+		.actions {
+		top: auto;
+		bottom: 100%;
+		margin-top: 0;
+		margin-bottom: 0.15rem;
 	}
 	/* No bubble, no bubble padding: text keeps its horizontal place
 	(only the background disappears), and the tighter vertical rhythm
@@ -6811,6 +6849,10 @@
 	}
 	:global(html[data-theme="dark"]) .settings-panel {
 		background: #17171a;
+		border-color: #38383a;
+	}
+	:global(html[data-theme="dark"]) .app[data-android] main.hide-buttons article .actions {
+		background: #1c1c1e;
 		border-color: #38383a;
 	}
 	:global(html[data-theme="dark"]) .modal {
