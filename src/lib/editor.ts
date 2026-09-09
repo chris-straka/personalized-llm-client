@@ -25,6 +25,12 @@ export type SubmitKind = "send" | "stage";
 export const PROMPT_PLACEHOLDER = "ctrl+g message scroll";
 /** Composer hint while scrolled out hopping messages. */
 export const SCROLL_PLACEHOLDER = "ctrl+g to hop back in";
+/**
+ * Touch variants: no Ctrl key to name, and shortcuts keep working (a
+ * keyboard may be attached) — only the hint text changes.
+ */
+export const ANDROID_PROMPT_PLACEHOLDER = "Type a message";
+export const ANDROID_SCROLL_PLACEHOLDER = "Tap to write again";
 
 export interface PromptEditor {
 	readonly view: EditorView;

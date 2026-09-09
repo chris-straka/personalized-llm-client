@@ -1,0 +1,9 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Theme.ccez_studio" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- Android 12+ launch splash: launcher icon on the icon tile
+        tone, so cold start doesn't flash white. Framework attrs only
+        (no splashscreen dep). Re-apply after `tauri android init`. -->
+        <item name="android:windowSplashScreenBackground">#FF28282F</item>
+    </style>
+</resources>

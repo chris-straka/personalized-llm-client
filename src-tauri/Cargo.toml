@@ -24,6 +24,10 @@ tauri-plugin-updater = "2"
 keyring = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Default TLS crypto provider (ring). Tauri core's mobile-dev protocol
+# handler builds a reqwest client that panics without one — see
+# install_tls_provider in lib.rs.
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
 
 # macOS-only native TTS (AVSpeechSynthesizer). Pure-Rust bindings via
 # objc2 — no Objective-C is written anywhere in this project.

@@ -66,8 +66,20 @@ fn keychain_delete(account: String) -> Result<(), String> {
     }
 }
 
+/// Install a default TLS crypto provider (ring). Tauri core's mobile-dev
+/// protocol handler builds a reqwest client to proxy the dev server and
+/// `build().unwrap()`s it; reqwest 0.13 panics without a provider even for
+/// plain HTTP, and core only installs one on its HTTPS path. Without this
+/// the app SIGABRTs ~2s after launch on Android dev builds.
+fn install_tls_provider() {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    install_tls_provider();
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
