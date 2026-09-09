@@ -281,6 +281,17 @@ test("rerun tooltip is just Rerun", async ({ page }) => {
 	expect(await rerun.getAttribute("aria-label")).toBe("Rerun");
 });
 
+test("drawers slide on transform, never pop", async ({ page }) => {
+	await seedEmpty(page);
+	const sheet = await page.locator("aside:has(button.new)").evaluate((el) => getComputedStyle(el).transition);
+	expect(sheet).toContain("transform");
+	await swipeX(page, 408, 268);
+	const panel = page.locator(".settings-panel");
+	await expect(panel).not.toHaveClass(/closed/);
+	const transition = await panel.evaluate((el) => getComputedStyle(el).transition);
+	expect(transition).toContain("transform");
+});
+
 test("settings sheet spans the phone and offers touch toggles", async ({ page }) => {
 	await seedEmpty(page);
 	await swipeX(page, 408, 268);

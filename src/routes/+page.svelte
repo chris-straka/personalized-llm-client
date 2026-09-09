@@ -35,6 +35,7 @@
 		activeThinkingSupport,
 		activeThinkingId,
 		resolveTheme,
+		systemLocale,
 		type AppSettings
 	} from "$lib/settings";
 	import { cycleThinkingId } from "$lib/providers/thinking";
@@ -327,18 +328,21 @@
 		messageId: ChatMsgId;
 	} | null>(null);
 	/**
-	 * An unanswered selection menu never lingers: it fades out two and
-	 * a half seconds after opening (clicking away still dismisses
-	 * instantly).
+	 * An unanswered selection menu never lingers (clicking away still
+	 * dismisses instantly). Touch holds it 1.8x longer: a thumb takes
+	 * longer to reach than a cursor.
 	 */
 	let selMenuTimer: ReturnType<typeof setTimeout> | null = null;
 	$effect(() => {
 		if (!selMenu) return;
 		if (selMenuTimer) clearTimeout(selMenuTimer);
-		selMenuTimer = setTimeout(() => {
-			selMenuTimer = null;
-			selMenu = null;
-		}, 2500);
+		selMenuTimer = setTimeout(
+			() => {
+				selMenuTimer = null;
+				selMenu = null;
+			},
+			androidUI ? 4500 : 2500
+		);
 		return () => {
 			if (selMenuTimer) {
 				clearTimeout(selMenuTimer);
@@ -2198,6 +2202,19 @@
 					persistSettings();
 				}
 			});
+		}
+		// A pill-owned voice must not leak past its chat: when the
+		// launch chat carries no reply pill and nobody pinned the
+		// field, the voice falls back to the system default — new
+		// chats start in English, pill chats reinstall their own.
+		const launchChat =
+			chatState.chats.find((c) => c.id === chatState.activeChatId) ?? null;
+		if (!settings.voiceLangPinned && !launchChat?.replyLang) {
+			const fallback = systemLocale();
+			if (settings.voiceLang !== fallback) {
+				settings.voiceLang = fallback;
+				persistSettings();
+			}
 		}
 		// Edge swipes toggle the sidebars on touch screens (Android
 		// milestone): rightward from the left edge for chats, leftward
@@ -4547,6 +4564,8 @@
 		padding: 0.6rem;
 		min-width: 2.75rem;
 		min-height: 2.75rem;
+		/* The box grew already; the glyph itself stays text-sized. */
+		font-size: 1.15rem;
 	}
 	/* Phones thumb-reach the chat list: it slides up from the bottom
 	instead of in from the left. Desktop keeps the left drawer; the
@@ -4764,37 +4783,42 @@
 		background: rgba(142, 142, 147, 0.55);
 		transition: background-color 0.12s ease;
 	}
-	/* The two sidebars collapse on width transitions of their own, which
-	the shared fade shorthand above would replace: restate the full lists
-	here so the scrollbar fade joins the collapse instead of killing it. */
+	/* The two drawers slide on transform (plus their collapse widths),
+	which the shared fade shorthand above would replace: restate the
+	full lists here so the scrollbar fade joins instead of killing the
+	slide. Every list keeps transform, or closes read as a fade. */
 	aside[data-fade-scroll] {
 		transition:
+			transform 0.22s ease,
 			width 0.22s ease,
-			opacity 0.18s ease,
+			opacity 0.22s ease,
 			padding 0.22s ease,
 			border-width 0.22s ease,
 			scrollbar-color 0.6s ease;
 	}
 	.settings-panel[data-fade-scroll] {
 		transition:
+			transform 0.22s ease,
 			width 0.22s ease,
-			opacity 0.12s ease,
+			opacity 0.22s ease,
 			padding 0.22s ease,
 			border-color 0.22s ease,
 			scrollbar-color 0.6s ease;
 	}
 	aside[data-fade-scroll]:global(.scrolling) {
 		transition:
+			transform 0.22s ease,
 			width 0.22s ease,
-			opacity 0.18s ease,
+			opacity 0.22s ease,
 			padding 0.22s ease,
 			border-width 0.22s ease,
 			scrollbar-color 0.12s ease;
 	}
 	.settings-panel[data-fade-scroll]:global(.scrolling) {
 		transition:
+			transform 0.22s ease,
 			width 0.22s ease,
-			opacity 0.12s ease,
+			opacity 0.22s ease,
 			padding 0.22s ease,
 			border-color 0.22s ease,
 			scrollbar-color 0.12s ease;
@@ -5235,6 +5259,10 @@
 		border-radius: 10px;
 		background: #fff;
 		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+		/* The menu is chrome, not text: dragging across it must not
+		start a selection of its own label. */
+		user-select: none;
+		-webkit-user-select: none;
 	}
 	.sel-menu button {
 		font-size: 0.8rem;
