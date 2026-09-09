@@ -782,27 +782,40 @@
 		border-top: 1px solid #e5e5ea;
 		padding: 1.1rem 0;
 	}
-	/* Touch gestures and Updates share one row instead of stacking;
-	wrap keeps narrow panels readable. */
+	/* Touch gestures and Updates form a 2x2 grid: headings share the
+	top row, buttons share the row beneath. Sections go display:contents
+	so their children place directly on the grid. */
 	.keys-updates {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0 1.5rem;
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0.6rem 1.5rem;
+		align-items: center;
+		border-top: 1px solid #e5e5ea;
+		padding: 1.1rem 0;
 	}
 	.keys-updates > section {
-		flex: 1 1 11rem;
-		/* Heading and button share one line inside each half. */
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 0.2rem 0.8rem;
+		display: contents;
+	}
+	.keys-updates > section:first-of-type > h2 {
+		grid-area: 1 / 1;
+	}
+	.keys-updates > section:first-of-type > button {
+		grid-area: 2 / 1;
+		justify-self: start;
+	}
+	.keys-updates > section:last-of-type > h2 {
+		grid-area: 1 / 2;
+	}
+	.keys-updates > section:last-of-type > button {
+		grid-area: 2 / 2;
+		justify-self: start;
 	}
 	.keys-updates h2 {
 		margin: 0;
 	}
 	.keys-updates .result {
-		flex-basis: 100%;
-		margin: 0.3rem 0 0;
+		grid-area: 3 / 2;
+		margin: 0;
 	}
 	h2 {
 		font-size: 0.95rem;
