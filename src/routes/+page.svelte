@@ -609,6 +609,12 @@
 			return;
 		}
 		shownActionsId = id;
+		// The row's layout shift lands mid-frame with any keyboard or
+		// viewport churn the tap caused: settle a re-measure after paint
+		// (same settle the send paths use) so the composer can't strand
+		// at zero height, and the extra paint invalidates a stale tile
+		// the transition left behind on phone GPUs.
+		requestAnimationFrame(() => requestAnimationFrame(() => editor?.remeasure()));
 		shownActionsTimer = setTimeout(() => {
 			if (shownActionsId === id) shownActionsId = null;
 			shownActionsTimer = null;
