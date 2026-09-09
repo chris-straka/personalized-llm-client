@@ -279,17 +279,22 @@ describe("theme", () => {
 });
 
 describe("touch toggles", () => {
-	it("default to shown messages and speaking selections", () => {
+	it("default to shown messages, hidden buttons, speaking selections", () => {
 		const s = blankSettings();
 		expect(s.hideMessages).toBe(false);
+		expect(s.hideButtons).toBe(true);
 		expect(s.autoSpeakSelection).toBe(true);
 	});
 	it("heals non-boolean saved values", () => {
 		const store = memoryStore;
 		const s = blankSettings();
-		saveSettings({ ...s, hideMessages: "yes" as never, autoSpeakSelection: 0 as never }, store);
+		saveSettings(
+			{ ...s, hideMessages: "yes" as never, hideButtons: 0 as never, autoSpeakSelection: 0 as never },
+			store
+		);
 		const healed = loadSettings(store);
 		expect(healed.hideMessages).toBe(false);
+		expect(healed.hideButtons).toBe(true);
 		expect(healed.autoSpeakSelection).toBe(true);
 	});
 });

@@ -461,3 +461,29 @@ test("composer holds one line after the reply lands", async ({ page }) => {
 	});
 	expect(after).toBeGreaterThan(30);
 });
+
+/** Buttons hide by default on phones: tap reveals one row, bodies stay
+visible throughout (only the text-hiding opt-in hides those), and the
+row drops on its own after ~3s. */
+test("message buttons hide until tapped", async ({ page }) => {
+	await seedTwoChats(page);
+	const row = page.locator("article.assistant .actions").first();
+	const body = page.locator("article.assistant .rendered").first();
+	await expect(row).toHaveCSS("opacity", "0");
+	await expect(body).toBeVisible();
+	// Tapping the message (not a control) opens its row...
+	await body.click();
+	await expect(row).toHaveCSS("opacity", "1");
+	// ...and it closes itself after ~3s.
+	await expect(row).toHaveCSS("opacity", "0", { timeout: 5000 });
+});
+
+/** The buttons checkbox ships checked: hiding rows is the default,
+unchecking is the opt-out. */
+test("buttons checkbox is checked by default", async ({ page }) => {
+	await seedEmpty(page);
+	await swipeX(page, 408, 268);
+	await page.locator(".settings-panel").waitFor();
+	const box = page.locator('label.check:has-text("Hide message buttons until tapped") input');
+	await expect(box).toBeChecked();
+});

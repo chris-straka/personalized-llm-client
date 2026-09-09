@@ -680,6 +680,10 @@
 				<input type="checkbox" bind:checked={settings.hideMessages} />
 				Hide message text until tapped
 			</label>
+			<label class="check">
+				<input type="checkbox" bind:checked={settings.hideButtons} />
+				Hide message buttons until tapped
+			</label>
 		</fieldset>
 	{/if}
 </section>

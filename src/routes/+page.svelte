@@ -591,7 +591,7 @@
 	let shownActionsId: string | null = $state(null);
 	let shownActionsTimer: ReturnType<typeof setTimeout> | null = null;
 	function toggleMessageActions(id: ChatMsgId, event: MouseEvent): void {
-		if (!settings.hideMessages) return;
+		if (!settings.hideMessages && !(androidUI && settings.hideButtons)) return;
 		const target = event.target as HTMLElement | null;
 		if (target?.closest("button, a, input, textarea, select, summary")) return;
 		if (shownActionsTimer) clearTimeout(shownActionsTimer);
@@ -3349,6 +3349,7 @@
 	<main
 		class:empty={viewChat.messages.length === 0}
 		class:hide-messages={settings.hideMessages}
+		class:hide-buttons={settings.hideButtons}
 		class:land={landTick}
 		class:plain-user={!settings.ownBubble}
 		class:hover-user={settings.hoverUserActions}
@@ -5810,6 +5811,16 @@
 		display: block;
 	}
 	main.hide-messages article[data-actions-open="true"] .actions {
+		opacity: 1;
+	}
+	/* Touch default: action rows hide until their message is tapped open
+	(the open row shows for 3s). Bodies always show — only hideMessages
+	hides those. Android-scoped, so desktop keeps its hover rhythm;
+	later than the hover rules and outranking them, so it wins ties. */
+	.app[data-android] main.hide-buttons article .actions {
+		opacity: 0;
+	}
+	.app[data-android] main.hide-buttons article[data-actions-open="true"] .actions {
 		opacity: 1;
 	}
 	/* Own messages pack to the right edge: block, text column, and row. */

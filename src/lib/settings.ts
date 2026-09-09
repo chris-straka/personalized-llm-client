@@ -104,6 +104,12 @@ export interface AppSettings {
 	 * message for 3s). The checkbox lives in Appearance on phones.
 	 */
 	hideMessages: boolean;
+	/**
+	 * Touch only: hide message action rows until tapped (tap reveals one
+	 * row for 3s). On by default — a row on every message is redundant
+	 * chrome on a phone. The checkbox lives in Messages on phones.
+	 */
+	hideButtons: boolean;
 	/** Touch only: read a fresh text selection aloud on release. */
 	autoSpeakSelection: boolean;
 }
@@ -207,6 +213,7 @@ export function defaultSettings(): AppSettings {
 		voiceLangPinned: false,
 		theme: "system",
 		hideMessages: false,
+		hideButtons: true,
 		autoSpeakSelection: true
 	};
 }
@@ -282,6 +289,7 @@ export function loadSettings(store?: KeyValueStore): AppSettings {
 		}
 		// Touch-only toggles postdate older saves the same way.
 		if (typeof merged.hideMessages !== "boolean") merged.hideMessages = false;
+		if (typeof merged.hideButtons !== "boolean") merged.hideButtons = true;
 		if (typeof merged.autoSpeakSelection !== "boolean") merged.autoSpeakSelection = true;
 		// Retire the old "Be brief, no summaries." default: profiles that
 		// never customized it inherit the new (empty) default instead.
