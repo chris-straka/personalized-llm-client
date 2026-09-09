@@ -4299,14 +4299,10 @@
 					<div><dt>Delete current chat</dt><dd>Double three-finger tap</dd></div>
 						<div><dt>Settings</dt><dd>Swipe right to left from anywhere</dd></div>
 						<div><dt>Send</dt><dd>↑ button or Enter</dd></div>
-						<div><dt>Select text</dt><dd>Touch and hold a word</dd></div>
 						<div><dt>Annotate</dt><dd>Select text and click the popup</dd></div>
 						<div><dt>Message buttons</dt><dd>Tap a message</dd></div>
 						<div><dt>Edit a message</dt><dd>Pencil button, then resend</dd></div>
 						<div><dt>Fold a message</dt><dd>Swipe right on it</dd></div>
-						<div><dt>Speak text</dt><dd>Select it, then Read Aloud</dd></div>
-						<div><dt>Reply language</dt><dd>Menu in the prompt</dd></div>
-						<div><dt>Stop voice</dt><dd>Skip in the voice bar</dd></div>
 					</dl>
 				{:else}
 				<dl class="keys">
