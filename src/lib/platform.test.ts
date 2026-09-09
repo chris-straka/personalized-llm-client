@@ -110,12 +110,15 @@ describe("twoFingerSwipeDir", () => {
 			{ id: 0, x, y },
 			{ id: 1, x: x + 40, y }
 		] as [{ id: number; x: number; y: number }, { id: number; x: number; y: number }]);
-	it("steps newer on swipe right, older on swipe left", () => {
+	it("steps newer on swipe right or down, older on left or up", () => {
 		expect(twoFingerSwipeDir(grip(100, 600), grip(300, 600))).toBe(1);
 		expect(twoFingerSwipeDir(grip(300, 600), grip(100, 600))).toBe(-1);
+		expect(twoFingerSwipeDir(grip(100, 400), grip(100, 600))).toBe(1);
+		expect(twoFingerSwipeDir(grip(100, 600), grip(100, 400))).toBe(-1);
 	});
 	it("rejects short glides, splits, diagonals, and pinches", () => {
 		expect(twoFingerSwipeDir(grip(100, 600), grip(140, 600))).toBeNull(); // too short
+		expect(twoFingerSwipeDir(grip(100, 600), grip(100, 640))).toBeNull(); // too short
 		const split = grip(100, 600);
 		const splitEnd = grip(300, 600);
 		splitEnd[1] = { ...splitEnd[1], x: 60 };

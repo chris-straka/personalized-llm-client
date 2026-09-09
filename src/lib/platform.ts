@@ -32,31 +32,42 @@ export interface FingerTrack {
 }
 
 /**
- * Two-finger horizontal chat step: both fingers glide mostly horizontally
- * in the same direction. Pinches change finger spread instead of gliding,
- * so a spread change vetoes the step and page zoom keeps working. Swipe
- * right steps newer (+1), swipe left steps older (-1).
+ * Two-finger chat step: both fingers glide together along whichever axis
+ * dominates. Pinches change finger spread instead of gliding, so a spread
+ * change vetoes the step and page zoom keeps working. Right/down steps
+ * newer (+1), left/up steps older (-1). One finger still scrolls, so the
+ * spare second finger owns navigation.
  */
 export function twoFingerSwipeDir(
 	start: [FingerTrack, FingerTrack],
 	end: [FingerTrack, FingerTrack],
 	minDistance = 96
 ): 1 | -1 | null {
-	const dx0 = end[0].x - start[0].x;
-	const dx1 = end[1].x - start[1].x;
-	if (dx0 === 0 || Math.sign(dx0) !== Math.sign(dx1)) return null;
-	const dx = (dx0 + dx1) / 2;
-	if (Math.abs(dx) < minDistance) return null;
-	for (let i = 0; i < 2; i++) {
+	const delta = (i: number, axis: "x" | "y"): number | null => {
 		const s = start[i];
 		const e = end[i];
 		if (!s || !e) return null;
-		if (Math.abs(e.y - s.y) > Math.abs(dx) / 2) return null;
-	}
+		return e[axis] - s[axis];
+	};
+	const dx0 = delta(0, "x");
+	const dx1 = delta(1, "x");
+	const dy0 = delta(0, "y");
+	const dy1 = delta(1, "y");
+	if (dx0 === null || dx1 === null || dy0 === null || dy1 === null) return null;
+	// Dominant axis wins; both fingers must agree on its direction.
+	const horizontal = Math.abs(dx0) + Math.abs(dx1) >= Math.abs(dy0) + Math.abs(dy1);
+	const d0 = horizontal ? dx0 : dy0;
+	const d1 = horizontal ? dx1 : dy1;
+	const c0 = horizontal ? dy0 : dx0;
+	const c1 = horizontal ? dy1 : dx1;
+	if (d0 === 0 || Math.sign(d0) !== Math.sign(d1)) return null;
+	const d = (d0 + d1) / 2;
+	if (Math.abs(d) < minDistance) return null;
+	if (Math.abs(c0) > Math.abs(d) / 2 || Math.abs(c1) > Math.abs(d) / 2) return null;
 	const spread0 = Math.hypot(start[0].x - start[1].x, start[0].y - start[1].y);
 	const spread1 = Math.hypot(end[0].x - end[1].x, end[0].y - end[1].y);
 	if (Math.abs(spread1 - spread0) > 24) return null;
-	return dx > 0 ? 1 : -1;
+	return d > 0 ? 1 : -1;
 }
 
 /**
