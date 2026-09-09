@@ -6,6 +6,11 @@ composer region. No DOM behind it (proven on-device). Open since the
 hide-buttons feature shipped; survives one mitigation attempt.
 
 ## Status
+- 2026-09-09: NOT reproducible on the physical phone (SM-S921W) — the
+  reporter cannot trigger it there despite repeated tries, new chats
+  included. Ghost is emulator-only (software GL tiles), consistent with
+  the flipped-tile evidence. Case closed pending any phone repro; the
+  Android textarea composer stays as the safer path regardless.
 OPEN. Root cause unconfirmed. Leading theory: keyboard-hide viewport resize
 + row-open layout shift strand a stale region in the root layer tile grid;
 nothing repaints the viewport bottom in a short chat, so it sticks until the
@@ -64,6 +69,14 @@ conditionally on tap state.
    tapping a message flashes green ONLY on the tapped message; the ghost
    region at the bottom NEVER flashes. Verdict: invalidation gap — our
    code never asks that spot to repaint. Fixable on our side.)
+- 2026-09-09: emulator screenshot shows the ghost TEXT rendered UPSIDE
+  DOWN ("What would you like to try out today?" flipped 180°) while the
+  ghost buttons below it are upright. Grep proves our code has no flip
+  transform (only a -90° icon rotation). A half-flipped fragment is not
+  producible by DOM/CSS — it is a misoriented compositor tile, which also
+  explains dead buttons + no green flash. Stuck-picture theory confirmed;
+  remaining question is what triggers the bad tile (row fade + smooth
+  scroll still prime suspects).
 7. Console, ghost up — manual invalidate, clears = automatable cure:
    `P('.prompt').style.opacity='0.999'` then back over two rAFs.
 8. Settings: turn the hide-buttons toggle OFF (rows always visible, no
