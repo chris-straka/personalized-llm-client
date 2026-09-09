@@ -2362,15 +2362,17 @@
 					if (candidate && candidate.identifier === start.id) ended = candidate;
 				}
 				if (!ended) return;
-				// Phone: a leftward stroke starting on a message folds it
-				// instead of opening settings. An active text selection
-				// wins — folding mid-select would eat the highlight.
+				// Phone: a rightward stroke starting on a message folds it
+				// (a rightward stroke elsewhere dismisses settings or does
+				// nothing — the fold only wins on a message). An active
+				// text selection wins — folding mid-select would eat the
+				// highlight.
 				const foldDx = ended.clientX - start.x;
 				const foldDy = ended.clientY - start.y;
 				if (
 					androidUI &&
 					start.msgId &&
-					foldDx <= -64 &&
+					foldDx >= 64 &&
 					Math.abs(foldDy) < Math.abs(foldDx) &&
 					window.getSelection()?.isCollapsed !== false
 				) {
@@ -4299,7 +4301,7 @@
 						<div><dt>Annotate</dt><dd>The Annotate menu appears by the selection</dd></div>
 						<div><dt>Message buttons</dt><dd>Tap a message to show its buttons</dd></div>
 						<div><dt>Edit a message</dt><dd>Its pencil button, then resend</dd></div>
-						<div><dt>Fold a message</dt><dd>Swipe left on the message (again to unfold)</dd></div>
+						<div><dt>Fold a message</dt><dd>Swipe right on the message (again to unfold)</dd></div>
 						<div><dt>Speak text</dt><dd>Select it, then Read Aloud in the system menu</dd></div>
 						<div><dt>Reply language</dt><dd>The language menu in the prompt</dd></div>
 						<div><dt>Stop voice</dt><dd>Skip in the voice bar; menus fade or close on tap-away</dd></div>
@@ -6081,6 +6083,21 @@
 		gap: 0.5rem;
 		margin-top: 0.35rem;
 		transition: opacity 0.18s ease;
+	}
+	@media (hover: none) {
+		/* Aid labels (show original) can outgrow the message: the row
+		scrolls sideways inside itself instead of spilling out and
+		dragging the whole chat along. Vertical drags still reach the
+		chat; the bar stays clean with no scrollbar of its own. */
+		.actions {
+			max-width: 100%;
+			overflow-x: auto;
+			overscroll-behavior-x: contain;
+			scrollbar-width: none;
+		}
+		.actions::-webkit-scrollbar {
+			display: none;
+		}
 	}
 	/* Hover-only actions, per side: the row fades in when the pointer is
 	over the message or the row itself (or keyboard focus lands inside
