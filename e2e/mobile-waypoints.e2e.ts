@@ -13,14 +13,16 @@ function fourTurns(): Array<{ role: "user" | "assistant"; content: string }> {
 test.beforeEach(async ({ page }) => {
 	await seedChat(page, fourTurns());
 	await page.goto("/");
-	await expect(page.locator(".wp-pill")).toBeVisible({ timeout: 60_000 });
+	await expect(page.locator(".wp-jump")).toBeVisible({ timeout: 60_000 });
 });
 
-test("pill replaces ticks, opens a bottom sheet", async ({ page }) => {
+test("jump icon replaces ticks, opens a bottom sheet", async ({ page }) => {
 	await expect(page.locator(".wp-btn")).toBeHidden();
-	await expect(page.locator(".wp-pill")).toHaveText("1 / 4");
+	const jump = page.locator(".wp-jump");
+	await expect(jump).toHaveAttribute("aria-expanded", "false");
 
-	await page.locator(".wp-pill").tap();
+	await jump.tap();
+	await expect(jump).toHaveAttribute("aria-expanded", "true");
 	const menu = page.locator(".wp-menu");
 	await expect(menu).toBeVisible();
 	await expect(page.locator(".wp-veil")).toBeVisible();
@@ -32,14 +34,14 @@ test("pill replaces ticks, opens a bottom sheet", async ({ page }) => {
 });
 
 test("sheet item jumps and closes", async ({ page }) => {
-	await page.locator(".wp-pill").tap();
+	await page.locator(".wp-jump").tap();
 	await page.locator('.wp-menu button[role="menuitem"]').last().tap();
 	await expect(page.locator(".wp-menu")).toBeHidden();
-	await expect(page.locator(".wp-pill")).toBeVisible();
+	await expect(page.locator(".wp-jump")).toBeVisible();
 });
 
 test("veil press dismisses the sheet", async ({ page }) => {
-	await page.locator(".wp-pill").tap();
+	await page.locator(".wp-jump").tap();
 	await expect(page.locator(".wp-menu")).toBeVisible();
 	await expect(page.locator(".wp-veil")).toBeVisible();
 	// The sheet covers the veil's center: press an uncovered point

@@ -3424,20 +3424,6 @@
 							<span class="wp-tick" aria-hidden="true"></span>
 						{/each}
 					</button>
-					<!-- Touch trigger: position pill in the thumb zone (the
-					tick strip is pointer-sized and lives on the wrong edge
-					for thumbs, so touch gets this instead). -->
-					<button
-						type="button"
-						class="wp-pill"
-						data-fade-scroll
-						aria-label="Jump to a message"
-						aria-haspopup="true"
-						aria-expanded={wpOpen}
-						onclick={() => (wpOpen = !wpOpen)}
-					>
-						{wpPos} / {points.length}
-					</button>
 					<div
 						class="wp-menu"
 						role="menu"
@@ -3828,6 +3814,21 @@
 			}}
 		>
 			<div class="prompt-tools">
+				{#if points.length > 3}
+					<!-- Touch jump-to-message trigger: an icon in the tools
+					cluster, styled like attach/mic (desktop keeps ticks). -->
+					<button
+						type="button"
+						class="wp-jump"
+						title="Jump to a message"
+						aria-label="Jump to a message"
+						aria-haspopup="true"
+						aria-expanded={wpOpen}
+						onclick={() => (wpOpen = !wpOpen)}
+					>
+						<ActionIcon kind="jump" />
+					</button>
+				{/if}
 				{#if annotations.length > 0}
 					<div class="ann-wrap" class:pinned={reviewOpen}>
 						<button
@@ -4579,10 +4580,11 @@
 		opacity: 0;
 		pointer-events: none;
 	}
-	/* Touch-only waypoint chrome: pill trigger, sheet backdrop, sheet
-	head, current-item mark. Display none on pointer devices, where the
-	hover ticks and floating card stay. Role dots ride both menus. */
-	.wp-pill,
+	/* Touch-only waypoint chrome: toolbar jump icon, sheet backdrop,
+	sheet head, current-item mark. Display none on pointer devices,
+	where the hover ticks and floating card stay. Role dots ride both
+	menus. */
+	.wp-jump,
 	.wp-veil,
 	.wp-sheet-head {
 		display: none;
@@ -5036,10 +5038,10 @@
 			scrollbar-color 0.12s ease;
 	}
 	/* Touch waypoint: the tick strip is pointer-sized and parked on the
-	wrong edge for thumbs, so touch gets a position pill in the thumb
-	zone (bottom-right, above the composer) opening a bottom sheet.
-	Desktop keeps its hover ticks and floating card untouched. Later
-	than the base waypoint rules, so equal-specificity ties win. */
+	wrong edge for thumbs, so touch gets a jump icon in the composer
+	tools opening a bottom sheet. Desktop keeps its hover ticks and
+	floating card untouched. Later than the base waypoint rules, so
+	equal-specificity ties win. */
 	@media (hover: none) {
 		.wp-btn {
 			display: none;
@@ -5066,25 +5068,21 @@
 			transform: none;
 			pointer-events: none;
 		}
-		.wp-pill {
+		/* Jump icon joins the tools cluster like attach/mic, with a
+		full-size touch target that keeps the cluster's footprint (the
+		negative margin offsets the extra padding). */
+		.wp-jump {
 			display: inline-flex;
 			align-items: center;
 			justify-content: center;
-			position: fixed;
-			right: 1rem;
-			bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px));
-			z-index: 61;
-			min-width: 3.5rem;
-			min-height: 2.75rem;
-			padding: 0.4rem 0.9rem;
+			line-height: 0;
+			color: #6e6e73;
 			border: 0;
-			border-radius: 999px;
-			background: #1c1c1e;
-			color: #f2f2f7;
-			font-size: 0.85rem;
-			font-variant-numeric: tabular-nums;
-			box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-			pointer-events: auto;
+			background: none;
+			cursor: pointer;
+			padding: 0.65rem;
+			margin: -0.45rem;
+			transition: color 0.18s ease;
 			user-select: none;
 			-webkit-user-select: none;
 		}
@@ -6259,6 +6257,7 @@
 	}
 	.attach-btn:hover,
 	.voice-float:hover,
+	.wp-jump:hover,
 	.mic-btn:hover {
 		color: #1c1c1e;
 	}
@@ -6482,10 +6481,6 @@
 	:global(html[data-theme="dark"]) .wp-menu button[aria-current="true"] {
 		background: #2c2c2e;
 	}
-	:global(html[data-theme="dark"]) .wp-pill {
-		background: #f2f2f7;
-		color: #1c1c1e;
-	}
 	:global(html[data-theme="dark"]) .wp-sheet-head {
 		color: #98989f;
 	}
@@ -6516,6 +6511,7 @@
 	}
 	:global(html[data-theme="dark"]) .attach-btn:hover,
 	:global(html[data-theme="dark"]) .voice-float:hover,
+	:global(html[data-theme="dark"]) .wp-jump:hover,
 	:global(html[data-theme="dark"]) .mic-btn:hover {
 		color: #f2f2f7;
 	}

@@ -29,6 +29,10 @@ test("trigger hides while the menu is up, returns after", async ({ page }) => {
 	await expect(menu).toHaveCSS("visibility", "hidden");
 });
 
+test("toolbar jump icon stays desktop-hidden", async ({ page }) => {
+	await expect(page.locator(".wp-jump")).toBeHidden();
+});
+
 test("pinned menu dismisses on outside press", async ({ page }) => {
 	const btn = page.locator(".wp-btn");
 	const menu = page.locator(".wp-menu");
