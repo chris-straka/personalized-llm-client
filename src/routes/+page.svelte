@@ -1524,7 +1524,7 @@
 		return speechAttemptable(messageSpeechLang(msg));
 	}
 
-	function startSpeech(id: string, text: string, lang: string | ((sentence: string) => string)): void {
+	function startSpeech(id: string, text: string, lang: string | ((sentence: string) => string), quiet = false): void {
 		stopSpeaking();
 		stopNative();
 		setVoiceError(null);
@@ -1542,27 +1542,28 @@
 			onError: (message) => {
 				if (useNative && !fellBack) {
 					// The bridge failed: say why, then read this utterance
-					// with web voices rather than leaving silence.
+					// with web voices rather than leaving silence (quiet
+					// background readbacks skip the notice, not the retry).
 					fellBack = true;
-					setVoiceError(`${friendlyNativeError(message)} Falling back to web voices.`);
+					if (!quiet) setVoiceError(`${friendlyNativeError(message)} Falling back to web voices.`);
 					const ok = speakWeb({
 						onEnd: resetVoice,
 						onError: (webMessage) => {
-							setVoiceError(webMessage);
+							if (!quiet) setVoiceError(webMessage);
 							resetVoice();
 						}
 					});
 					if (!ok) resetVoice();
 					return;
 				}
-				setVoiceError(useNative ? friendlyNativeError(message) : message);
+				if (!quiet) setVoiceError(useNative ? friendlyNativeError(message) : message);
 				resetVoice();
 			}
 		};
 		const ok = useNative ? speakNat(callbacks) : speakWeb(callbacks);
 		if (!ok) {
 			resetVoice();
-			setVoiceError("Voice not available.");
+			if (!quiet) setVoiceError("Voice not available.");
 		}
 	}
 
@@ -1586,15 +1587,15 @@
 		};
 	}
 
-	async function speakReply(msg: ChatMsg): Promise<void> {
+	async function speakReply(msg: ChatMsg, quiet = false): Promise<void> {
 		const text = speechText(msg.content);
 		if (!text) return;
 		if (!speechAttemptable(messageSpeechLang(msg))) {
-			setVoiceError("No voice for this language.");
+			if (!quiet) setVoiceError("No voice for this language.");
 			return;
 		}
 		const stripped = text.replace(/```[\s\S]*?```/g, " ");
-		startSpeech(msg.id, text, speechLangsFor(await quoteLangFor(stripped, latinFallback())));
+		startSpeech(msg.id, text, speechLangsFor(await quoteLangFor(stripped, latinFallback())), quiet);
 	}
 
 	/** Speak-button label. */
@@ -1607,10 +1608,11 @@
 		if (!settings.voice) return;
 		const last = chat.messages[chat.messages.length - 1];
 		if (last?.role === "assistant" && !last.error && last.content.trim()) {
-			// Background readback skips silently when no voice fits:
-			// no banner for something the user never asked to hear.
+			// Background readback stays silent throughout: no banner for
+			// something the user never asked to hear, including a runtime
+			// failure after an attemptable-looking voice.
 			if (!speechAttemptable(messageSpeechLang(last))) return;
-			void speakReply(last);
+			void speakReply(last, true);
 		}
 	}
 
@@ -3957,7 +3959,7 @@
 		{#if voiceError}
 			<!-- Top notice, not the bottom banner: speech errors arrive
 			while the eyes are on the message, and a tap dismisses. -->
-			<button type="button" class="voice-error" title="Dismiss" onclick={() => setVoiceError(null)}>
+			<button type="button" class="voice-error" title="Dismiss" transition:fade={{ duration: 160 }} onclick={() => setVoiceError(null)}>
 				<span role="alert">{voiceError}</span>
 			</button>
 		{/if}
