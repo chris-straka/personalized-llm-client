@@ -791,6 +791,18 @@
 	}
 	.keys-updates > section {
 		flex: 1 1 11rem;
+		/* Heading and button share one line inside each half. */
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.2rem 0.8rem;
+	}
+	.keys-updates h2 {
+		margin: 0;
+	}
+	.keys-updates .result {
+		flex-basis: 100%;
+		margin: 0.3rem 0 0;
 	}
 	h2 {
 		font-size: 0.95rem;

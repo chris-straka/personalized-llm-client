@@ -4294,7 +4294,7 @@
 					<!-- Android milestone: key chords don't exist on a phone,
 					so the same modal teaches the touch equivalents. -->
 					<dl class="keys">
-						<div><dt>Chats list</dt><dd>Two-finger double-tap (tap the chat to close)</dd></div>
+						<div><dt>Chats list</dt><dd>Two-finger double-tap</dd></div>
 					<div><dt>Newer / older chat</dt><dd>Two-finger swipe right / left</dd></div>
 					<div><dt>Delete current chat</dt><dd>Double three-finger tap</dd></div>
 						<div><dt>Settings</dt><dd>Swipe left from the right edge to open (swipe right to close)</dd></div>
