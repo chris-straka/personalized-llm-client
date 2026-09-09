@@ -5025,7 +5025,9 @@
 		padding: 1rem 1.2rem;
 		display: flex;
 		flex-direction: column;
-		gap: 0.8rem;
+		/* Pairs hug: a message sits close to its reply; the wider
+		separation lands between pairs (see article.user below). */
+		gap: 0.35rem;
 	}
 	/* The chat scrollbar stays out of the way: invisible until a scroll
 	is in flight (JS toggles .scrolling while scroll events land). */
@@ -5378,6 +5380,15 @@
 		position: relative;
 		border-radius: 10px;
 		padding: 0.6rem 0.8rem;
+	}
+	/* A user message opens a new pair, so it carries the
+	between-pair separation on top; replies hug underneath. */
+	article.user {
+		margin-top: 0.45rem;
+	}
+	article:first-of-type {
+		margin-top: 0;
+	}
 		/* Text starts only at the message body: dragging anywhere else
 		(empty space, action rows) is a plain pointer drag, never an
 		I-beam selection. .rendered re-enables both below. */
