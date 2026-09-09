@@ -3441,6 +3441,7 @@
 					<div
 						class="wp-menu"
 						role="menu"
+						tabindex={-1}
 						aria-label="Waypoints"
 						data-fade-scroll
 						ontouchstart={(e) => (wpTouchY = e.touches[0]?.clientY ?? null)}
