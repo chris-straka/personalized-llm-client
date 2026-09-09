@@ -146,6 +146,7 @@
 		currentKeyboardInputSource
 	} from "$lib/nativeTts";
 	import { voiceLocaleForInputSource } from "$lib/keyboardLang";
+	import { joinExternalDraft } from "$lib/externalText";
 
 	let chatState = $state(createChatState());
 	let settings = $state(loadSettings());
@@ -2364,6 +2365,21 @@
 				}
 			});
 		}
+		// External-text bridge (Android OS selection menu): shared-in
+		// text lands in the composer with the keyboard up; a bare
+		// trigger annotates the live web selection, exactly like the
+		// web row's button. The web row itself is untouched.
+		void listen<{ text: string | null }>("annotate-external", (event) => {
+			const text = event.payload?.text ?? null;
+			if (text) {
+				if (!chatState.activeChatId) newChat(chatState);
+				editor?.setText(joinExternalDraft(editor?.getText() ?? "", text));
+				editor?.focus();
+				return;
+			}
+			if (selMenu?.quote.trim()) annotate();
+			else flashToast("Select text first, then Annotate.");
+		});
 		// A pill-owned voice must not leak past its chat: when the
 		// launch chat carries no reply pill and nobody pinned the
 		// field, the voice falls back to the system default — new

@@ -2,6 +2,7 @@
 
 #[cfg(all(target_os = "macos", debug_assertions))]
 mod dev_icon;
+mod annotate;
 mod keyboard;
 #[cfg(desktop)]
 mod menu;
@@ -98,6 +99,9 @@ pub fn run() {
             tts::tts_identify_lang
         ])
         .setup(|_app| {
+            // External-text bridge (Android PROCESS_TEXT / action-mode):
+            // capture the handle before any intent can fire the native fns.
+            annotate::remember(_app.handle());
             // Dev-only: shrink the oversized runtime Dock tile (see dev_icon).
             #[cfg(all(target_os = "macos", debug_assertions))]
             if let Some(window) = tauri::Manager::get_webview_window(_app.handle(), "main") {
