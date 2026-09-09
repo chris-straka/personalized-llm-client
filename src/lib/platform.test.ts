@@ -110,22 +110,28 @@ describe("twoFingerSwipeDir", () => {
 			{ id: 0, x, y },
 			{ id: 1, x: x + 40, y }
 		] as [{ id: number; x: number; y: number }, { id: number; x: number; y: number }]);
-	it("steps older on swipe up, newer on swipe down", () => {
-		expect(twoFingerSwipeDir(grip(100, 600), grip(100, 400))).toBe(-1);
-		expect(twoFingerSwipeDir(grip(100, 400), grip(100, 600))).toBe(1);
+	it("steps newer on swipe right, older on swipe left", () => {
+		expect(twoFingerSwipeDir(grip(100, 600), grip(300, 600))).toBe(1);
+		expect(twoFingerSwipeDir(grip(300, 600), grip(100, 600))).toBe(-1);
 	});
 	it("rejects short glides, splits, diagonals, and pinches", () => {
-		expect(twoFingerSwipeDir(grip(100, 600), grip(100, 560))).toBeNull(); // too short
+		expect(twoFingerSwipeDir(grip(100, 600), grip(140, 600))).toBeNull(); // too short
 		const split = grip(100, 600);
-		const splitEnd = grip(100, 400);
-		splitEnd[1] = { ...splitEnd[1], y: 800 };
+		const splitEnd = grip(300, 600);
+		splitEnd[1] = { ...splitEnd[1], x: 60 };
 		expect(twoFingerSwipeDir(split, splitEnd)).toBeNull(); // fingers split
 		expect(twoFingerSwipeDir(grip(100, 600), grip(300, 400))).toBeNull(); // diagonal
 		const pinch = grip(100, 500);
 		const pinched = grip(100, 300).map((f, i) => ({ ...f, x: i === 0 ? 40 : 200 }));
 		expect(
 			twoFingerSwipeDir(pinch, pinched as typeof pinch)
-		).toBeNull(); // spread change = pinch
+		).toBeNull(); // opposite directions = pinch
+		const spread = grip(100, 500);
+		const spreadEnd: typeof spread = [
+			{ id: 0, x: 220, y: 500 },
+			{ id: 1, x: 340, y: 500 }
+		];
+		expect(twoFingerSwipeDir(spread, spreadEnd)).toBeNull(); // spread change = pinch
 	});
 });
 

@@ -32,31 +32,31 @@ export interface FingerTrack {
 }
 
 /**
- * Two-finger vertical chat step: both fingers glide mostly vertically in
- * the same direction. Pinches change finger spread instead of gliding, so
- * a spread change vetoes the step and page zoom keeps working. Swipe up
- * steps older (⇧⌘K), swipe down steps newer (⇧⌘J).
+ * Two-finger horizontal chat step: both fingers glide mostly horizontally
+ * in the same direction. Pinches change finger spread instead of gliding,
+ * so a spread change vetoes the step and page zoom keeps working. Swipe
+ * right steps newer (+1), swipe left steps older (-1).
  */
 export function twoFingerSwipeDir(
 	start: [FingerTrack, FingerTrack],
 	end: [FingerTrack, FingerTrack],
 	minDistance = 96
 ): 1 | -1 | null {
-	const dy0 = end[0].y - start[0].y;
-	const dy1 = end[1].y - start[1].y;
-	if (dy0 === 0 || Math.sign(dy0) !== Math.sign(dy1)) return null;
-	const dy = (dy0 + dy1) / 2;
-	if (Math.abs(dy) < minDistance) return null;
+	const dx0 = end[0].x - start[0].x;
+	const dx1 = end[1].x - start[1].x;
+	if (dx0 === 0 || Math.sign(dx0) !== Math.sign(dx1)) return null;
+	const dx = (dx0 + dx1) / 2;
+	if (Math.abs(dx) < minDistance) return null;
 	for (let i = 0; i < 2; i++) {
 		const s = start[i];
 		const e = end[i];
 		if (!s || !e) return null;
-		if (Math.abs(e.x - s.x) > Math.abs(dy) / 2) return null;
+		if (Math.abs(e.y - s.y) > Math.abs(dx) / 2) return null;
 	}
 	const spread0 = Math.hypot(start[0].x - start[1].x, start[0].y - start[1].y);
 	const spread1 = Math.hypot(end[0].x - end[1].x, end[0].y - end[1].y);
 	if (Math.abs(spread1 - spread0) > 24) return null;
-	return dy < 0 ? -1 : 1;
+	return dx > 0 ? 1 : -1;
 }
 
 /**

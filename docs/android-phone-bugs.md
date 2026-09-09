@@ -56,14 +56,17 @@ composer (never resizes). Prime suspect: the `<activity>` has no
 guesses = intermittent). Fix: `adjustResize` so the WebView always
 shrinks. Then re-test the new-chat focus path.
 
-## 8. Mobile gesture redesign
+## 8. Mobile gesture redesign (IMPLEMENTED 2026-09-09, pending device test)
 
-- Two-finger DOUBLE TAP opens the chats sidebar (replaces swipe-right).
+- Two-finger DOUBLE TAP toggles the chats sidebar (replaces swipe-right
+  on Android; other touch screens keep the edge swipe).
 - Two-finger swipe right → newer chat; two-finger swipe left → older
-  chat (two-finger swipe nav exists via `stepChat` — confirm directions).
-- Single-finger swipe left ON A MESSAGE folds that message.
-- Conflicts to resolve: swipe-left currently opens settings (see #6);
-  three-finger tap currently deletes chats (dangerous — revisit).
+  chat (`twoFingerSwipeDir` is now horizontal; was vertical).
+- Single-finger swipe left ON A MESSAGE folds/unfolds it (`toggleFold`);
+  active text selection wins over the fold. Leftward elsewhere still
+  opens settings.
+- Untouched: double three-finger tap still deletes the current chat
+  (dangerous — revisit separately).
 
 ## 9. Rename: "ccez studio" → "ccez llm"
 

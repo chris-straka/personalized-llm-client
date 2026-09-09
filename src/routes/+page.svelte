@@ -2296,7 +2296,9 @@
 		}
 		// Edge swipes toggle the sidebars on touch screens (Android
 		// milestone): rightward from the left edge for chats, leftward
-		// from the right edge for settings. Toggle, not open-only: with
+		// from the right edge for settings — except on Android, where a
+		// two-finger double-tap owns the chats sidebar and rightward
+		// strokes only dismiss settings. Toggle, not open-only: with
 		// no keyboard or Esc key, a swipe is the touch user's only way
 		// back out. Multi-touch cancels, and the mostly-horizontal rule
 		// keeps scrolling and code-block pans to themselves. Passive:
@@ -2316,7 +2318,13 @@
 			if (window.getSelection()?.isCollapsed === false) return null;
 			return contentSwipeTarget(start.x, start.y, ended.clientX, ended.clientY);
 		}
-		let edgeTouch: { id: number; x: number; y: number; clean: boolean } | null = null;
+		let edgeTouch: {
+			id: number;
+			x: number;
+			y: number;
+			clean: boolean;
+			msgId: ChatMsgId | null;
+		} | null = null;
 		window.addEventListener(
 			"touchstart",
 			(event) => {
@@ -2332,7 +2340,13 @@
 				const clean =
 					!(target instanceof Element) ||
 					target.closest(".cm-content, input, textarea, select, [contenteditable='true']") === null;
-				edgeTouch = { id: touch.identifier, x: touch.clientX, y: touch.clientY, clean };
+				// Message the stroke starts on (for swipe-to-fold). The
+				// article id carries the viewChat index (see msg-{i}).
+				const art = target instanceof Element ? articleOf(target) : null;
+				const msgIndex = art ? Number(art.id.slice(4)) : NaN;
+				const msgId =
+					Number.isInteger(msgIndex) ? (viewChat.messages[msgIndex]?.id ?? null) : null;
+				edgeTouch = { id: touch.identifier, x: touch.clientX, y: touch.clientY, clean, msgId };
 			},
 			{ passive: true }
 		);
@@ -2348,6 +2362,21 @@
 					if (candidate && candidate.identifier === start.id) ended = candidate;
 				}
 				if (!ended) return;
+				// Phone: a leftward stroke starting on a message folds it
+				// instead of opening settings. An active text selection
+				// wins — folding mid-select would eat the highlight.
+				const foldDx = ended.clientX - start.x;
+				const foldDy = ended.clientY - start.y;
+				if (
+					androidUI &&
+					start.msgId &&
+					foldDx <= -64 &&
+					Math.abs(foldDy) < Math.abs(foldDx) &&
+					window.getSelection()?.isCollapsed !== false
+				) {
+					toggleFold(start.msgId);
+					return;
+				}
 				const target =
 					edgeSwipeTarget(start.x, start.y, ended.clientX, ended.clientY, window.innerWidth) ??
 					middleSwipeTarget(start, ended);
@@ -2357,7 +2386,9 @@
 				// the sheet (it doesn't summon settings).
 				if (target === "chats") {
 					if (settingsOpen) toggleSettingsPanel();
-					else toggleSidebar();
+					// Android: two-finger double-tap owns the sidebar — a
+					// rightward stroke only ever dismisses settings.
+					else if (!androidUI) toggleSidebar();
 				} else if (target === "settings") {
 					// A leftward stroke never closes settings once open —
 					// only a rightward stroke (the "chats" branch) dismisses.
@@ -2448,15 +2479,18 @@
 			const live = window.getSelection();
 			if (!live || live.isCollapsed || live.toString() === "") selMenu = null;
 		});
-		// Two-finger vertical swipe steps chats (down = newer like
-		// ⇧⌘J, up = older like ⇧⌘K, no focus: the keyboard stays down);
-		// a double three-finger tap deletes the current chat. Both
-		// start away from controls, drawers, and the modal, and the
-		// swipe's pinch veto (see twoFingerSwipeDir) keeps page zoom.
+		// Two-finger horizontal swipe steps chats (right = newer, left =
+		// older, no focus: the keyboard stays down); a two-finger double
+		// tap toggles the chats sidebar on Android; a double three-finger
+		// tap deletes the current chat. All start away from controls,
+		// drawers, and the modal, and the swipe's pinch veto (see
+		// twoFingerSwipeDir) keeps page zoom.
 		let twoTrack: { start: [FingerTrack, FingerTrack]; end: [FingerTrack, FingerTrack] } | null =
 			null;
 		let threeTrack: { x: number; y: number; moved: number; at: number } | null = null;
 		let lastThreeTapAt = 0;
+		let twoTapAt = 0;
+		let lastTwoTapAt = 0;
 		const gestureClean = (event: TouchEvent): boolean => {
 			if (!androidUI || shortcutsOpen) return false;
 			const target = event.target;
@@ -2478,6 +2512,8 @@
 						a && b && gestureClean(event)
 							? { start: [trackOf(a), trackOf(b)], end: [trackOf(a), trackOf(b)] }
 							: null;
+					// A clean two-finger press starts the double-tap clock.
+					twoTapAt = twoTrack ? Date.now() : 0;
 					threeTrack = null;
 				} else if (event.touches.length === 3) {
 					const first = event.touches[0];
@@ -2529,8 +2565,27 @@
 					}
 					if (event.touches.length === 0) {
 						const dir = twoFingerSwipeDir(twoTrack.start, twoTrack.end);
+						const now = Date.now();
+						const moved = Math.max(
+							Math.hypot(
+								twoTrack.end[0].x - twoTrack.start[0].x,
+								twoTrack.end[0].y - twoTrack.start[0].y
+							),
+							Math.hypot(
+								twoTrack.end[1].x - twoTrack.start[1].x,
+								twoTrack.end[1].y - twoTrack.start[1].y
+							)
+						);
 						twoTrack = null;
 						if (dir !== null) stepChat(dir, false);
+						// Still two-finger taps pair into a sidebar toggle
+						// (Android): swipes take the step path instead.
+						else if (androidUI && twoTapAt > 0 && moved <= 12 && now - twoTapAt <= 400) {
+							if (now - lastTwoTapAt < 600) {
+								lastTwoTapAt = 0;
+								toggleSidebar();
+							} else lastTwoTapAt = now;
+						}
 					}
 				}
 				if (threeTrack && event.touches.length === 0) {
@@ -4235,13 +4290,14 @@
 					<!-- Android milestone: key chords don't exist on a phone,
 					so the same modal teaches the touch equivalents. -->
 					<dl class="keys">
-						<div><dt>Chats list</dt><dd>Swipe right from the left edge (tap the chat to close)</dd></div>
-					<div><dt>Newer / older chat</dt><dd>Two-finger swipe down / up</dd></div>
+						<div><dt>Chats list</dt><dd>Two-finger double-tap (tap the chat to close)</dd></div>
+					<div><dt>Newer / older chat</dt><dd>Two-finger swipe right / left</dd></div>
 					<div><dt>Delete current chat</dt><dd>Double three-finger tap</dd></div>
 						<div><dt>Settings</dt><dd>Swipe left from the right edge to open (swipe right to close)</dd></div>
 						<div><dt>Send</dt><dd>The ↑ button (newline is your keyboard's return key)</dd></div>
 						<div><dt>Select text</dt><dd>Touch and hold a word, then drag the handles</dd></div>
 						<div><dt>Annotate</dt><dd>The Annotate menu appears by the selection</dd></div>
+						<div><dt>Fold a message</dt><dd>Swipe left on the message (again to unfold)</dd></div>
 						<div><dt>Speak text</dt><dd>Select it, then Read Aloud in the system menu</dd></div>
 						<div><dt>Message buttons</dt><dd>Always visible on touch — no hover needed</dd></div>
 						<div><dt>Edit a message</dt><dd>Its pencil button, then resend</dd></div>
