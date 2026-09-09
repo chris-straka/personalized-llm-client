@@ -3443,15 +3443,30 @@
 				</li>
 			{/each}
 		</ul>
-		<button
-			type="button"
-			class="new"
-			title={tip("New chat (⌘N or ⇧⌘N)", "New chat")}
-			aria-label="New chat"
-			onclick={() => doNewChat()}
-		>
-			+
-		</button>
+		<div class="side-foot">
+			<button
+				type="button"
+				class="new"
+				title={tip("New chat (⌘N or ⇧⌘N)", "New chat")}
+				aria-label="New chat"
+				onclick={() => doNewChat()}
+			>
+				+
+			</button>
+			{#if androidUI}
+				<!-- Phone has no menu bar: this is the only visible door
+				to the gestures list (settings itself takes a gesture). -->
+				<button
+					type="button"
+					class="new"
+					title="Touch gestures"
+					aria-label="Touch gestures"
+					onclick={() => (shortcutsOpen = true)}
+				>
+					?
+				</button>
+			{/if}
+		</div>
 	</aside>
 
 	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
@@ -4297,8 +4312,6 @@
 						<div><dt>Chats list</dt><dd>Two-finger double-tap</dd></div>
 					<div><dt>Newer / older chat</dt><dd>Two-finger swipe right / left</dd></div>
 					<div><dt>Delete current chat</dt><dd>Double three-finger tap</dd></div>
-						<div><dt>Settings</dt><dd>Swipe right to left from anywhere</dd></div>
-						<div><dt>Send</dt><dd>↑ button or Enter</dd></div>
 						<div><dt>Annotate</dt><dd>Select text and click the popup</dd></div>
 						<div><dt>Message buttons</dt><dd>Tap a message</dd></div>
 						<div><dt>Edit a message</dt><dd>Pencil button, then resend</dd></div>
@@ -4469,6 +4482,13 @@
 	aside .new {
 		border-color: #c7c7cc;
 	}
+	.side-foot {
+		display: flex;
+		gap: 0.4rem;
+	}
+	.side-foot .new {
+		flex: 1;
+	}
 	.side-head {
 		display: flex;
 		align-items: center;
@@ -4605,11 +4625,6 @@
 		font-size: 0.75rem;
 		color: #1c1c1e;
 		overflow-wrap: anywhere;
-	}
-	.modal-note {
-		font-size: 0.8rem;
-		color: #6e6e73;
-		margin: 0.2rem 0 0;
 	}
 	aside .del {
 		color: #6e6e73;
@@ -6648,9 +6663,6 @@
 	}
 	:global(html[data-theme="dark"]) .app[data-android] .keys div:nth-child(2) {
 		border-top-color: #38383a;
-	}
-	:global(html[data-theme="dark"]) .modal-note {
-		color: #98989f;
 	}
 	:global(html[data-theme="dark"]) nav {
 		border-color: #38383a;
