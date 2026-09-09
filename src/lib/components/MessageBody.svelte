@@ -598,64 +598,70 @@
 		animation: ann-badge-in 0.2s ease;
 	}
 	/* Shiki emits light colors inline + dark variants as CSS variables. */
-	@media (prefers-color-scheme: dark) {
-		.rendered :global(mark.ccez-ann) {
-			background: #5c4d00;
+	/* Dark theme, gated on the resolved scheme (<html data-theme>)
+	instead of the OS query, so the settings switch can pin it.
+	Keyframes can't sit behind a selector, so the dark wash variants
+	are renamed and picked up by the animation-name overrides below. */
+	:global(html[data-theme="dark"]) .rendered :global(mark.ccez-ann) {
+		background: #5c4d00;
+	}
+	@keyframes ann-wash-in-dark {
+		from {
+			background-color: transparent;
 		}
-		/* Dark variants of the wash fades (media-scoped keyframes win
-		while the query matches). */
-		@keyframes ann-wash-in {
-			from {
-				background-color: transparent;
-			}
-			to {
-				background-color: #5c4d00;
-			}
+		to {
+			background-color: #5c4d00;
 		}
-		@keyframes ann-wash-out {
-			from {
-				background-color: #5c4d00;
-			}
-			to {
-				background-color: transparent;
-			}
+	}
+	@keyframes ann-wash-out-dark {
+		from {
+			background-color: #5c4d00;
 		}
-		.folded-preview {
-			color: #98989f;
+		to {
+			background-color: transparent;
 		}
-		.rendered :global(pre),
-		.rendered :global(:not(pre) > code) {
-			background: #1c1c1e;
-		}
-		.rendered :global(th),
-		.rendered :global(td) {
-			border-color: #48484a;
-		}
-		.rendered :global(blockquote) {
-			border-color: #48484a;
-			color: #98989f;
-		}
-		.rendered :global(.ccez-code) {
-			border-color: #38383a;
-		}
-		.rendered :global(.ccez-code-head) {
-			background: #2c2c2e;
-		}
-		.rendered :global(.ccez-code-head button) {
-			background: #1c1c1e;
-			border-color: #48484a;
-			color: #f2f2f7;
-		}
-		.rendered :global(.ccez-code pre) {
-			background: #101013;
-		}
-		.rendered :global(.shiki),
-		.rendered :global(.shiki span) {
-			color: var(--shiki-dark) !important;
-			background-color: var(--shiki-dark-bg) !important;
-			font-style: var(--shiki-dark-font-style) !important;
-			font-weight: var(--shiki-dark-font-weight) !important;
-			text-decoration: var(--shiki-dark-text-decoration) !important;
-		}
+	}
+	:global(html[data-theme="dark"]) .rendered :global(mark.ccez-ann.fresh) {
+		animation-name: ann-wash-in-dark;
+	}
+	:global(html[data-theme="dark"]) .rendered :global(mark.ccez-ann.leaving) {
+		animation-name: ann-wash-out-dark;
+	}
+	:global(html[data-theme="dark"]) .folded-preview {
+		color: #98989f;
+	}
+	:global(html[data-theme="dark"]) .rendered :global(pre),
+	:global(html[data-theme="dark"]) :global(html[data-theme="dark"]) .rendered :global(:not(pre) > code) {
+		background: #1c1c1e;
+	}
+	:global(html[data-theme="dark"]) .rendered :global(th),
+	:global(html[data-theme="dark"]) :global(html[data-theme="dark"]) .rendered :global(td) {
+		border-color: #48484a;
+	}
+	:global(html[data-theme="dark"]) .rendered :global(blockquote) {
+		border-color: #48484a;
+		color: #98989f;
+	}
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-code) {
+		border-color: #38383a;
+	}
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-code-head) {
+		background: #2c2c2e;
+	}
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-code-head button) {
+		background: #1c1c1e;
+		border-color: #48484a;
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-code pre) {
+		background: #101013;
+	}
+	:global(html[data-theme="dark"]) .rendered :global(.shiki),
+	:global(html[data-theme="dark"]) :global(html[data-theme="dark"]) .rendered :global(.shiki span) {
+		color: var(--shiki-dark) !important;
+		background-color: var(--shiki-dark-bg) !important;
+		font-style: var(--shiki-dark-font-style) !important;
+		font-weight: var(--shiki-dark-font-weight) !important;
+		text-decoration: var(--shiki-dark-text-decoration) !important;
 	}
 </style>

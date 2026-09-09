@@ -43,6 +43,44 @@ export function replyLangFor(text: string, fallback: string): string {
 	return ttsLangFor(text.replace(/```[\s\S]*?```/g, " "), fallback);
 }
 
+/**
+ * Whether a web voice exists for `lang` (two-letter prefix match, the
+ * same routing queueUtterances uses). An empty inventory means voices
+ * haven't loaded yet — never disable UI on a guess, so that reads as
+ * available. The voice list rides as a parameter so the check stays
+ * pure: call sites pass `speechSynthesis.getVoices()`, tests pass
+ * literals.
+ */
+export function webVoiceAvailable(lang: string, voices: ReadonlyArray<{ lang: string }>): boolean {
+	if (voices.length === 0) return true;
+	const prefix = lang.slice(0, 2).toLowerCase();
+	if (!prefix) return false;
+	return voices.some((v) => v.lang.toLowerCase().startsWith(prefix));
+}
+
+/**
+ * Stand-in locale until a dedicated voice exists: Latin reads with an
+ * Italian voice, Sanskrit with a Hindi voice (the same pair the reply
+ * pills already use). Null when the language needs no stand-in.
+ */
+export function spokenFallbackFor(lang: string): string | null {
+	const table: Record<string, string> = { la: "it-IT", sa: "hi-IN" };
+	return table[lang.slice(0, 2).toLowerCase()] ?? null;
+}
+
+/**
+ * Locale to actually speak: the request when a voice exists, else its
+ * stand-in when one does, else the request unchanged so the error path
+ * explains. An unloaded inventory passes everything through (see
+ * webVoiceAvailable) — never route on a guess.
+ */
+export function effectiveSpeechLang(lang: string, voices: ReadonlyArray<{ lang: string }>): string {
+	if (webVoiceAvailable(lang, voices)) return lang;
+	const fallback = spokenFallbackFor(lang);
+	if (fallback && webVoiceAvailable(fallback, voices)) return fallback;
+	return lang;
+}
+
 /** One speakable sentence with its own voice locale. */
 export interface SpeechSegment {
 	text: string;

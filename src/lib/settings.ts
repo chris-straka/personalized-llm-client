@@ -8,6 +8,16 @@ import {
 
 export type VoiceEngine = "web" | "native";
 
+/** Color-scheme override: follow the OS, or pin light/dark. */
+export type ThemeMode = "system" | "light" | "dark";
+
+/** Resolved scheme for a mode: pins hold, system mirrors the OS. */
+export function resolveTheme(mode: ThemeMode, systemDark: boolean): "light" | "dark" {
+	if (mode === "light") return "light";
+	if (mode === "dark") return "dark";
+	return systemDark ? "dark" : "light";
+}
+
 /**
  * Active provider entry. loadSettings backfills every listed id and clamps
  * activeProviderId to one of them, so a missing entry means corrupt state —
@@ -87,6 +97,15 @@ export interface AppSettings {
 	hoverUserActions: boolean;
 	/** AI message action buttons appear only on hover/focus. Off = always shown. */
 	hoverAssistantActions: boolean;
+	/** Color-scheme override (system follows the OS). */
+	theme: ThemeMode;
+	/**
+	 * Touch only: hide message bodies until tapped (tap reveals one
+	 * message for 3s). The checkbox lives in Appearance on phones.
+	 */
+	hideMessages: boolean;
+	/** Touch only: read a fresh text selection aloud on release. */
+	autoSpeakSelection: boolean;
 }
 
 const STORAGE_KEY = "ccez-studio-settings-v1";
@@ -185,7 +204,10 @@ export function defaultSettings(): AppSettings {
 		ownBubble: true,
 		hoverUserActions: false,
 		hoverAssistantActions: false,
-		voiceLangPinned: false
+		voiceLangPinned: false,
+		theme: "system",
+		hideMessages: false,
+		autoSpeakSelection: true
 	};
 }
 
@@ -253,6 +275,14 @@ export function loadSettings(store?: KeyValueStore): AppSettings {
 		if (typeof merged.fontScale !== "number" || !(merged.fontScale >= 0.5 && merged.fontScale <= 2)) {
 			merged.fontScale = 1;
 		}
+		// Theme pins from older saves predate the switch: anything that
+		// isn't a known mode follows the OS.
+		if (merged.theme !== "light" && merged.theme !== "dark" && merged.theme !== "system") {
+			merged.theme = "system";
+		}
+		// Touch-only toggles postdate older saves the same way.
+		if (typeof merged.hideMessages !== "boolean") merged.hideMessages = false;
+		if (typeof merged.autoSpeakSelection !== "boolean") merged.autoSpeakSelection = true;
 		// Retire the old "Be brief, no summaries." default: profiles that
 		// never customized it inherit the new (empty) default instead.
 		if (merged.systemPrompt === "Be brief, no summaries.") {

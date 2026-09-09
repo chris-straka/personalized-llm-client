@@ -26,9 +26,18 @@
 		tokensLabel?: string | null;
 		/** Tooltip for the tally (exact total). */
 		tokensTitle?: string | null;
+		/** Phone UI: hover doesn't exist, so the hover toggles read as a note. */
+		androidUI?: boolean;
 	}
 
-	let { settings, onClose, onShortcuts, tokensLabel = null, tokensTitle = null }: Props = $props();
+	let {
+		settings,
+		onClose,
+		onShortcuts,
+		tokensLabel = null,
+		tokensTitle = null,
+		androidUI = false
+	}: Props = $props();
 	let updateStatus = $state("");
 	let checkingUpdate = $state(false);
 	let modelLoading = $state(false);
@@ -446,9 +455,12 @@
 		</p>
 	{/if}
 	<p class="note">
-		{#if inShell}
+		{#if inShell && !androidUI}
 			Keys stay in the macOS Keychain, never in a file. Eject unloads a key
 			for this session only.
+		{:else if inShell}
+			Keys stay in this app's secured storage, never in a file. Eject
+			unloads a key for this session only.
 		{:else}
 			Keys stay on this machine, in this app's local storage.
 		{/if}
@@ -484,18 +496,23 @@
 		enable bg on my msgs
 	</label>
 	<!-- One row for both hover toggles: the label names the behavior once,
-	each box names whose buttons it covers. -->
-	<fieldset class="hover-row">
-		<legend>Message buttons only on hover for…</legend>
-		<label class="check">
-			<input type="checkbox" bind:checked={settings.hoverUserActions} />
-			my msgs
-		</label>
-		<label class="check">
-			<input type="checkbox" bind:checked={settings.hoverAssistantActions} />
-			AI msgs
-		</label>
-	</fieldset>
+	each box names whose buttons it covers. Touch has no hover, so the
+	phone shows a note instead of the toggles. -->
+	{#if androidUI}
+		<p class="note">Message buttons always show on touch — no hover to wait for.</p>
+	{:else}
+		<fieldset class="hover-row">
+			<legend>Message buttons only on hover for…</legend>
+			<label class="check">
+				<input type="checkbox" bind:checked={settings.hoverUserActions} />
+				my msgs
+			</label>
+			<label class="check">
+				<input type="checkbox" bind:checked={settings.hoverAssistantActions} />
+				AI msgs
+			</label>
+		</fieldset>
+	{/if}
 	{#if nativeVoice}
 		<fieldset class="voice-engine">
 			<legend>Voice engine</legend>
@@ -562,12 +579,12 @@
 				{/if}
 			{/if}
 		</fieldset>
-		{:else if inShell && voiceLoadError}
+		{:else if inShell && voiceLoadError && !androidUI}
 			<fieldset>
 				<legend>Voice engine</legend>
 				<p class="note" role="alert">System voices are unavailable: {voiceLoadError}</p>
 			</fieldset>
-		{:else if isMacBrowser}
+		{:else if isMacBrowser && !androidUI}
 			<fieldset>
 				<legend>Voice engine</legend>
 				<p class="note">
@@ -577,6 +594,17 @@
 					then Read &amp; Speak → System Voice → Manage Voices.
 				</p>
 			</fieldset>
+	{/if}
+	{#if androidUI}
+		<!-- Phones only have web voices (no engine to pick): the useful
+		voice control is whether selections read themselves aloud. -->
+		<fieldset>
+			<legend>Voice</legend>
+			<label class="check">
+				<input type="checkbox" bind:checked={settings.autoSpeakSelection} />
+				Read selections aloud on release
+			</label>
+		</fieldset>
 	{/if}
 	<!-- Plain div + aria, not a <label>: label clicks yank focus into the
 		field, which fights selecting this text. -->
@@ -614,10 +642,53 @@
 	</label>
 </section>
 
+<section aria-labelledby="appearance-heading">
+	<h2 id="appearance-heading">Appearance</h2>
+	<fieldset>
+		<legend>Color scheme</legend>
+		<div class="segmented" role="radiogroup" aria-label="Color scheme">
+			<button
+				type="button"
+				role="radio"
+				aria-checked={settings.theme === "system"}
+				class:selected={settings.theme === "system"}
+				title="Follow the system appearance"
+				onclick={() => (settings.theme = "system")}>System</button
+			>
+			<button
+				type="button"
+				role="radio"
+				aria-checked={settings.theme === "light"}
+				class:selected={settings.theme === "light"}
+				title="Always light"
+				onclick={() => (settings.theme = "light")}>Light</button
+			>
+			<button
+				type="button"
+				role="radio"
+				aria-checked={settings.theme === "dark"}
+				class:selected={settings.theme === "dark"}
+				title="Always dark"
+				onclick={() => (settings.theme = "dark")}>Dark</button
+			>
+		</div>
+	</fieldset>
+	{#if androidUI}
+		<fieldset>
+			<legend>Messages</legend>
+			<label class="check">
+				<input type="checkbox" bind:checked={settings.hideMessages} />
+				Hide message text until tapped
+			</label>
+		</fieldset>
+	{/if}
+</section>
+
 <section aria-labelledby="keys-heading">
-	<h2 id="keys-heading">Keyboard shortcuts</h2>
+	<h2 id="keys-heading">{androidUI ? "Touch gestures" : "Keyboard shortcuts"}</h2>
 	<button type="button" onclick={onShortcuts}>
-		Show all shortcuts <span class="key-hint" aria-hidden="true">⇧⌘/</span>
+		Show all {androidUI ? "gestures" : "shortcuts"}
+		{#if !androidUI}<span class="key-hint" aria-hidden="true">⇧⌘/</span>{/if}
 	</button>
 </section>
 
@@ -666,10 +737,10 @@
 		-webkit-user-select: text;
 		cursor: text;
 	}
-	@media (prefers-color-scheme: dark) {
-		.head-tokens {
-			color: #98989f;
-		}
+	/* Dark theme, gated on the resolved scheme (<html data-theme>)
+	instead of the OS query, so the settings switch can pin it. */
+	:global(html[data-theme="dark"]) .head-tokens {
+		color: #98989f;
 	}
 	.panel-head:focus-visible {
 		outline: 2px solid #1c1c1e;
@@ -994,79 +1065,79 @@
 		background: #e6f4ea;
 		overflow-wrap: anywhere;
 	}
-	@media (prefers-color-scheme: dark) {
-		.panel-head:focus-visible {
-			outline-color: #aeaeb2;
-		}
-		section {
-			border-color: #38383a;
-		}
-		input[type="url"],
-		input[type="text"],
-		input[type="password"],
-		select,
-		textarea,
-		.provider-row button,
-		.segmented button,
-		.key-state button,
-		section > button {
-			background: #1c1c1e;
-			border-color: #48484a;
-			color: #f2f2f7;
-		}
-		.provider-row button:not(.selected):not(:disabled):hover,
-		.segmented button:not(.selected):not(:disabled):hover,
-		.key-state button:hover,
-		section > button:not(:disabled):hover,
-		.note button:hover {
-			border-color: #aeaeb2;
-			color: #f2f2f7;
-		}
-		input[type="url"]:hover,
-		input[type="text"]:hover,
-		input[type="password"]:hover,
-		select:hover,
-		textarea:hover {
-			border-color: #636366;
-		}
-		.voice-pick select {
-			background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23aeaeb2' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-		}
-		input[type="url"]:focus,
-		input[type="text"]:focus,
-		input[type="password"]:focus,
-		select:focus,
-		textarea:focus {
-			border-color: #aeaeb2;
-		}
-		.font-row input[type="range"] {
-			accent-color: #f2f2f7;
-		}
-		.model-row button {
-			background: #1c1c1e;
-			border-color: #48484a;
-			color: #f2f2f7;
-		}
-		.model-row button:not(:disabled):hover {
-			border-color: #aeaeb2;
-		}
-		.provider-row button.selected,
-		.segmented button.selected {
-			background: #f2f2f7;
-			border-color: #f2f2f7;
-			color: #1c1c1e;
-		}
-		.segmented button:disabled {
-			background: #2c2c2e;
-			border-color: #38383a;
-			color: #636366;
-		}
-		.hint,
-		.note {
-			color: #98989f;
-		}
-		.result {
-			background: #12351f;
-		}
+	/* Dark theme, gated on the resolved scheme (<html data-theme>)
+	instead of the OS query, so the settings switch can pin it. */
+	:global(html[data-theme="dark"]) .panel-head:focus-visible {
+		outline-color: #aeaeb2;
+	}
+	:global(html[data-theme="dark"]) section {
+		border-color: #38383a;
+	}
+	:global(html[data-theme="dark"]) input[type="url"],
+	:global(html[data-theme="dark"]) input[type="text"],
+	:global(html[data-theme="dark"]) input[type="password"],
+	:global(html[data-theme="dark"]) select,
+	:global(html[data-theme="dark"]) textarea,
+	:global(html[data-theme="dark"]) .provider-row button,
+	:global(html[data-theme="dark"]) .segmented button,
+	:global(html[data-theme="dark"]) .key-state button,
+	:global(html[data-theme="dark"]) section > button {
+		background: #1c1c1e;
+		border-color: #48484a;
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .provider-row button:not(.selected):not(:disabled):hover,
+	:global(html[data-theme="dark"]) .segmented button:not(.selected):not(:disabled):hover,
+	:global(html[data-theme="dark"]) .key-state button:hover,
+	:global(html[data-theme="dark"]) section > button:not(:disabled):hover,
+	:global(html[data-theme="dark"]) .note button:hover {
+		border-color: #aeaeb2;
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) input[type="url"]:hover,
+	:global(html[data-theme="dark"]) input[type="text"]:hover,
+	:global(html[data-theme="dark"]) input[type="password"]:hover,
+	:global(html[data-theme="dark"]) select:hover,
+	:global(html[data-theme="dark"]) textarea:hover {
+		border-color: #636366;
+	}
+	:global(html[data-theme="dark"]) .voice-pick select {
+		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23aeaeb2' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+	}
+	:global(html[data-theme="dark"]) input[type="url"]:focus,
+	:global(html[data-theme="dark"]) input[type="text"]:focus,
+	:global(html[data-theme="dark"]) input[type="password"]:focus,
+	:global(html[data-theme="dark"]) select:focus,
+	:global(html[data-theme="dark"]) textarea:focus {
+		border-color: #aeaeb2;
+	}
+	:global(html[data-theme="dark"]) .font-row input[type="range"] {
+		accent-color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .model-row button {
+		background: #1c1c1e;
+		border-color: #48484a;
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .model-row button:not(:disabled):hover {
+		border-color: #aeaeb2;
+	}
+	:global(html[data-theme="dark"]) .provider-row button.selected,
+	:global(html[data-theme="dark"]) .segmented button.selected {
+		background: #f2f2f7;
+		border-color: #f2f2f7;
+		color: #1c1c1e;
+	}
+	:global(html[data-theme="dark"]) .segmented button:disabled {
+		background: #2c2c2e;
+		border-color: #38383a;
+		color: #636366;
+	}
+	:global(html[data-theme="dark"]) .hint,
+	:global(html[data-theme="dark"]) .note {
+		color: #98989f;
+	}
+	:global(html[data-theme="dark"]) .result {
+		background: #12351f;
 	}
 </style>

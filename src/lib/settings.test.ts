@@ -8,7 +8,8 @@ import {
 	DEFAULT_SYSTEM_PROMPT,
 	activeThinkingId,
 	effectiveSystemPrompt,
-	systemLocale
+	systemLocale,
+	resolveTheme
 } from "./settings";
 
 /** Blank slate: tests must never see the developer's real `.env`. */
@@ -258,5 +259,37 @@ describe("settings", () => {
 
 		memoryStore.setItem("ccez-studio-settings-v1", "{not json");
 		expect(loadSettings(memoryStore)).toEqual(defaultSettings());
+	});
+});
+
+describe("theme", () => {
+	it("defaults to system and resolves pins over the OS", () => {
+		expect(blankSettings().theme).toBe("system");
+		expect(resolveTheme("system", true)).toBe("dark");
+		expect(resolveTheme("system", false)).toBe("light");
+		expect(resolveTheme("dark", false)).toBe("dark");
+		expect(resolveTheme("light", true)).toBe("light");
+	});
+	it("heals unknown saved values back to system", () => {
+		const store = memoryStore;
+		const s = blankSettings();
+		saveSettings({ ...s, theme: "midnight" as never }, store);
+		expect(loadSettings(store).theme).toBe("system");
+	});
+});
+
+describe("touch toggles", () => {
+	it("default to shown messages and speaking selections", () => {
+		const s = blankSettings();
+		expect(s.hideMessages).toBe(false);
+		expect(s.autoSpeakSelection).toBe(true);
+	});
+	it("heals non-boolean saved values", () => {
+		const store = memoryStore;
+		const s = blankSettings();
+		saveSettings({ ...s, hideMessages: "yes" as never, autoSpeakSelection: 0 as never }, store);
+		const healed = loadSettings(store);
+		expect(healed.hideMessages).toBe(false);
+		expect(healed.autoSpeakSelection).toBe(true);
 	});
 });

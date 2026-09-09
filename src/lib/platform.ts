@@ -24,6 +24,57 @@ export function isCoarsePointer(query: (media: string) => { matches: boolean }):
 
 export type EdgePanel = "chats" | "settings";
 
+/** One tracked touch point (identifier + last-seen position). */
+export interface FingerTrack {
+	id: number;
+	x: number;
+	y: number;
+}
+
+/**
+ * Two-finger vertical chat step: both fingers glide mostly vertically in
+ * the same direction. Pinches change finger spread instead of gliding, so
+ * a spread change vetoes the step and page zoom keeps working. Swipe up
+ * steps older (⇧⌘K), swipe down steps newer (⇧⌘J).
+ */
+export function twoFingerSwipeDir(
+	start: [FingerTrack, FingerTrack],
+	end: [FingerTrack, FingerTrack],
+	minDistance = 96
+): 1 | -1 | null {
+	const dy0 = end[0].y - start[0].y;
+	const dy1 = end[1].y - start[1].y;
+	if (dy0 === 0 || Math.sign(dy0) !== Math.sign(dy1)) return null;
+	const dy = (dy0 + dy1) / 2;
+	if (Math.abs(dy) < minDistance) return null;
+	for (let i = 0; i < 2; i++) {
+		const s = start[i];
+		const e = end[i];
+		if (!s || !e) return null;
+		if (Math.abs(e.x - s.x) > Math.abs(dy) / 2) return null;
+	}
+	const spread0 = Math.hypot(start[0].x - start[1].x, start[0].y - start[1].y);
+	const spread1 = Math.hypot(end[0].x - end[1].x, end[0].y - end[1].y);
+	if (Math.abs(spread1 - spread0) > 24) return null;
+	return dy < 0 ? -1 : 1;
+}
+
+/**
+ * Three-finger double-tap delete: each tap is short, near-stationary, and
+ * exactly three fingers. The pairing window lives at the call site (it
+ * needs a clock); this judges one tap. Pure so the shape unit-tests
+ * without touch hardware.
+ */
+export function isThreeFingerTap(
+	fingers: number,
+	moved: number,
+	durationMs: number,
+	maxMove = 12,
+	maxDuration = 400
+): boolean {
+	return fingers === 3 && moved <= maxMove && durationMs <= maxDuration;
+}
+
 /**
  * Provider ids visible under the platform caps. `local-gemma` is the
  * future on-device entry: it lists only on Android (nowhere else has
@@ -47,7 +98,8 @@ export function visibleProviderIds(
  * least `minDistance` px starting inside the screen's edge zone. Left
  * edge swipes right to open chats; right edge swipes left for settings.
  * Vertical scrolls, short drags, and mid-screen swipes never qualify,
- * so code blocks and the prompt keep their own gestures.
+ * so code blocks and the prompt keep their own gestures. (A bottom-up
+ * summon was tried and dropped: it fires during message scrolling.)
  */
 export function edgeSwipeTarget(
 	startX: number,
@@ -64,4 +116,24 @@ export function edgeSwipeTarget(
 	if (dx > 0 && startX <= edgeZone) return "chats";
 	if (dx < 0 && startX >= width - edgeZone) return "settings";
 	return null;
+}
+
+/**
+ * Mid-screen swipe (phone only): right opens chats, left opens settings.
+ * Longer stroke than the edge rule, since mid-screen horizontal drift
+ * during vertical scrolling is common. Callers gate this on the Android
+ * UA plus their own guards (no text selected, started outside editable
+ * text) — desktops with touchscreens must never see it.
+ */
+export function contentSwipeTarget(
+	startX: number,
+	startY: number,
+	endX: number,
+	endY: number,
+	minDistance = 64
+): EdgePanel | null {
+	const dx = endX - startX;
+	const dy = endY - startY;
+	if (Math.abs(dx) < minDistance || Math.abs(dy) > Math.abs(dx)) return null;
+	return dx > 0 ? "chats" : "settings";
 }

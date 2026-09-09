@@ -461,3 +461,18 @@ describe("chat", () => {
 		expect(activeChat(state).messages[0]?.attachments).toHaveLength(1);
 	});
 });
+
+describe("resendLast identity", () => {
+	it("reuses the user message instead of remounting it", async () => {
+		const { state, store } = stateWith(freshStore());
+		await sendMessage(state, scriptedProvider(["one"]), "sys", "q", {}, store);
+		const userId = activeChat(state).messages[0]?.id;
+		if (!userId) throw new Error("seed message missing");
+		takeBackLastReply(state, store);
+		await resendLast(state, scriptedProvider(["two"]), "sys", { store });
+		const messages = activeChat(state).messages;
+		expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+		expect(messages[0]?.id).toBe(userId);
+		expect(messages[1]?.content).toBe("two");
+	});
+});

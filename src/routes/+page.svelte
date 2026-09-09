@@ -34,6 +34,7 @@
 		effectiveSystemPrompt,
 		activeThinkingSupport,
 		activeThinkingId,
+		resolveTheme,
 		type AppSettings
 	} from "$lib/settings";
 	import { cycleThinkingId } from "$lib/providers/thinking";
@@ -52,6 +53,8 @@
 		createPromptEditor,
 		PROMPT_PLACEHOLDER,
 		SCROLL_PLACEHOLDER,
+		ANDROID_PROMPT_PLACEHOLDER,
+		ANDROID_SCROLL_PLACEHOLDER,
 		sendPasteFolds,
 		type PromptEditor,
 		type PromptEditorOptions,
@@ -91,7 +94,15 @@
 	} from "$lib/annotations";
 	import { createRefMemo } from "$lib/aidLoading";
 	import { translateSelection } from "$lib/translate";
-	import { isAndroidUserAgent, edgeSwipeTarget } from "$lib/platform";
+	import {
+	isAndroidUserAgent,
+	edgeSwipeTarget,
+	contentSwipeTarget,
+	twoFingerSwipeDir,
+	isThreeFingerTap,
+	type EdgePanel,
+	type FingerTrack
+} from "$lib/platform";
 	import {
 		detectScript,
 		detectScripts,
@@ -112,6 +123,9 @@
 		speakText,
 		speakMultilingual,
 		speechText,
+		replyLangFor,
+		webVoiceAvailable,
+		effectiveSpeechLang,
 		stopSpeaking,
 		micAvailable,
 		dictateOnce,
@@ -123,6 +137,7 @@
 		speakNativeWord,
 		stopNative,
 		friendlyNativeError,
+		nativeTtsSupported,
 		quoteLangFor,
 		quoteLangForContext,
 		currentKeyboardInputSource
@@ -430,6 +445,21 @@
 	 * persisted.
 	 */
 	let androidUI = $state(false);
+
+	/**
+	 * Touch copy drops key-chord parentheticals: no Option key, no
+	 * hover, no right-click on a phone (it backs out of the app).
+	 */
+	function tip(desktop: string, mobile: string): string {
+		return androidUI ? mobile : desktop;
+	}
+	/** Composer hints: touch wording on phones, shortcut wording elsewhere. */
+	function promptPlaceholder(): string {
+		return androidUI ? ANDROID_PROMPT_PLACEHOLDER : PROMPT_PLACEHOLDER;
+	}
+	function scrollPlaceholder(): string {
+		return androidUI ? ANDROID_SCROLL_PLACEHOLDER : SCROLL_PLACEHOLDER;
+	}
 	let hasText = $state(false);
 	let altHeld = $state(false);
 	const canSubmit = $derived(
@@ -439,6 +469,24 @@
 	function toggleSidebar(): void {
 		settings.sidebarCollapsed = !settings.sidebarCollapsed;
 		persistSettings();
+		// Touch draws one sidebar at a time: an opening chats list
+		// dismisses the settings panel (and vice versa below).
+		if (!settings.sidebarCollapsed && androidUI && settingsOpen) settingsOpen = false;
+	}
+
+	/** Open the settings panel, dismissing the chats list on touch. */
+	function openSettingsPanel(): void {
+		settingsOpen = true;
+		if (androidUI && !settings.sidebarCollapsed) {
+			settings.sidebarCollapsed = true;
+			persistSettings();
+		}
+	}
+
+	/** Toggle the settings panel with the same one-sidebar rule. */
+	function toggleSettingsPanel(): void {
+		if (settingsOpen) settingsOpen = false;
+		else openSettingsPanel();
 	}
 
 	/** UI text scale in 10% steps (settings bounds are 50–200%). */
@@ -479,6 +527,48 @@
 		}
 	}
 
+	/**
+	 * Resolved color scheme on <html>: "system" mirrors the OS live
+	 * (the listener re-runs the effect's cleanup on mode change, so
+	 * only system subscribes), pins hold regardless. The dark CSS
+	 * gates on this attribute — never on media queries — so one rule
+	 * set serves all three modes.
+	 */
+	$effect(() => {
+		const mode = settings.theme;
+		const query = window.matchMedia("(prefers-color-scheme: dark)");
+		const apply = (): void => {
+			document.documentElement.dataset.theme = resolveTheme(mode, query.matches);
+		};
+		apply();
+		if (mode === "system") query.addEventListener("change", apply);
+		return () => query.removeEventListener("change", apply);
+	});
+
+	/**
+	 * Hide-messages mode (touch): every body stays hidden until its
+	 * message is tapped — the open one shows text and buttons, then
+	 * closes itself after 3s. Tapping controls never toggles.
+	 */
+	let shownActionsId: string | null = $state(null);
+	let shownActionsTimer: ReturnType<typeof setTimeout> | null = null;
+	function toggleMessageActions(id: ChatMsgId, event: MouseEvent): void {
+		if (!settings.hideMessages) return;
+		const target = event.target as HTMLElement | null;
+		if (target?.closest("button, a, input, textarea, select, summary")) return;
+		if (shownActionsTimer) clearTimeout(shownActionsTimer);
+		shownActionsTimer = null;
+		if (shownActionsId === id) {
+			shownActionsId = null;
+			return;
+		}
+		shownActionsId = id;
+		shownActionsTimer = setTimeout(() => {
+			if (shownActionsId === id) shownActionsId = null;
+			shownActionsTimer = null;
+		}, 3000);
+	}
+
 	/** Focus a sidebar chat button by list position (clamped). */
 	function focusSideChat(index: number): void {
 		const items = [...document.querySelectorAll("aside ul li button.side-chat")];
@@ -501,7 +591,7 @@
 	 * never a second while it is still empty, so repeats can't pile up
 	 * blanks.
 	 */
-	function stepChat(direction: 1 | -1): void {
+	function stepChat(direction: 1 | -1, focus = true): void {
 		previewChatId = null;
 		const chats = chatState.chats;
 		if (chats.length === 0) return;
@@ -511,22 +601,24 @@
 		);
 		const next = at + direction;
 		if (next < 0) return;
+		// Touch steps never take focus: landing in the prompt would pop
+		// the keyboard on every swipe. Keyboard steps keep the old path.
 		if (next >= chats.length) {
 			if (chats[at]?.messages.length === 0) {
-				enterEditMode();
+				if (focus) enterEditMode();
 				return;
 			}
 			resetDraftExtras();
 			newChat(chatState);
 			scrollBox?.scrollTo({ top: 0, behavior: "smooth" });
-			enterEditMode();
+			if (focus) enterEditMode();
 			return;
 		}
 		const target = chats[next];
 		if (!target) return;
 		sideIdx = next;
 		selectChat(chatState, target.id);
-		enterEditMode();
+		if (focus) enterEditMode();
 	}
 
 	/** Enter the cursor chat from the keyboard, close the list, and land in its prompt. */
@@ -566,7 +658,7 @@
 		editingId = null;
 		editDraft = "";
 		editingMsgId = null;
-		editor?.setPlaceholder(PROMPT_PLACEHOLDER);
+		editor?.setPlaceholder(promptPlaceholder());
 		highlightAnnId = null;
 		settleAnnPop();
 		annPop = null;
@@ -765,8 +857,18 @@
 		// it lines above where the pointer is.
 		const at = cursorX ?? rect.left;
 		const x = Math.min(Math.max(8, at), window.innerWidth - width - 8);
-		let y = rect.top - 47;
-		if (y < 8) y = rect.bottom + 8;
+		// Touch: the OS text toolbar (Copy / Translate / Read Aloud)
+		// docks above the selection, so ours goes below it instead of
+		// underneath it — except near the screen bottom, where above
+		// wins and may share space with the OS bar.
+		let y: number;
+		if (androidUI) {
+			y = rect.bottom + 8;
+			if (y + 44 > window.innerHeight) y = Math.max(8, rect.top - 47);
+		} else {
+			y = rect.top - 47;
+			if (y < 8) y = rect.bottom + 8;
+		}
 		selMenu = { x, y, quote: found.quote, messageId: found.messageId };
 	}
 
@@ -1323,10 +1425,63 @@
 		setPasteFold(chatState, msg.id, index, !(msg.pasteFolds?.[index]?.open ?? false));
 	}
 
+	/** The error banner clears itself like the toast: a failed read
+	shouldn't lecture from the bottom of the screen forever. */
+	let voiceErrorTimer: ReturnType<typeof setTimeout> | null = null;
+	function setVoiceError(message: string | null): void {
+		if (voiceErrorTimer) clearTimeout(voiceErrorTimer);
+		voiceErrorTimer = null;
+		voiceError = message;
+		if (message) {
+			voiceErrorTimer = setTimeout(() => {
+				if (voiceError === message) voiceError = null;
+				voiceErrorTimer = null;
+			}, 8000);
+		}
+	}
+
+	/** Installed web voices (best-effort: [] reads as "unknown"). */
+	function webVoices(): Array<{ lang: string }> {
+		try {
+			if (typeof speechSynthesis === "undefined") return [];
+			return speechSynthesis.getVoices();
+		} catch {
+			return [];
+		}
+	}
+
+	/**
+	 * Sync speech locale for a message: the same sentence routing
+	 * speakReply uses, minus the async recognizer (Latin-script text
+	 * lands on the voice-language fallback either way on devices
+	 * without the bridge), resolved through the stand-in map (Latin
+	 * reads Italian, Sanskrit Hindi). Feeds the no-voice gate below.
+	 */
+	function messageSpeechLang(msg: ChatMsg): string {
+		return effectiveSpeechLang(replyLangFor(speechText(msg.content), latinFallback()), webVoices());
+	}
+
+	/**
+	 * Whether attempting speech makes sense: the web engine with no
+	 * installed voice for the locale (Latin with no Latin voice, …)
+	 * would only raise the error banner, so callers disable or skip
+	 * instead. Native availability is bridge-side and stays on the
+	 * error path; an unloaded inventory never disables.
+	 */
+	function speechAttemptable(lang: string): boolean {
+		if (settings.voiceEngine !== "web") return true;
+		return webVoiceAvailable(lang, webVoices());
+	}
+
+	/** Speak-button state per message (a playing message always offers Stop). */
+	function messageSpeakable(msg: ChatMsg): boolean {
+		return speechAttemptable(messageSpeechLang(msg));
+	}
+
 	function startSpeech(id: string, text: string, lang: string | ((sentence: string) => string)): void {
 		stopSpeaking();
 		stopNative();
-		voiceError = null;
+		setVoiceError(null);
 		speakingId = id;
 		const useNative = settings.voiceEngine === "native";
 		const speakWeb = (cb: SpeakCallbacks): boolean =>
@@ -1343,25 +1498,25 @@
 					// The bridge failed: say why, then read this utterance
 					// with web voices rather than leaving silence.
 					fellBack = true;
-					voiceError = `${friendlyNativeError(message)} Falling back to web voices.`;
+					setVoiceError(`${friendlyNativeError(message)} Falling back to web voices.`);
 					const ok = speakWeb({
 						onEnd: resetVoice,
 						onError: (webMessage) => {
-							voiceError = webMessage;
+							setVoiceError(webMessage);
 							resetVoice();
 						}
 					});
 					if (!ok) resetVoice();
 					return;
 				}
-				voiceError = useNative ? friendlyNativeError(message) : message;
+				setVoiceError(useNative ? friendlyNativeError(message) : message);
 				resetVoice();
 			}
 		};
 		const ok = useNative ? speakNat(callbacks) : speakWeb(callbacks);
 		if (!ok) {
 			resetVoice();
-			voiceError = "Voice not available.";
+			setVoiceError("Voice not available.");
 		}
 	}
 
@@ -1377,7 +1532,9 @@
 		return (sentence: string) => {
 			const hit = cache.get(sentence);
 			if (hit !== undefined) return hit;
-			const lang = ttsLangFor(sentence, "") || latinLang;
+			// Stand-ins resolve per sentence too: a Latin sentence with
+			// no Latin voice reads Italian rather than failing.
+			const lang = effectiveSpeechLang(ttsLangFor(sentence, "") || latinLang, webVoices());
 			cache.set(sentence, lang);
 			return lang;
 		};
@@ -1386,6 +1543,10 @@
 	async function speakReply(msg: ChatMsg): Promise<void> {
 		const text = speechText(msg.content);
 		if (!text) return;
+		if (!speechAttemptable(messageSpeechLang(msg))) {
+			setVoiceError("No voice for this language.");
+			return;
+		}
 		const stripped = text.replace(/```[\s\S]*?```/g, " ");
 		startSpeech(msg.id, text, speechLangsFor(await quoteLangFor(stripped, latinFallback())));
 	}
@@ -1400,6 +1561,9 @@
 		if (!settings.voice) return;
 		const last = chat.messages[chat.messages.length - 1];
 		if (last?.role === "assistant" && !last.error && last.content.trim()) {
+			// Background readback skips silently when no voice fits:
+			// no banner for something the user never asked to hear.
+			if (!speechAttemptable(messageSpeechLang(last))) return;
 			void speakReply(last);
 		}
 	}
@@ -1433,16 +1597,23 @@
 	 * Latin scripts), so a French highlight gets a French voice even when
 	 * the message around it is English.
 	 */
-	async function speakQuote(quote: string, messageId: ChatMsgId): Promise<void> {
+	async function speakQuote(quote: string, messageId: ChatMsgId, keepMenu = false): Promise<void> {
 		// The highlight stays: hearing the quote shouldn't clear the
-		// selection it came from. Only the menu goes away.
-		selMenu = null;
+		// selection it came from. Touch auto-read keeps the menu too,
+		// so Annotate stays one tap away after listening.
+		const gateLang = effectiveSpeechLang(ttsLangFor(quote, latinFallback()), webVoices());
+		if (!speechAttemptable(gateLang)) {
+			selMenu = null;
+			setVoiceError("No voice for this language.");
+			return;
+		}
+		if (!keepMenu) selMenu = null;
 		speakingSelection = messageId;
 		// Two kanji identify nothing on their own (Han reads Chinese by
 		// default): the quote's sentence picks a Japanese voice when the
 		// highlight sits in one.
 		const context = speechText(chat.messages.find((m) => m.id === messageId)?.content ?? quote);
-		const lang = await quoteLangForContext(quote, context, latinFallback());
+		const lang = effectiveSpeechLang(await quoteLangForContext(quote, context, latinFallback()), webVoices());
 		startSpeech("selection", quote, speechLangsFor(lang));
 	}
 
@@ -1549,7 +1720,7 @@
 				return;
 			}
 			editingMsgId = null;
-			editor?.setPlaceholder(PROMPT_PLACEHOLDER);
+			editor?.setPlaceholder(promptPlaceholder());
 		}
 		const provider = resolveProvider();
 		if (!provider) {
@@ -1722,7 +1893,7 @@
 		// no typing — keystrokes land on the window, where scroll mode
 		// owns the J/K keys and ignores the rest.
 		editor?.blur();
-		editor?.setPlaceholder(SCROLL_PLACEHOLDER);
+		editor?.setPlaceholder(scrollPlaceholder());
 		if (selectedIdx < 0 && chat.messages.length > 0) {
 			selectedIdx = chat.messages.length - 1;
 		}
@@ -1730,7 +1901,7 @@
 
 	function enterEditMode() {
 		focusMode = "edit";
-		editor?.setPlaceholder(PROMPT_PLACEHOLDER);
+		editor?.setPlaceholder(promptPlaceholder());
 		editor?.focus();
 	}
 
@@ -1910,7 +2081,7 @@
 			await listen<string>("menu-action", (event) => {
 				const action = event.payload;
 				if (action === "settings") {
-					settingsOpen = !settingsOpen;
+					toggleSettingsPanel();
 					if (!settingsOpen) pulseCursor();
 				} else if (action === "new-chat") {
 					doNewChat();
@@ -1976,7 +2147,7 @@
 				persistSettings();
 			}
 		} else if (event.clientX > right) {
-			if (!settingsOpen) settingsOpen = true;
+			if (!settingsOpen) openSettingsPanel();
 		}
 	}
 
@@ -2016,6 +2187,18 @@
 		} catch {
 			androidUI = false;
 		}
+		// Android has no native-TTS bridge (macOS-only): a persisted
+		// "native" choice from another machine would fail every read, so
+		// correct it to web voices once, up front. The settings panel
+		// repeats the probe for its picker; this is the silent path.
+		if (androidUI && settings.voiceEngine === "native") {
+			void nativeTtsSupported().then((supported) => {
+				if (!supported && settings.voiceEngine === "native") {
+					settings.voiceEngine = "web";
+					persistSettings();
+				}
+			});
+		}
 		// Edge swipes toggle the sidebars on touch screens (Android
 		// milestone): rightward from the left edge for chats, leftward
 		// from the right edge for settings. Toggle, not open-only: with
@@ -2023,7 +2206,22 @@
 		// back out. Multi-touch cancels, and the mostly-horizontal rule
 		// keeps scrolling and code-block pans to themselves. Passive:
 		// the app never blocks a scroll.
-		let edgeTouch: { id: number; x: number; y: number } | null = null;
+		/**
+		 * Mid-screen swipe target (phone only): like the edge rule, but for
+		 * strokes starting in the middle of the conversation. Gated on the
+		 * Android UA so touchscreen laptops never see it, and suppressed
+		 * while text is selected (handle-dragging), while starting in an
+		 * editable, or while the shortcuts modal owns the screen.
+		 */
+		function middleSwipeTarget(
+			start: { x: number; y: number; clean: boolean },
+			ended: { clientX: number; clientY: number }
+		): EdgePanel | null {
+			if (!androidUI || !start.clean || shortcutsOpen) return null;
+			if (window.getSelection()?.isCollapsed === false) return null;
+			return contentSwipeTarget(start.x, start.y, ended.clientX, ended.clientY);
+		}
+		let edgeTouch: { id: number; x: number; y: number; clean: boolean } | null = null;
 		window.addEventListener(
 			"touchstart",
 			(event) => {
@@ -2033,7 +2231,13 @@
 				}
 				const touch = event.touches[0];
 				if (!touch) return;
-				edgeTouch = { id: touch.identifier, x: touch.clientX, y: touch.clientY };
+				// Mid-screen swipes must never steal text entry: a swipe
+				// starting in the composer or a field is cursor/scroll work.
+				const target = event.target;
+				const clean =
+					!(target instanceof Element) ||
+					target.closest(".cm-content, input, textarea, select, [contenteditable='true']") === null;
+				edgeTouch = { id: touch.identifier, x: touch.clientX, y: touch.clientY, clean };
 			},
 			{ passive: true }
 		);
@@ -2049,12 +2253,21 @@
 					if (candidate && candidate.identifier === start.id) ended = candidate;
 				}
 				if (!ended) return;
-				const target = edgeSwipeTarget(start.x, start.y, ended.clientX, ended.clientY, window.innerWidth);
+				const target =
+					edgeSwipeTarget(start.x, start.y, ended.clientX, ended.clientY, window.innerWidth) ??
+					middleSwipeTarget(start, ended);
+				// Swipes dismiss first, summon second: a rightward stroke
+				// with settings open closes settings (it doesn't summon
+				// chats), and a leftward stroke with chats open closes
+				// the sheet (it doesn't summon settings).
 				if (target === "chats") {
-					settings.sidebarCollapsed = !settings.sidebarCollapsed;
-					persistSettings();
+					if (settingsOpen) toggleSettingsPanel();
+					else toggleSidebar();
 				} else if (target === "settings") {
-					settingsOpen = !settingsOpen;
+					if (!settings.sidebarCollapsed) {
+						settings.sidebarCollapsed = true;
+						persistSettings();
+					} else toggleSettingsPanel();
 				}
 			},
 			{ passive: true }
@@ -2066,12 +2279,186 @@
 			},
 			{ passive: true }
 		);
+		// Touch text selection: a long-press selects natively, but the
+		// compatibility mouse sequence trailing it looks like a stale
+		// click (mousedown snapshots the already-made selection, mouseup
+		// clears it as "unchanged"), so the menu never appears. Handle
+		// touchend directly — a near-stationary lift over message text
+		// with a NEW selection summons the menu — and the guard in
+		// onMouseUp swallows the compat mouseup behind it. Multi-touch
+		// gestures claim their own sequences; taps matching the
+		// pre-touch selection are handle nudges, not new picks.
+		let touchMenuAt = 0;
+		let multiTouchSeen = false;
+		let selTouchStart: { x: number; y: number; sel: string } | null = null;
+		window.addEventListener(
+			"touchstart",
+			(event) => {
+				if (event.touches.length > 1) {
+					multiTouchSeen = true;
+					selTouchStart = null;
+					return;
+				}
+				const first = event.touches[0];
+				selTouchStart = first
+					? { x: first.clientX, y: first.clientY, sel: window.getSelection()?.toString() ?? "" }
+					: null;
+			},
+			{ passive: true }
+		);
+		window.addEventListener(
+			"touchend",
+			(event) => {
+				const start = selTouchStart;
+				selTouchStart = null;
+				if (event.touches.length === 0) {
+					const claimed = multiTouchSeen;
+					multiTouchSeen = false;
+					if (claimed) return;
+				} else if (multiTouchSeen) {
+					return;
+				}
+				if (!androidUI || shortcutsOpen || !start) return;
+				const touch = event.changedTouches[0];
+				if (!touch) return;
+				if (Math.hypot(touch.clientX - start.x, touch.clientY - start.y) > 20) return;
+				const el = document.elementFromPoint(touch.clientX, touch.clientY);
+				if (!el?.closest(".messages .rendered")) return;
+				const live = window.getSelection()?.toString() ?? "";
+				if (live === "" || live === start.sel) return;
+				placeSelMenu(touch.clientX);
+				touchMenuAt = Date.now();
+				// Headphones in: the fresh selection reads itself aloud
+				// on release (when a voice fits). The menu stays up, so
+				// Annotate is still one tap away after listening.
+				if (settings.autoSpeakSelection) {
+					const fresh = currentQuote();
+					if (fresh) void speakQuote(fresh.quote, fresh.messageId, true);
+				}
+			},
+			{ passive: true }
+		);
+		// Two-finger vertical swipe steps chats (down = newer like
+		// ⇧⌘J, up = older like ⇧⌘K, no focus: the keyboard stays down);
+		// a double three-finger tap deletes the current chat. Both
+		// start away from controls, drawers, and the modal, and the
+		// swipe's pinch veto (see twoFingerSwipeDir) keeps page zoom.
+		let twoTrack: { start: [FingerTrack, FingerTrack]; end: [FingerTrack, FingerTrack] } | null =
+			null;
+		let threeTrack: { x: number; y: number; moved: number; at: number } | null = null;
+		let lastThreeTapAt = 0;
+		const gestureClean = (event: TouchEvent): boolean => {
+			if (!androidUI || shortcutsOpen) return false;
+			const target = event.target;
+			return (
+				!(target instanceof Element) ||
+				target.closest(
+					".cm-content, input, textarea, select, [contenteditable='true'], button, aside, .settings-panel, .modal, .sel-menu"
+				) === null
+			);
+		};
+		const trackOf = (t: Touch): FingerTrack => ({ id: t.identifier, x: t.clientX, y: t.clientY });
+		window.addEventListener(
+			"touchstart",
+			(event) => {
+				if (event.touches.length === 2) {
+					const a = event.touches[0];
+					const b = event.touches[1];
+					twoTrack =
+						a && b && gestureClean(event)
+							? { start: [trackOf(a), trackOf(b)], end: [trackOf(a), trackOf(b)] }
+							: null;
+					threeTrack = null;
+				} else if (event.touches.length === 3) {
+					const first = event.touches[0];
+					threeTrack =
+						first && gestureClean(event)
+							? { x: first.clientX, y: first.clientY, moved: 0, at: Date.now() }
+							: null;
+					twoTrack = null;
+				} else {
+					twoTrack = null;
+				}
+			},
+			{ passive: true }
+		);
+		window.addEventListener(
+			"touchmove",
+			(event) => {
+				if (threeTrack) {
+					const first = event.touches[0];
+					if (first) {
+						threeTrack.moved = Math.max(
+							threeTrack.moved,
+							Math.hypot(first.clientX - threeTrack.x, first.clientY - threeTrack.y)
+						);
+					}
+				}
+				if (twoTrack) {
+					for (const t of Array.from(event.touches)) {
+						const slot = twoTrack.end.find((e) => e.id === t.identifier);
+						if (slot) {
+							slot.x = t.clientX;
+							slot.y = t.clientY;
+						}
+					}
+				}
+			},
+			{ passive: true }
+		);
+		window.addEventListener(
+			"touchend",
+			(event) => {
+				if (twoTrack) {
+					for (const t of Array.from(event.changedTouches)) {
+						const slot = twoTrack.end.find((e) => e.id === t.identifier);
+						if (slot) {
+							slot.x = t.clientX;
+							slot.y = t.clientY;
+						}
+					}
+					if (event.touches.length === 0) {
+						const dir = twoFingerSwipeDir(twoTrack.start, twoTrack.end);
+						twoTrack = null;
+						if (dir !== null) stepChat(dir, false);
+					}
+				}
+				if (threeTrack && event.touches.length === 0) {
+					const track = threeTrack;
+					threeTrack = null;
+					const now = Date.now();
+					if (isThreeFingerTap(3, track.moved, now - track.at)) {
+						if (now - lastThreeTapAt < 600) {
+							lastThreeTapAt = 0;
+							dropChat(chatState.activeChatId);
+							flashToast("Chat deleted");
+						} else {
+							lastThreeTapAt = now;
+						}
+					}
+				}
+			},
+			{ passive: true }
+		);
+		window.addEventListener(
+			"touchcancel",
+			() => {
+				twoTrack = null;
+				threeTrack = null;
+			},
+			{ passive: true }
+		);
 		if (!promptEl) return;
 		editor = createPromptEditor(promptEl, promptOptions());
-		editor.focus();
-		// Mount-time focus can lose to hydration churn; retry on next frame
-		// so a fresh window and a new chat both land in the prompt.
-		requestAnimationFrame(() => editor?.focus());
+		editor.setPlaceholder(promptPlaceholder());
+		// Desktop lands in the prompt on launch; phones don't — popping
+		// the keyboard on every cold start is the mobile annoyance.
+		if (!androidUI) {
+			editor.focus();
+			// Mount-time focus can lose to hydration churn; retry on next
+			// frame so a fresh window and a new chat both land in the prompt.
+			requestAnimationFrame(() => editor?.focus());
+		}
 		// First paint can measure while the webview is still settling
 		// (window restore, DPR): cached line boxes go stale and the prompt
 		// snaps to a new height on the next measure. Settle it up front,
@@ -2216,7 +2603,7 @@
 				if (event.code === "BracketRight") {
 					event.preventDefault();
 					event.stopPropagation();
-					settingsOpen = !settingsOpen;
+					toggleSettingsPanel();
 					return;
 				}
 				if (event.code === "KeyH") {
@@ -2244,7 +2631,7 @@
 						enterEditMode();
 						return;
 					}
-					settingsOpen = !settingsOpen;
+					toggleSettingsPanel();
 					return;
 				}
 				if (event.code === "Slash") {
@@ -2288,7 +2675,7 @@
 			// layouts, so both spellings count) — toggles the panel.
 			event.preventDefault();
 			event.stopPropagation();
-			settingsOpen = !settingsOpen;
+			toggleSettingsPanel();
 			return;
 		}
 		if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey) {
@@ -2303,14 +2690,14 @@
 				if (event.key === ".") {
 					event.preventDefault();
 					event.stopPropagation();
-					settingsOpen = !settingsOpen;
+					toggleSettingsPanel();
 					return;
 				}
 				if (event.key === ",") {
 					// ⌘, — the macOS Settings shortcut — toggles the panel.
 					event.preventDefault();
 					event.stopPropagation();
-					settingsOpen = !settingsOpen;
+					toggleSettingsPanel();
 					return;
 				}
 				const quickIdx = "1234567890".indexOf(event.key);
@@ -2616,6 +3003,11 @@
 		};
 		const onMouseUp = (event: MouseEvent) => {
 			selectingInMessage = false;
+			// Compat mouseup trailing a touch-handled selection: the menu
+			// is already up, and the staleness check below would clear it
+			// as a no-change click (touchMenuAt lives with the touchend
+			// listener above).
+			if (Date.now() - touchMenuAt < 800) return;
 			// Ignore clicks that start inside the prompt, popups, or buttons —
 			// only freshly selected message text summons the menu.
 			if (event.button === 2) return; // right-click reads aloud instead
@@ -2660,6 +3052,17 @@
 		// Capture phase + preventDefault pre-empts the native context menu.
 		const onContextMenu = (event: MouseEvent) => {
 			const target = event.target as HTMLElement | null;
+			// Android long-press fires contextmenu mid-hold, before
+			// touchend: summon the menu off the live selection without
+			// consuming the event, so the native callout (Copy) still
+			// appears. Desktop right-click keeps the speak path below.
+			if (androidUI && target?.closest(".messages .rendered")) {
+				if (currentQuote()) {
+					placeSelMenu(event.clientX);
+					touchMenuAt = Date.now();
+				}
+				return;
+			}
 			const body = target?.closest(".messages .rendered");
 			if (!body || target?.closest("button, input, textarea, a, summary")) return;
 			// Highlighted text wins over the word under the cursor: a
@@ -2685,7 +3088,11 @@
 			if (!word) return;
 			event.preventDefault();
 			const fallbackLang = settings.voiceLang?.trim() || "en-US";
-			const wordLang = ttsLangFor(word, fallbackLang);
+			const wordLang = effectiveSpeechLang(ttsLangFor(word, fallbackLang), webVoices());
+			if (!speechAttemptable(wordLang)) {
+				setVoiceError("No voice for this language.");
+				return;
+			}
 			if (settings.voiceEngine === "native") {
 				speakNativeWord(
 					word,
@@ -2800,6 +3207,7 @@
 	class="app"
 	data-focus-mode={focusMode}
 	data-shell={tauriBackendAvailable() ? "tauri" : "browser"}
+	data-android={androidUI || null}
 	style="--font-scale: {settings.fontScale}"
 >
 	<aside class:collapsed={settings.sidebarCollapsed} inert={settings.sidebarCollapsed} data-fade-scroll>
@@ -2839,7 +3247,7 @@
 		<button
 			type="button"
 			class="new"
-			title="New chat (⌘N or ⇧⌘N)"
+			title={tip("New chat (⌘N or ⇧⌘N)", "New chat")}
 			aria-label="New chat"
 			onclick={() => doNewChat()}
 		>
@@ -2851,6 +3259,7 @@
 	<!-- Click-off closes the settings panel (keyboard users get Esc and ⌘,). -->
 	<main
 		class:empty={viewChat.messages.length === 0}
+		class:hide-messages={settings.hideMessages}
 		class:land={landTick}
 		class:plain-user={!settings.ownBubble}
 		class:hover-user={settings.hoverUserActions}
@@ -2954,8 +3363,10 @@
 					class:selected={focusMode === "scroll" && selectedIdx === i}
 					class:speaking={speakingId === msg.id}
 					class:speaking-sel={speakingSelection === msg.id}
+					data-actions-open={shownActionsId === msg.id}
 					onclick={(e) => {
 						if (e.altKey) toggleFold(msg.id);
+						toggleMessageActions(msg.id, e);
 					}}
 					onmouseenter={() => (hoveredIdx = i)}
 					onmouseleave={(event) => onArticleLeave(event, msg, i)}
@@ -3022,7 +3433,7 @@
 							type="button"
 							class="icon-btn"
 							class:folded={isFolded}
-							data-tip="Fold this message (F or Option-click)"
+							data-tip={tip("Fold this message (F or Option-click)", "Fold this message")}
 							aria-label={isFolded ? "Unfold this message" : "Fold this message"}
 							onclick={() => toggleFold(msg.id)}
 						>
@@ -3049,8 +3460,8 @@
 						<button
 							type="button"
 							class="icon-btn"
-							data-tip="Delete this message (⌘D)"
-							aria-label="Delete this message (⌘D)"
+							data-tip={tip("Delete this message (⌘D)", "Delete this message")}
+							aria-label={tip("Delete this message (⌘D)", "Delete this message")}
 							onclick={() => deleteMessage(chatState, i)}
 						>
 							<ActionIcon kind="delete" />
@@ -3059,9 +3470,10 @@
 							type="button"
 							class="icon-btn"
 							class:active={speakingId === msg.id}
-							data-tip={speakTitle(msg)}
-							aria-label={speakTitle(msg)}
+							data-tip={messageSpeakable(msg) ? speakTitle(msg) : "No voice for this language"}
+							aria-label={messageSpeakable(msg) ? speakTitle(msg) : "No voice for this language"}
 							aria-pressed={speakingId === msg.id}
+							disabled={speakingId !== msg.id && !messageSpeakable(msg)}
 							onclick={() => {
 								if (speakingId === msg.id) stopVoice();
 								else void speakReply(msg);
@@ -3149,8 +3561,8 @@
 							<button
 								type="button"
 								class="icon-btn"
-								data-tip="Rerun from here — deletes everything after this message"
-								aria-label="Rerun from here — deletes everything after this message"
+								data-tip="Rerun"
+								aria-label="Rerun"
 								onclick={() => rerunFrom(i)}
 							>
 								<ActionIcon kind="rerun" />
@@ -3188,7 +3600,7 @@
 						class="link"
 						data-settings-toggle
 						onclick={() => {
-						settingsOpen = true;
+						openSettingsPanel();
 						pulseCursor();
 					}}
 					>
@@ -3201,7 +3613,7 @@
 						class="link"
 						data-settings-toggle
 						onclick={() => {
-						settingsOpen = true;
+						openSettingsPanel();
 						pulseCursor();
 					}}
 					>
@@ -3374,7 +3786,7 @@
 					type="button"
 					class="voice-float"
 					class:on={settings.voice}
-					title="Toggle voice readback (Ctrl+⌥+S)"
+					title={tip("Toggle voice readback (Ctrl+⌥+S)", "Toggle voice readback")}
 					aria-label="Toggle voice readback"
 					aria-pressed={settings.voice}
 					onclick={toggleVoice}
@@ -3399,7 +3811,11 @@
 		{/if}
 
 		{#if voiceError}
-			<p class="error-banner" role="alert">{voiceError}</p>
+			<!-- Top notice, not the bottom banner: speech errors arrive
+			while the eyes are on the message, and a tap dismisses. -->
+			<button type="button" class="voice-error" title="Dismiss" onclick={() => setVoiceError(null)}>
+				<span role="alert">{voiceError}</span>
+			</button>
 		{/if}
 
 		{#if translate}
@@ -3475,6 +3891,8 @@
 			role="menu"
 			transition:fade={{ duration: 150 }}
 		>
+			<!-- Annotate only, every device: speech lives in the OS text
+			toolbar's Read Aloud (touch) and right-click (desktop). -->
 			<button type="button" onclick={annotate}>Annotate</button>
 		</div>
 	{/if}
@@ -3585,6 +4003,7 @@
 			onShortcuts={() => (shortcutsOpen = true)}
 			tokensLabel="{formatTokens(split.prompt)} in / {formatTokens(split.completion)} out"
 			tokensTitle="{total} tokens total this chat"
+			androidUI={androidUI}
 		/>
 		</div>
 	</aside>
@@ -3604,7 +4023,7 @@
 					<button
 						type="button"
 						aria-label="Close shortcuts"
-						title="Close (⇧⌘/)"
+						title={tip("Close (⇧⌘/)", "Close")}
 						onclick={() => (shortcutsOpen = false)}
 					>
 						×
@@ -3619,12 +4038,14 @@
 					<!-- Android milestone: key chords don't exist on a phone,
 					so the same modal teaches the touch equivalents. -->
 					<dl class="keys">
-						<div><dt>Chats sidebar</dt><dd>Swipe right from the left edge (toggles)</dd></div>
+						<div><dt>Chats list</dt><dd>Swipe right from the left edge (tap the chat to close)</dd></div>
+					<div><dt>Newer / older chat</dt><dd>Two-finger swipe down / up</dd></div>
+					<div><dt>Delete current chat</dt><dd>Double three-finger tap</dd></div>
 						<div><dt>Settings</dt><dd>Swipe left from the right edge (toggles)</dd></div>
 						<div><dt>Send</dt><dd>The ↑ button (newline is your keyboard's return key)</dd></div>
 						<div><dt>Select text</dt><dd>Touch and hold a word, then drag the handles</dd></div>
 						<div><dt>Annotate</dt><dd>The Annotate menu appears by the selection</dd></div>
-						<div><dt>Speak text</dt><dd>Select it, then Speak in the menu</dd></div>
+						<div><dt>Speak text</dt><dd>Select it, then Read Aloud in the system menu</dd></div>
 						<div><dt>Message buttons</dt><dd>Always visible on touch — no hover needed</dd></div>
 						<div><dt>Edit a message</dt><dd>Its pencil button, then resend</dd></div>
 						<div><dt>Reply language</dt><dd>The language menu in the prompt</dd></div>
@@ -3673,10 +4094,27 @@
 		color: #1c1c1e;
 		background: #fff;
 		color-scheme: light dark;
+		/* Phones never pan sideways: a horizontal drift is a gesture,
+		not a scroll (it used to open settings by accident). clip, not
+		hidden, so fixed drawers stay viewport-relative. */
+		overflow-x: clip;
 	}
+	:global(html),
+	:global(body) {
+		overflow-x: clip;
+	}
+	/* Overlay drawer: the chat list slides over the main column instead
+	of squeezing it — the main chat keeps full width whether sidebars
+	are open or not. */
 	aside {
+		position: fixed;
+		left: 0;
+		top: 0;
+		bottom: 0;
 		width: 13rem;
-		flex-shrink: 0;
+		z-index: 55;
+		background: #fff;
+		box-shadow: 8px 0 24px rgba(0, 0, 0, 0.12);
 		border-right: 1px solid #e5e5ea;
 		padding: 0.8rem;
 		display: flex;
@@ -3781,43 +4219,42 @@
 		min-height: 1.25rem;
 	}
 	aside {
+		/* One duration for slide and fade: the old 0.12s opacity
+		finished first, so closes read as a fade while the slide ran
+		invisibly. Drawers slide both ways now. */
 		transition:
-			width 0.22s ease,
-			opacity 0.12s ease,
-			padding 0.22s ease,
-			border-color 0.22s ease;
+			transform 0.22s ease,
+			opacity 0.22s ease;
 		overflow: hidden;
 	}
 	aside.collapsed {
-		width: 0;
-		min-width: 0;
+		transform: translateX(-105%);
 		opacity: 0;
-		padding-left: 0;
-		padding-right: 0;
-		border-right-width: 0;
-		pointer-events: none;
 	}
+	/* Overlay drawer, right side: same contract as the chat list —
+	the main chat never squeezes. */
 	.settings-panel {
+		position: fixed;
+		right: 0;
+		top: 0;
+		bottom: 0;
 		width: 22rem;
-		flex-shrink: 0;
+		z-index: 55;
+		box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
 		border-left: 1px solid #e5e5ea;
 		padding: 1.2rem 0.7rem 2rem;
 		overflow-y: auto;
 		overflow-x: hidden;
 		background: #fff;
+		/* Same drawer contract as the chat list (see aside): the
+		fade used to finish first and swallow the closing slide. */
 		transition:
-			width 0.22s ease,
-			opacity 0.12s ease,
-			padding 0.22s ease,
-			border-color 0.22s ease;
+			transform 0.22s ease,
+			opacity 0.22s ease;
 	}
 	.settings-panel.closed {
-		width: 0;
+		transform: translateX(105%);
 		opacity: 0;
-		padding-left: 0;
-		padding-right: 0;
-		border-left-color: transparent;
-		pointer-events: none;
 	}
 	.settings-inner {
 		width: 20.6rem;
@@ -4047,6 +4484,101 @@
 		margin-left: 5.75rem;
 		margin-top: 0.35rem;
 	}
+	/* Android is a Tauri shell with no traffic lights and no window
+	drag: drop the desktop clearance and the empty drag strip. */
+	.app[data-android] header {
+		padding-left: 1.4rem;
+		padding-top: 0;
+	}
+	.app[data-android] .side-head {
+		margin-left: 0;
+		margin-top: 0;
+		min-height: 0;
+	}
+	/* Notch and home-indicator clearance: the reply pill stops riding
+	under the status clock, the composer clears the gesture bar. env()
+	is 0 where the webview already insets, so this no-ops there. */
+	.app[data-android] header {
+		padding-top: env(safe-area-inset-top, 0px);
+	}
+	.app[data-android] main {
+		padding-bottom: env(safe-area-inset-bottom, 0px);
+	}
+	/* Full-width settings sheet on phones: no sliver to tap, no
+	weird one-tap-close strip. left+right with auto width fills
+	exactly (a 100% width would add the padding on top and overflow).
+	The inner column centers itself. */
+	.app[data-android] .settings-panel {
+		left: 0;
+		width: auto;
+		padding-top: calc(1.2rem + env(safe-area-inset-top, 0px));
+	}
+	.app[data-android] .settings-inner {
+		width: auto;
+		max-width: 26rem;
+		margin-left: auto;
+		margin-right: auto;
+	}
+	/* Chats with messages lift the composer off the bottom and give
+	it more rows: the empty state's hero layout keeps its own rhythm.
+	No font-size here — CodeMirror caches line metrics, and a size
+	change out from under it collapses the editor to zero height. */
+	.app[data-android] main:not(.empty) .prompt {
+		margin-bottom: 1.8rem;
+		min-height: 7.25rem;
+	}
+	/* Touch has no hover: tooltips only ever appear as a clipped
+	flash on long-press (the fold button's runs off-screen). */
+	.app[data-android] .actions [data-tip]::after {
+		display: none;
+	}
+	/* Thumb-sized Cancel targets on phones: the annotation review and
+	pill buttons plus the chat-row ×. Message-row icons stay tight so
+	the row never overflows the phone width. */
+	.app[data-android] .review-edit-actions button {
+		padding: 0.6rem 1.2rem;
+		min-height: 2.75rem;
+	}
+	.app[data-android] .ann-cancel,
+	.app[data-android] .ann-save {
+		min-height: 2.75rem;
+	}
+	.app[data-android] aside li .del {
+		padding: 0.6rem;
+		min-width: 2.75rem;
+		min-height: 2.75rem;
+	}
+	/* Phones thumb-reach the chat list: it slides up from the bottom
+	instead of in from the left. Desktop keeps the left drawer; the
+	settings panel keeps its right drawer (one sidebar at a time). */
+	.app[data-android] aside:not(.settings-panel) {
+		left: 0;
+		right: 0;
+		top: auto;
+		bottom: 0;
+		width: auto;
+		max-height: 62vh;
+		overflow-y: auto;
+		border-right: 0;
+		border-top: 1px solid #e5e5ea;
+		border-radius: 16px 16px 0 0;
+		box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.16);
+		padding-bottom: calc(0.8rem + env(safe-area-inset-bottom, 0px));
+	}
+	.app[data-android] aside:not(.settings-panel).collapsed {
+		transform: translateY(105%);
+	}
+	/* Four region menus share one row on a phone: no wrap, tighter
+	chrome. Desktop keeps the wrapping rhythm. */
+	.app[data-android] .lang-menus {
+		flex-wrap: nowrap;
+		gap: 0.4rem;
+	}
+	.app[data-android] .lang-menu > button {
+		font-size: 0.75rem;
+		padding: 0.3rem 0.55rem;
+		white-space: nowrap;
+	}
 	nav {
 		display: flex;
 		gap: 0.3rem;
@@ -4158,6 +4690,11 @@
 	}
 	.messages {
 		flex: 1;
+		/* Flex items default to min-height: auto, which lets growing
+		content stretch this pane and squeeze the composer instead of
+		scrolling inside it — the prompt shrank and juddered with
+		every streamed chunk. Zero lets it scroll like it should. */
+		min-height: 0;
 		overflow-y: auto;
 		/* Selection starts at message text only: dragging empty space
 		between messages is a plain pointer drag (arrow, no I-beam, no
@@ -4289,9 +4826,9 @@
 	}
 	main.empty .messages {
 		justify-content: center;
-		/* Cap the hero zone so the composer rests near the middle,
-		not pinned to the bottom. */
-		max-height: 42%;
+		/* Roomy hero zone: on the empty screen the prompt and pills sit
+		below the fold of the hero, neither middle nor bottom. */
+		max-height: 60%;
 	}
 	.empty-state {
 		display: flex;
@@ -4354,6 +4891,15 @@
 		border-radius: 10px;
 		background: #fff;
 		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+	}
+	@media (hover: none) {
+		/* A phone can't fit the 15-item list above the pills, so it
+		gets a capped sheet with its own scroll instead of flying off
+		the top of the screen. Desktop keeps full extent, no scrollbar. */
+		.lang-list {
+			max-height: 52vh;
+			overflow-y: auto;
+		}
 	}
 	.lang-list button {
 		display: flex;
@@ -4607,7 +5153,7 @@
 	}
 	.toast {
 		position: fixed;
-		top: 0.5rem;
+		top: calc(0.5rem + env(safe-area-inset-top, 0px));
 		left: 50%;
 		transform: translateX(-50%);
 		z-index: 100;
@@ -4621,6 +5167,27 @@
 		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 		cursor: pointer;
 		white-space: nowrap;
+	}
+	/* Speech errors ride under the toast: top of the screen, big
+	enough to notice, same dark-red pairing as the old banner so it
+	reads in both themes. A tap dismisses; silence still expires it. */
+	.voice-error {
+		position: fixed;
+		top: calc(3rem + env(safe-area-inset-top, 0px));
+		left: 50%;
+		transform: translateX(-50%);
+		z-index: 100;
+		max-width: min(30rem, calc(100vw - 2rem));
+		background: #3d1008;
+		color: #ffb4a2;
+		font: inherit;
+		font-size: 0.95rem;
+		line-height: 1.4;
+		padding: 0.7rem 1.1rem;
+		border: 0;
+		border-radius: 12px;
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+		cursor: pointer;
 	}
 	@keyframes voice-pulse {
 		0%,
@@ -5097,6 +5664,24 @@
 			opacity: 1;
 		}
 	}
+	/* Hide-messages mode (touch option): bodies and baked quote blocks
+	stay hidden until their message is tapped open; the open row shows
+	text and buttons for 3s. Later than the hover rules so it wins ties;
+	the open-row attr outranks them outright. */
+	main.hide-messages article :global(.rendered),
+	main.hide-messages article .ann-refs {
+		display: none;
+	}
+	main.hide-messages article .actions {
+		opacity: 0;
+	}
+	main.hide-messages article[data-actions-open="true"] :global(.rendered),
+	main.hide-messages article[data-actions-open="true"] .ann-refs {
+		display: block;
+	}
+	main.hide-messages article[data-actions-open="true"] .actions {
+		opacity: 1;
+	}
 	/* Own messages pack to the right edge: block, text column, and row. */
 	article.user .actions {
 		justify-content: flex-end;
@@ -5153,6 +5738,10 @@
 			animation: none;
 			transition: opacity 0.12s ease 2s;
 		}
+		aside,
+		.settings-panel {
+			transition: none;
+		}
 	}
 	/* Text and icon buttons share one stable box: padding makes a real
 	hit area, hover is a color shift only (no underline, no background),
@@ -5177,6 +5766,11 @@
 	.actions button:disabled {
 		cursor: default;
 		opacity: 0.8;
+	}
+	/* A speak button with no voice for the language dims further: it is
+	off, not busy (vocalizing aids keep the rule above). */
+	.actions .icon-btn:disabled {
+		opacity: 0.35;
 	}
 	.actions .icon-btn {
 		display: inline-flex;
@@ -5405,23 +5999,23 @@
 		/* Scroll mode shows no prompt cursor at all (see enterScrollMode). */
 		display: none;
 	}
-	@media (prefers-color-scheme: dark) {
-		.prompt :global(.cm-content) {
-			caret-color: #f2f2f7;
-		}
-		.prompt :global(.cm-placeholder) {
-			color: #636366;
-		}
-		:global(.cm-editor .cm-cursor) {
-			border-left-color: #f2f2f7 !important;
-		}
-		/* !important throughout: the CodeMirror theme object injects its
-		light rules after this stylesheet, so only importance wins. */
-		:global(.cm-paste-marker) {
-			background: #2c2c2e !important;
-			border-color: #48484a !important;
-			color: #f2f2f7 !important;
-		}
+	/* Dark theme, gated on the resolved scheme (<html data-theme>)
+	instead of the OS query, so the settings switch can pin it. */
+	:global(html[data-theme="dark"]) .prompt :global(.cm-content) {
+		caret-color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .prompt :global(.cm-placeholder) {
+		color: #636366;
+	}
+	:global(html[data-theme="dark"]) :global(.cm-editor .cm-cursor) {
+		border-left-color: #f2f2f7 !important;
+	}
+	/* !important throughout: the CodeMirror theme object injects its
+	light rules after this stylesheet, so only importance wins. */
+	:global(html[data-theme="dark"]) :global(.cm-paste-marker) {
+		background: #2c2c2e !important;
+		border-color: #48484a !important;
+		color: #f2f2f7 !important;
 	}
 	/* Centered reading column on wide screens (DeepSeek-web rhythm). */
 	article,
@@ -5454,259 +6048,257 @@
 		border-color: #3a3a3c;
 	}
 
-	@media (prefers-color-scheme: dark) {
-		.app {
-			color: #f2f2f7;
-			background: #17171a;
-		}
-		aside {
-			border-color: #38383a;
-		}
-		aside button.active {
-			background: transparent;
-		}
-		aside ul button:hover {
-			background: #2c2c2e;
-		}
-		aside .new:hover {
-			border-color: #aeaeb2;
-		}
-		aside .del:hover {
-			color: #e89a90;
-		}
-
-		aside .new {
-			border-color: #48484a;
-		}
-		header {
-			border-color: #38383a;
-		}
-		.voice-float {
-			color: #98989f;
-		}
-		.voice-float:hover {
-			color: #f2f2f7;
-		}
-		:global(::selection) {
-			background: rgba(129, 140, 248, 0.4);
-		}
-		.voice-float.on {
-			color: #7cc3a3;
-		}
-		.settings-panel {
-			background: #17171a;
-			border-color: #38383a;
-		}
-		.modal {
-			background: #17171a;
-			border-color: #38383a;
-			color: #f2f2f7;
-		}
-		.modal-head button {
-			border-color: #48484a;
-			color: #aeaeb2;
-		}
-		.modal-head button:hover {
-			border-color: #aeaeb2;
-			color: #f2f2f7;
-		}
-		.keys div {
-			border-color: #38383a;
-		}
-		.keys dt {
-			color: #aeaeb2;
-		}
-		.keys dd {
-			color: #f2f2f7;
-		}
-		.modal-note {
-			color: #98989f;
-		}
-		nav {
-			border-color: #38383a;
-		}
-		nav button {
-			background: #1c1c1e;
-			border-color: #48484a;
-			color: #f2f2f7;
-		}
-		.wp-menu {
-			background: #1c1c1e;
-			border-color: #48484a;
-		}
-		.wp-menu button {
-			color: #f2f2f7;
-		}
-		.wp-menu button:hover {
-			background: #2c2c2e;
-		}
-		article.user .bubble {
-			background: #2c2c2e;
-		}
-		main.plain-user article.user .bubble {
-			background: none;
-		}
-		article.selected {
-			outline-color: #aeaeb2;
-		}
-		.actions button {
-			color: #98989f;
-		}
-		.actions button:hover {
-			color: #f2f2f7;
-		}
-		/* Same specificity as the light-theme hover above, so dark wins. */
-		.actions .icon-btn:hover {
-			color: #f2f2f7;
-		}
-		/* The message being read aloud: green stop button, held on hover
-		(the equal-specificity hover above would otherwise strip it). */
-		.actions .icon-btn.active,
-		.actions .icon-btn.active:hover {
-			color: #7cc3a3;
-		}
-		.attach-btn:hover,
-		.voice-float:hover,
-		.mic-btn:hover {
-			color: #f2f2f7;
-		}
-		.error-banner {
-			background: #3d1008;
-			color: #ffb4a2;
-		}
-		.sent-files {
-			color: #98989f;
-		}
-		.attachments li {
-			background: #12233d;
-		}
-		.attachments .tok {
-			color: #98989f;
-		}
-		.attachments button {
-			color: #f2f2f7;
-		}
-		.preview {
-			border-color: #48484a;
-		}
-		.ann-wrap {
-			border-color: #48484a;
-		}
-		.ann-wrap > button {
-			color: #98989f;
-		}
-		.ann-wrap > button:hover {
-			color: #f2f2f7;
-		}
-		.review-tools button {
-			color: #98989f;
-		}
-		.review-tools button:hover {
-			color: #e89a90;
-		}
-		.sel-menu {
-			background: #1c1c1e;
-			border-color: #48484a;
-		}
-		.sel-menu button {
-			color: #f2f2f7;
-		}
-		.sel-menu button:hover {
-			background: #2c2c2e;
-		}
-		.ann-pop {
-			background: #1c1c1e;
-			border-color: #38383a;
-		}
-		.review,
-		.translate-panel {
-			background: #1c1c1e;
-			border-color: #38383a;
-		}
-		.review-item.highlight {
-			background: #12233d;
-		}
-		.review-head button {
-			color: #98989f;
-		}
-		.review-head button:hover {
-			color: #f2f2f7;
-		}
-		.review-label {
-			color: #98989f;
-		}
-		.review textarea {
-			background: #101013;
-			border-color: #48484a;
-			color: #f2f2f7;
-		}
-		.review textarea:focus {
-			border-color: #aeaeb2;
-		}
-		/* Dark primary: light pill, dark text (mirrors the send
-		button's inversion); Cancel stays quiet gray text. */
-		.review-edit-actions button {
-			background: #f2f2f7;
-			border-color: #f2f2f7;
-			color: #1c1c1e;
-		}
-		.review-edit-actions button:last-child {
-			background: none;
-			border-color: transparent;
-			color: #98989f;
-		}
-		.review-edit-actions button:last-child:hover {
-			color: #f2f2f7;
-		}
-		.muted {
-			color: #98989f;
-		}
-		.prompt {
-			background: #1c1c1e;
-			border-color: #48484a;
-		}
-		.prompt:focus-within {
-			border-color: #aeaeb2;
-		}
-		.prompt:hover {
-			border-color: #636366;
-		}
-		.prompt:focus-within:hover {
-			border-color: #aeaeb2;
-		}
-
-		.lang-chip {
-			color: #f2f2f7;
-			border-color: #aeaeb2;
-		}
-		.lang-menu > button {
-			color: #f2f2f7;
-			border-color: #48484a;
-		}
-		.lang-menu > button:hover {
-			border-color: #aeaeb2;
-		}
-		.lang-list {
-			background: #1c1c1e;
-			border-color: #48484a;
-		}
-		.lang-list button {
-			color: #f2f2f7;
-		}
-		.lang-list button:hover,
-		.lang-list button:focus-visible,
-		.lang-list button.selected {
-			background: #2c2c2e;
-		}
-		.badge {
-			color: #aeaeb2;
-			border-color: #48484a;
-		}
-
-		.send-btn {
-			background: #f2f2f7;
-			border-color: #f2f2f7;
-			color: #1c1c1e;
-		}
+	/* Dark theme, gated on the resolved scheme (<html data-theme>)
+	instead of the OS query, so the settings switch can pin it. */
+	:global(html[data-theme="dark"]) .app {
+		color: #f2f2f7;
+		background: #17171a;
+	}
+	:global(html[data-theme="dark"]) aside {
+		border-color: #38383a;
+		background: #17171a;
+	}
+	:global(html[data-theme="dark"]) aside button.active {
+		background: transparent;
+	}
+	:global(html[data-theme="dark"]) aside ul button:hover {
+		background: #2c2c2e;
+	}
+	:global(html[data-theme="dark"]) aside .new:hover {
+		border-color: #aeaeb2;
+	}
+	:global(html[data-theme="dark"]) aside .del:hover {
+		color: #e89a90;
+	}
+	:global(html[data-theme="dark"]) aside .new {
+		border-color: #48484a;
+	}
+	:global(html[data-theme="dark"]) header {
+		border-color: #38383a;
+	}
+	:global(html[data-theme="dark"]) .voice-float {
+		color: #98989f;
+	}
+	:global(html[data-theme="dark"]) .voice-float:hover {
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) :global(::selection) {
+		background: rgba(129, 140, 248, 0.4);
+	}
+	:global(html[data-theme="dark"]) .voice-float.on {
+		color: #7cc3a3;
+	}
+	:global(html[data-theme="dark"]) .settings-panel {
+		background: #17171a;
+		border-color: #38383a;
+	}
+	:global(html[data-theme="dark"]) .modal {
+		background: #17171a;
+		border-color: #38383a;
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .modal-head button {
+		border-color: #48484a;
+		color: #aeaeb2;
+	}
+	:global(html[data-theme="dark"]) .modal-head button:hover {
+		border-color: #aeaeb2;
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .keys div {
+		border-color: #38383a;
+	}
+	:global(html[data-theme="dark"]) .keys dt {
+		color: #aeaeb2;
+	}
+	:global(html[data-theme="dark"]) .keys dd {
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .modal-note {
+		color: #98989f;
+	}
+	:global(html[data-theme="dark"]) nav {
+		border-color: #38383a;
+	}
+	:global(html[data-theme="dark"]) nav button {
+		background: #1c1c1e;
+		border-color: #48484a;
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .wp-menu {
+		background: #1c1c1e;
+		border-color: #48484a;
+	}
+	:global(html[data-theme="dark"]) .wp-menu button {
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .wp-menu button:hover {
+		background: #2c2c2e;
+	}
+	:global(html[data-theme="dark"]) article.user .bubble {
+		background: #2c2c2e;
+	}
+	:global(html[data-theme="dark"]) main.plain-user article.user .bubble {
+		background: none;
+	}
+	:global(html[data-theme="dark"]) article.selected {
+		outline-color: #aeaeb2;
+	}
+	:global(html[data-theme="dark"]) .actions button {
+		color: #98989f;
+	}
+	:global(html[data-theme="dark"]) .actions button:hover {
+		color: #f2f2f7;
+	}
+	/* Same specificity as the light-theme hover above, so dark wins. */
+	:global(html[data-theme="dark"]) .actions .icon-btn:hover {
+		color: #f2f2f7;
+	}
+	/* The message being read aloud: green stop button, held on hover
+	(the equal-specificity hover above would otherwise strip it). */
+	:global(html[data-theme="dark"]) .actions .icon-btn.active,
+	:global(html[data-theme="dark"]) .actions .icon-btn.active:hover {
+		color: #7cc3a3;
+	}
+	:global(html[data-theme="dark"]) .attach-btn:hover,
+	:global(html[data-theme="dark"]) .voice-float:hover,
+	:global(html[data-theme="dark"]) .mic-btn:hover {
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .error-banner {
+		background: #3d1008;
+		color: #ffb4a2;
+	}
+	:global(html[data-theme="dark"]) .sent-files {
+		color: #98989f;
+	}
+	:global(html[data-theme="dark"]) .attachments li {
+		background: #12233d;
+	}
+	:global(html[data-theme="dark"]) .attachments .tok {
+		color: #98989f;
+	}
+	:global(html[data-theme="dark"]) .attachments button {
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .preview {
+		border-color: #48484a;
+	}
+	:global(html[data-theme="dark"]) .ann-wrap {
+		border-color: #48484a;
+	}
+	:global(html[data-theme="dark"]) .ann-wrap > button {
+		color: #98989f;
+	}
+	:global(html[data-theme="dark"]) .ann-wrap > button:hover {
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .review-tools button {
+		color: #98989f;
+	}
+	:global(html[data-theme="dark"]) .review-tools button:hover {
+		color: #e89a90;
+	}
+	:global(html[data-theme="dark"]) .sel-menu {
+		background: #1c1c1e;
+		border-color: #48484a;
+	}
+	:global(html[data-theme="dark"]) .sel-menu button {
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .sel-menu button:hover {
+		background: #2c2c2e;
+	}
+	:global(html[data-theme="dark"]) .ann-pop {
+		background: #1c1c1e;
+		border-color: #38383a;
+	}
+	:global(html[data-theme="dark"]) .review,
+	:global(html[data-theme="dark"]) .translate-panel {
+		background: #1c1c1e;
+		border-color: #38383a;
+	}
+	:global(html[data-theme="dark"]) .review-item.highlight {
+		background: #12233d;
+	}
+	:global(html[data-theme="dark"]) .review-head button {
+		color: #98989f;
+	}
+	:global(html[data-theme="dark"]) .review-head button:hover {
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .review-label {
+		color: #98989f;
+	}
+	:global(html[data-theme="dark"]) .review textarea {
+		background: #101013;
+		border-color: #48484a;
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .review textarea:focus {
+		border-color: #aeaeb2;
+	}
+	/* Dark primary: light pill, dark text (mirrors the send
+	button's inversion); Cancel stays quiet gray text. */
+	:global(html[data-theme="dark"]) .review-edit-actions button {
+		background: #f2f2f7;
+		border-color: #f2f2f7;
+		color: #1c1c1e;
+	}
+	:global(html[data-theme="dark"]) .review-edit-actions button:last-child {
+		background: none;
+		border-color: transparent;
+		color: #98989f;
+	}
+	:global(html[data-theme="dark"]) .review-edit-actions button:last-child:hover {
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .muted {
+		color: #98989f;
+	}
+	:global(html[data-theme="dark"]) .prompt {
+		background: #1c1c1e;
+		border-color: #48484a;
+	}
+	:global(html[data-theme="dark"]) .prompt:focus-within {
+		border-color: #aeaeb2;
+	}
+	:global(html[data-theme="dark"]) .prompt:hover {
+		border-color: #636366;
+	}
+	:global(html[data-theme="dark"]) .prompt:focus-within:hover {
+		border-color: #aeaeb2;
+	}
+	:global(html[data-theme="dark"]) .lang-chip {
+		color: #f2f2f7;
+		border-color: #aeaeb2;
+	}
+	:global(html[data-theme="dark"]) .lang-menu > button {
+		color: #f2f2f7;
+		border-color: #48484a;
+	}
+	:global(html[data-theme="dark"]) .lang-menu > button:hover {
+		border-color: #aeaeb2;
+	}
+	:global(html[data-theme="dark"]) .lang-list {
+		background: #1c1c1e;
+		border-color: #48484a;
+	}
+	:global(html[data-theme="dark"]) .lang-list button {
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .lang-list button:hover,
+	:global(html[data-theme="dark"]) .lang-list button:focus-visible,
+	:global(html[data-theme="dark"]) .lang-list button.selected {
+		background: #2c2c2e;
+	}
+	:global(html[data-theme="dark"]) .badge {
+		color: #aeaeb2;
+		border-color: #48484a;
+	}
+	:global(html[data-theme="dark"]) .send-btn {
+		background: #f2f2f7;
+		border-color: #f2f2f7;
+		color: #1c1c1e;
 	}
 </style>

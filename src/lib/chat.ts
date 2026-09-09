@@ -330,15 +330,7 @@ export async function resendLast(
 	const chat = activeChat(state);
 	const last = chat.messages[chat.messages.length - 1];
 	if (!last || last.role !== "user" || state.sending) return;
-	chat.messages = chat.messages.slice(0, -1);
-	await sendMessage(
-		state,
-		provider,
-		systemPrompt,
-		last.content,
-		{ attachments: last.attachments, thinking: opts.thinking },
-		opts.store
-	);
+	await streamAssistantReply(state, provider, systemPrompt, { thinking: opts.thinking }, opts.store);
 }
 
 export function tokenTotal(state: ChatState, chat?: Chat): number {
@@ -461,7 +453,31 @@ export async function sendMessage(
 		}
 	];
 	persistChats(state, store);
+	await streamAssistantReply(
+		state,
+		provider,
+		systemPrompt,
+		{ signal: opts.signal, thinking: opts.thinking },
+		store
+	);
+}
 
+/**
+ * Stream one assistant reply onto the messages already there. The
+ * last message must be the user turn being answered: resends reuse
+ * it in place (same id, same attachments and paste folds) instead of
+ * slicing it off and re-adding a copy, so retrying a failed reply
+ * never remounts — and flashes — the messages above it.
+ */
+export async function streamAssistantReply(
+	state: ChatState,
+	provider: ChatProvider,
+	systemPrompt: string,
+	opts: { signal?: AbortSignal | undefined; thinking?: string | undefined } = {},
+	store?: KeyValueStore
+): Promise<void> {
+	if (state.sending) return;
+	const chat = activeChat(state);
 	const apiMessages = buildApiMessages(chat, systemPrompt);
 	const replyId = newChatMsgId();
 	chat.messages = [

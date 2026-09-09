@@ -4,6 +4,8 @@ import {
 	splitSentences,
 	speechText,
 	replyLangFor,
+	webVoiceAvailable,
+	effectiveSpeechLang,
 	splitSpeechSegments,
 	speakText,
 	speakMultilingual,
@@ -78,5 +80,38 @@ describe("splitSpeechSegments", () => {
 	});
 	it("returns no segments for blank text", () => {
 		expect(splitSpeechSegments("   ", langFor)).toEqual([]);
+	});
+});
+
+describe("webVoiceAvailable", () => {
+	const VOICES = [{ lang: "en-US" }, { lang: "fr-FR" }, { lang: "ja-JP" }];
+	it("matches the two-letter prefix case-insensitively", () => {
+		expect(webVoiceAvailable("en-US", VOICES)).toBe(true);
+		expect(webVoiceAvailable("en-GB", VOICES)).toBe(true);
+		expect(webVoiceAvailable("fr-CA", VOICES)).toBe(true);
+		expect(webVoiceAvailable("la", VOICES)).toBe(false);
+		expect(webVoiceAvailable("de-DE", VOICES)).toBe(false);
+	});
+	it("treats an unloaded inventory as available, blank as not", () => {
+		expect(webVoiceAvailable("la", [])).toBe(true);
+		expect(webVoiceAvailable("", VOICES)).toBe(false);
+	});
+});
+
+describe("effectiveSpeechLang", () => {
+	const VOICES = [{ lang: "en-US" }, { lang: "it-IT" }, { lang: "hi-IN" }, { lang: "ja-JP" }];
+	it("keeps the request when a voice exists", () => {
+		expect(effectiveSpeechLang("en-US", VOICES)).toBe("en-US");
+		expect(effectiveSpeechLang("ja-JP", VOICES)).toBe("ja-JP");
+	});
+	it("stands Latin in for Italian and Sanskrit for Hindi", () => {
+		expect(effectiveSpeechLang("la", VOICES)).toBe("it-IT");
+		expect(effectiveSpeechLang("sa", VOICES)).toBe("hi-IN");
+	});
+	it("leaves truly voiceless requests to the error path", () => {
+		expect(effectiveSpeechLang("de-DE", VOICES)).toBe("de-DE");
+	});
+	it("never routes on an unloaded inventory", () => {
+		expect(effectiveSpeechLang("la", [])).toBe("la");
 	});
 });

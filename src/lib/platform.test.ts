@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { isAndroidUserAgent, isCoarsePointer, edgeSwipeTarget, visibleProviderIds } from "./platform";
+import {
+	isAndroidUserAgent,
+	isCoarsePointer,
+	edgeSwipeTarget,
+	contentSwipeTarget,
+	visibleProviderIds,
+	twoFingerSwipeDir,
+	isThreeFingerTap
+} from "./platform";
 
 const ANDROID_UA =
 	"Mozilla/5.0 (Linux; Android 14; SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36";
@@ -62,6 +70,18 @@ describe("edgeSwipeTarget", () => {
 	});
 });
 
+describe("contentSwipeTarget", () => {
+	it("opens chats rightward and settings leftward from mid-screen", () => {
+		expect(contentSwipeTarget(150, 600, 240, 604)).toBe("chats");
+		expect(contentSwipeTarget(260, 600, 170, 596)).toBe("settings");
+	});
+	it("rejects short drags, vertical scrolls, and directionless taps", () => {
+		expect(contentSwipeTarget(150, 600, 200, 600)).toBeNull(); // too short
+		expect(contentSwipeTarget(150, 600, 260, 760)).toBeNull(); // vertical
+		expect(contentSwipeTarget(150, 600, 151, 600)).toBeNull(); // tap
+	});
+});
+
 describe("visibleProviderIds", () => {
 	const CLOUD = ["muse", "deepseek"];
 	it("lists everything on desktop, online or not", () => {
@@ -83,3 +103,39 @@ describe("visibleProviderIds", () => {
 		expect(visibleProviderIds(all, { android: true, online: false, local: false })).toEqual([]);
 	});
 });
+
+describe("twoFingerSwipeDir", () => {
+	const grip = (x: number, y: number) =>
+		([
+			{ id: 0, x, y },
+			{ id: 1, x: x + 40, y }
+		] as [{ id: number; x: number; y: number }, { id: number; x: number; y: number }]);
+	it("steps older on swipe up, newer on swipe down", () => {
+		expect(twoFingerSwipeDir(grip(100, 600), grip(100, 400))).toBe(-1);
+		expect(twoFingerSwipeDir(grip(100, 400), grip(100, 600))).toBe(1);
+	});
+	it("rejects short glides, splits, diagonals, and pinches", () => {
+		expect(twoFingerSwipeDir(grip(100, 600), grip(100, 560))).toBeNull(); // too short
+		const split = grip(100, 600);
+		const splitEnd = grip(100, 400);
+		splitEnd[1] = { ...splitEnd[1], y: 800 };
+		expect(twoFingerSwipeDir(split, splitEnd)).toBeNull(); // fingers split
+		expect(twoFingerSwipeDir(grip(100, 600), grip(300, 400))).toBeNull(); // diagonal
+		const pinch = grip(100, 500);
+		const pinched = grip(100, 300).map((f, i) => ({ ...f, x: i === 0 ? 40 : 200 }));
+		expect(
+			twoFingerSwipeDir(pinch, pinched as typeof pinch)
+		).toBeNull(); // spread change = pinch
+	});
+});
+
+describe("isThreeFingerTap", () => {
+	it("accepts a still three-finger tap, rejects everything else", () => {
+		expect(isThreeFingerTap(3, 4, 180)).toBe(true);
+		expect(isThreeFingerTap(2, 4, 180)).toBe(false);
+		expect(isThreeFingerTap(3, 40, 180)).toBe(false);
+		expect(isThreeFingerTap(3, 4, 900)).toBe(false);
+	});
+});
+
+
