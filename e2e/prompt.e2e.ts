@@ -15,6 +15,22 @@ test("prompt types and sends without vim", async ({ page }) => {
 	await expect(page.locator(".cm-content")).toContainText("ctrl+g to hop back in");
 });
 
+/** j past the newest message drops back into the prompt. */
+test("j on the newest message returns to the prompt", async ({ page }) => {
+	await seedChat(page, [
+		{ role: "user", content: "one" },
+		{ role: "assistant", content: "two" }
+	]);
+	await page.goto("/");
+	await page.locator(".cm-content").click();
+	await page.keyboard.press("Control+g");
+	await expect(page.locator('.app[data-focus-mode="scroll"]')).toHaveCount(1);
+	// G lands on the newest message; j past it hops back to edit mode.
+	await page.keyboard.press("G");
+	await page.keyboard.press("j");
+	await expect(page.locator('.app[data-focus-mode="edit"]')).toHaveCount(1);
+});
+
 /** The prompt grows with the draft, then stops and scrolls inside. */
 test("long drafts cap the prompt height and scroll", async ({ page }) => {
 	await seedChat(page, []);

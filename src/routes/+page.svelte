@@ -2966,7 +2966,10 @@
 			if (event.key === "j" || event.key === "ArrowDown") {
 				event.preventDefault();
 				lastGAt = 0;
-				jumpTo(Math.min(selectedIdx + 1, chat.messages.length - 1));
+				// Past the newest message drops back into the prompt:
+				// scroll mode is for visiting history, not parking.
+				if (selectedIdx >= chat.messages.length - 1) enterEditMode();
+				else jumpTo(selectedIdx + 1);
 			} else if (event.key === "k" || event.key === "ArrowUp") {
 				event.preventDefault();
 				lastGAt = 0;
@@ -4398,6 +4401,9 @@
 	.settings-panel {
 		position: fixed;
 		right: 0;
+		/* The chat-list drawer rule parks asides left: reset it here or
+		the right-docked panel over-constrains and left wins. */
+		left: auto;
 		top: 0;
 		bottom: 0;
 		width: 22rem;
@@ -5308,6 +5314,10 @@
 		align-self: center;
 		padding-left: 0;
 		padding-right: 0;
+		/* Assistant text packs tight: the list gap already separates
+		messages, so no vertical padding here (desktop and touch). */
+		padding-top: 0;
+		padding-bottom: 0;
 	}
 	/* Unshaded own messages read like replies: no bubble, but the same
 	right-docked flow — alignment never changes with the background.
