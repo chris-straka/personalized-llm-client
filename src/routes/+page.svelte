@@ -3443,30 +3443,15 @@
 				</li>
 			{/each}
 		</ul>
-		<div class="side-foot">
-			<button
-				type="button"
-				class="new"
-				title={tip("New chat (⌘N or ⇧⌘N)", "New chat")}
-				aria-label="New chat"
-				onclick={() => doNewChat()}
-			>
-				+
-			</button>
-			{#if androidUI}
-				<!-- Phone has no menu bar: this is the only visible door
-				to the gestures list (settings itself takes a gesture). -->
-				<button
-					type="button"
-					class="new"
-					title="Touch gestures"
-					aria-label="Touch gestures"
-					onclick={() => (shortcutsOpen = true)}
-				>
-					?
-				</button>
-			{/if}
-		</div>
+		<button
+			type="button"
+			class="new"
+			title={tip("New chat (⌘N or ⇧⌘N)", "New chat")}
+			aria-label="New chat"
+			onclick={() => doNewChat()}
+		>
+			+
+		</button>
 	</aside>
 
 	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
@@ -4314,7 +4299,6 @@
 					<div><dt>Delete current chat</dt><dd>Double three-finger tap</dd></div>
 						<div><dt>Annotate</dt><dd>Select text and click the popup</dd></div>
 						<div><dt>Message buttons</dt><dd>Tap a message</dd></div>
-						<div><dt>Edit a message</dt><dd>Pencil button, then resend</dd></div>
 						<div><dt>Fold a message</dt><dd>Swipe right on it</dd></div>
 					</dl>
 				{:else}
@@ -4481,13 +4465,6 @@
 
 	aside .new {
 		border-color: #c7c7cc;
-	}
-	.side-foot {
-		display: flex;
-		gap: 0.4rem;
-	}
-	.side-foot .new {
-		flex: 1;
 	}
 	.side-head {
 		display: flex;

@@ -596,13 +596,10 @@
 	{#if androidUI}
 		<!-- Phones only have web voices (no engine to pick): the useful
 		voice control is whether selections read themselves aloud. -->
-		<fieldset>
-			<legend>Voice</legend>
-			<label class="check">
-				<input type="checkbox" bind:checked={settings.autoSpeakSelection} />
-				Read selections aloud on release
-			</label>
-		</fieldset>
+		<label class="check">
+			<input type="checkbox" bind:checked={settings.autoSpeakSelection} />
+			Read selections aloud on release
+		</label>
 	{/if}
 	<!-- Plain div + aria, not a <label>: label clicks yank focus into the
 		field, which fights selecting this text. -->
@@ -674,10 +671,6 @@
 	{#if androidUI}
 		<fieldset>
 			<legend>Messages</legend>
-			<label class="check">
-				<input type="checkbox" bind:checked={settings.hideMessages} />
-				Hide message text until tapped
-			</label>
 			<label class="check">
 				<input type="checkbox" bind:checked={settings.hideButtons} />
 				Hide message buttons until tapped
