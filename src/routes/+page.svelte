@@ -350,6 +350,40 @@
 			}
 		};
 	});
+	/**
+	 * Last press that began inside the selection menu: whatever
+	 * selection churn follows belongs to the menu (button taps collapse
+	 * the highlight on release), so the selectionchange auto-dismiss
+	 * below stands down for it. Annotate runs off the stored quote.
+	 */
+	let menuPressAt = 0;
+	function noteMenuPress(): void {
+		menuPressAt = Date.now();
+	}
+	let annBtnTouch: { x: number; y: number } | null = null;
+	function noteAnnBtnTouch(event: TouchEvent): void {
+		const t = event.changedTouches[0];
+		annBtnTouch = t ? { x: t.clientX, y: t.clientY } : null;
+		menuPressAt = Date.now();
+	}
+	/**
+	 * Touch activation for Annotate: a tap that starts near a selection
+	 * handle is swallowed as a handle nudge (the handle blinks, no click
+	 * ever arrives), so waiting for onclick strands the button. Run off
+	 * touchend instead; preventDefault eats the compat mouse sequence,
+	 * and annotate() nulls the menu, so a trailing click on an old
+	 * webview is a harmless no-op. Mouse and keyboard keep onclick.
+	 */
+	function annotateTouch(event: TouchEvent): void {
+		const t = event.changedTouches[0];
+		const start = annBtnTouch;
+		annBtnTouch = null;
+		menuPressAt = Date.now();
+		if (!t || !start) return;
+		if (Math.hypot(t.clientX - start.x, t.clientY - start.y) > 14) return;
+		event.preventDefault();
+		annotate();
+	}
 	let translate = $state<{
 		quote: string;
 		messageId: ChatMsgId;
@@ -2355,6 +2389,18 @@
 			},
 			{ passive: true }
 		);
+		// A dead highlight drops its menu at once: taps elsewhere (and
+		// handle collapses) clear the selection without touching the
+		// mouse/touch summon paths, so without this the menu stranded
+		// until the 4.5s timer. Presses that began in the menu stand
+		// down (see menuPressAt): the button's own release collapses
+		// the highlight, and Annotate runs off the stored quote.
+		document.addEventListener("selectionchange", () => {
+			if (!selMenu) return;
+			if (Date.now() - menuPressAt < 1000) return;
+			const live = window.getSelection();
+			if (!live || live.isCollapsed || live.toString() === "") selMenu = null;
+		});
 		// Two-finger vertical swipe steps chats (down = newer like
 		// ⇧⌘J, up = older like ⇧⌘K, no focus: the keyboard stays down);
 		// a double three-finger tap deletes the current chat. Both
@@ -3907,10 +3953,17 @@
 			style="left: {selMenu.x}px; top: {selMenu.y}px"
 			role="menu"
 			transition:fade={{ duration: 150 }}
+			onmousedown={noteMenuPress}
+			ontouchstart={noteMenuPress}
 		>
 			<!-- Annotate only, every device: speech lives in the OS text
 			toolbar's Read Aloud (touch) and right-click (desktop). -->
-			<button type="button" onclick={annotate}>Annotate</button>
+			<button
+				type="button"
+				onclick={annotate}
+				ontouchstart={noteAnnBtnTouch}
+				ontouchend={annotateTouch}
+			>Annotate</button>
 		</div>
 	{/if}
 
@@ -4100,6 +4153,14 @@
 </div>
 
 <style>
+	/* Root opt-out of WebView algorithmic darkening: the page paints
+	its own dark theme (gated on html[data-theme] below), so an old
+	Android WebView must not "help" by darkening light text into
+	invisibility. Without this the chat list reads fine on desktop
+	but vanishes on the phone in dark mode. */
+	:global(html) {
+		color-scheme: light;
+	}
 	:global(body) {
 		margin: 0;
 	}
@@ -4597,6 +4658,20 @@
 		font-size: 0.75rem;
 		padding: 0.3rem 0.55rem;
 		white-space: nowrap;
+	}
+	/* The gestures list goes single-column on phones: two columns
+	overflow a 360px viewport by ~60px, clipping the very text that
+	teaches the gestures. Touch descriptions are prose, not key
+	chords, so they drop the monospace too. */
+	.app[data-android] .keys {
+		grid-template-columns: 1fr;
+	}
+	.app[data-android] .keys div:nth-child(2) {
+		border-top: 1px solid #e5e5ea;
+	}
+	.app[data-android] .keys dd {
+		font-family: inherit;
+		font-size: 0.8rem;
 	}
 	nav {
 		display: flex;
@@ -6080,6 +6155,9 @@
 
 	/* Dark theme, gated on the resolved scheme (<html data-theme>)
 	instead of the OS query, so the settings switch can pin it. */
+	:global(html[data-theme="dark"]) {
+		color-scheme: dark;
+	}
 	:global(html[data-theme="dark"]) .app {
 		color: #f2f2f7;
 		background: #17171a;
@@ -6102,6 +6180,15 @@
 	}
 	:global(html[data-theme="dark"]) aside .new {
 		border-color: #48484a;
+	}
+	/* Sidebar text never rides on inheritance alone: old phone
+	WebViews resolve button colors (ButtonText) against the wrong
+	scheme, and the × had no dark color at all. */
+	:global(html[data-theme="dark"]) aside ul button.side-chat {
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) aside .del {
+		color: #aeaeb2;
 	}
 	:global(html[data-theme="dark"]) header {
 		border-color: #38383a;
@@ -6143,6 +6230,9 @@
 	}
 	:global(html[data-theme="dark"]) .keys dd {
 		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .app[data-android] .keys div:nth-child(2) {
+		border-top-color: #38383a;
 	}
 	:global(html[data-theme="dark"]) .modal-note {
 		color: #98989f;

@@ -319,3 +319,114 @@ test("theme pin holds dark under a light OS", async ({ page }) => {
 	const bg = await page.locator(".app").evaluate((el) => getComputedStyle(el).backgroundColor);
 	expect(bg).toBe("rgb(23, 23, 26)");
 });
+
+test.describe("dark phone", () => {
+	test.use({ viewport: { width: 360, height: 740 }, colorScheme: "dark", hasTouch: true });
+
+	/** The chat list keeps readable contrast in dark: phone WebViews
+	that "help" by darkening light text blank the sheet otherwise. */
+	test("chat list text keeps contrast in dark", async ({ page }) => {
+		await seedTwoChats(page);
+		const report = await page.evaluate(() => {
+			const lum = (rgb: string): number => {
+				const m = rgb.match(/[\d.]+/g)?.map(Number) ?? [0, 0, 0];
+				const f = (v: number): number => {
+					const s = v / 255;
+					return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+				};
+				return 0.2126 * f(m[0] ?? 0) + 0.7152 * f(m[1] ?? 0) + 0.0722 * f(m[2] ?? 0);
+			};
+			const ratio = (fg: string, bg: string): number => {
+				const [a, b] = [lum(fg), lum(bg)].sort((x, y) => y - x);
+				return (a + 0.05) / (b + 0.05);
+			};
+			const cs = (sel: string): { fg: string; bg: string } => {
+				const el = document.querySelector(sel);
+				if (!(el instanceof HTMLElement)) throw new Error(`${sel} missing`);
+				const s = getComputedStyle(el);
+				return { fg: s.color, bg: s.backgroundColor };
+			};
+			const aside = cs("aside");
+			const chat = cs("aside ul button.side-chat");
+			const del = cs("aside li .del");
+			return {
+				theme: document.documentElement.dataset.theme,
+				scheme: getComputedStyle(document.documentElement).colorScheme,
+				chat: ratio(chat.fg, aside.bg),
+				del: ratio(del.fg, aside.bg)
+			};
+		});
+		expect(report.theme).toBe("dark");
+		// Root opt-out of algorithmic darkening, so the WebView paints
+		// our dark theme as-is instead of darkening light text away.
+		expect(report.scheme).toBe("dark");
+		expect(report.chat).toBeGreaterThanOrEqual(4.5);
+		expect(report.del).toBeGreaterThanOrEqual(4.5);
+	});
+
+	/** The two-column gestures grid overflows a 360px phone, clipping
+	the teaching text — single column fits, in a reading typeface. */
+	test("gestures list fits a 360px screen", async ({ page }) => {
+		await seedTwoChats(page);
+		await swipeX(page, 356, 216);
+		await page.locator(".settings-panel").waitFor();
+		await page.locator('button:has-text("Show all gestures")').click();
+		await page.locator("#shortcuts-heading").waitFor();
+		const fit = await page.evaluate(() => {
+			const keys = document.querySelector(".keys");
+			const dd = document.querySelector(".keys dd");
+			if (!(keys instanceof HTMLElement) || !(dd instanceof HTMLElement)) throw new Error("keys missing");
+			return {
+				overflow: keys.scrollWidth - keys.clientWidth,
+				columns: getComputedStyle(keys).gridTemplateColumns.split(" ").length,
+				font: getComputedStyle(dd).fontFamily
+			};
+		});
+		expect(fit.overflow).toBeLessThanOrEqual(0);
+		expect(fit.columns).toBe(1);
+		expect(fit.font).not.toMatch(/mono/i);
+	});
+
+	/** A tap on Annotate opens the comment box: taps near a selection
+	handle are swallowed as handle nudges (no click ever arrives), so
+	the button runs off touchend instead of waiting for onclick. */
+	test("a tap on Annotate opens the comment box", async ({ page }) => {
+		await seedTwoChats(page);
+		const box = await page.locator("article .rendered").first().boundingBox();
+		if (!box) throw new Error("no message box");
+		await page.evaluate(
+			({ x, y }: { x: number; y: number }) => {
+				const touch = (id: number) => new Touch({ identifier: id, target: document.body, clientX: x, clientY: y });
+				window.dispatchEvent(
+					new TouchEvent("touchstart", { bubbles: true, cancelable: true, composed: true, touches: [touch(1)] })
+				);
+				const rendered = document.querySelector("article .rendered");
+				const sel = window.getSelection();
+				sel?.removeAllRanges();
+				const range = document.createRange();
+				if (rendered) range.selectNodeContents(rendered);
+				sel?.addRange(range);
+				window.dispatchEvent(
+					new TouchEvent("touchend", {
+						bubbles: true,
+						cancelable: true,
+						composed: true,
+						touches: [],
+						changedTouches: [touch(1)]
+					})
+				);
+			},
+			{ x: box.x + box.width / 2, y: box.y + box.height / 2 }
+		);
+		const btn = page.locator('.sel-menu button:has-text("Annotate")');
+		await expect(btn).toBeVisible();
+		// A real tap on the button: on-device the handle eats the click,
+		// so the comment box must open off the touch sequence itself.
+		// (Synthetic TouchEvents don't reach Svelte's touch handlers —
+		// only trusted taps exercise this path.)
+		const btnBox = await btn.boundingBox();
+		if (!btnBox) throw new Error("no annotate box");
+		await page.touchscreen.tap(btnBox.x + btnBox.width / 2, btnBox.y + btnBox.height / 2);
+		await expect(page.locator(".ann-pop")).toBeVisible();
+	});
+});

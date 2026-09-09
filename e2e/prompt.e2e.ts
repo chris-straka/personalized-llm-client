@@ -82,3 +82,17 @@ test("prompt typeface matches the chat typeface", async ({ page }) => {
 	expect(fonts.prompt).toBe(fonts.message);
 	expect(fonts.prompt).not.toMatch(/fira|mono/i);
 });
+
+/** A cleared highlight drops the menu at once — taps elsewhere and
+handle collapses never pass through the summon paths, so without a
+selectionchange dismiss the menu stranded until the 2.5s timer. */
+test("a cleared highlight drops the menu at once", async ({ page }) => {
+	await seedChat(page, [{ role: "assistant", content: "prompt halo" }]);
+	await page.goto("/");
+	await page.locator('article .rendered:has-text("prompt halo")').first().selectText();
+	await page.mouse.up();
+	const menu = page.locator(".sel-menu");
+	await expect(menu).toBeVisible();
+	await page.evaluate(() => window.getSelection()?.removeAllRanges());
+	await expect(menu).toHaveCount(0, { timeout: 1500 });
+});
