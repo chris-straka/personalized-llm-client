@@ -5980,8 +5980,10 @@
 	   Dark rules live here — not in the CM theme object — because real
 	   media queries are the only reliable switch. */
 	.prompt :global(.cm-content) {
+		/* Same stack as the chat text — the draft should look like the
+		message it becomes, not a terminal. */
 		font-family:
-			"Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+			-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
 		padding-right: 4.6rem;
 		caret-color: #1c1c1e;
 	}

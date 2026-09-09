@@ -59,3 +59,26 @@ test("prompt review card fades in and out", async ({ page }) => {
 	await page.mouse.move(4, 300);
 	await expect.poll(opacity, { timeout: 2000 }).toBe("0");
 });
+
+/** The draft text uses the same typeface as the chat messages — the
+composer is a message being written, not a code editor. */
+test("prompt typeface matches the chat typeface", async ({ page }) => {
+	await seedChat(page, [{ role: "user", content: "same typeface" }]);
+	await page.goto("/");
+	// Raw evaluate does not auto-wait like locators do: hold for
+	// hydration before reading computed styles.
+	await page.locator(".prompt .cm-content").waitFor();
+	await page.locator('article[id^="msg-"] .rendered').waitFor();
+	const fonts = await page.evaluate(() => {
+		const cm = document.querySelector(".prompt .cm-content");
+		const msg = document.querySelector('article[id^="msg-"] .rendered');
+		if (!(cm instanceof HTMLElement) || !(msg instanceof HTMLElement)) return null;
+		return {
+			prompt: getComputedStyle(cm).fontFamily,
+			message: getComputedStyle(msg).fontFamily,
+		};
+	});
+	if (!fonts) throw new Error("prompt or message node missing");
+	expect(fonts.prompt).toBe(fonts.message);
+	expect(fonts.prompt).not.toMatch(/fira|mono/i);
+});
