@@ -38,9 +38,8 @@ sharing, no plugins, no agentic/build features).
    hop-out to J/K message scroll.
 5. **Rendering: marked + DOMPurify + Shiki** (`https://marked.js.org/`,
    `https://github.com/cure53/DOMPurify`, `https://shiki.style/`).
-6. **Reading aids: pinyin-pro + kuroshiro + model-assisted aid path**
-   (`https://github.com/zh-lx/pinyin-pro`,
-   `https://github.com/hexenq/kuroshiro`). Tashkeel was first through the
+6. **Reading aids: pinyin-pro + lindera-wasm + model-assisted aid path**
+   (`https://github.com/zh-lx/pinyin-pro`). Tashkeel was first through the
    generic model-aid path (no maintained JS vocalizer exists — only removers);
    see A6 for the generalized multilingual rule.
 7. **Voice: Web Speech first**
@@ -77,9 +76,9 @@ sharing, no plugins, no agentic/build features).
 - **A7. Dependency policy (Sep 2026).** `bun outdated` shows everything
   current; TypeScript 6.0.3 is the latest stable 6.x, only 7.0.2 (native port)
   is newer and is deferred until svelte-check / typescript-eslint support it.
-  No upgrade needed. Known legacy smells, kept while they work: kuroshiro
-  (unmaintained — lazy-loaded, API fallback), pako + path-browserify shims
-  (replacement candidate: fflate), 17 MB kuromoji dict (git-lfs/download TBD).
+  No upgrade needed. Legacy smells removed Sep 2026: kuroshiro/kuromoji
+  (superseded by lindera), pako + path-browserify shims and the vite
+  kuromoji aliases (fflate live), 17 MB kuromoji dict.
 - **A8. Round 2 chrome rules.** Overlay native titlebar; no product-name
   text in the UI; no emoji as interface icons (text pills + status dots +
   ISO-code badges, except the three user-requested menu markers 🌍🌏🏛 and
@@ -225,7 +224,8 @@ Highest-risk check was annotation wrap-into-query (passed). Manual at end:
 
 - Tashkeel quality depends on the models — judged against a reading bar, never
   blocking earlier stages.
-- kuroshiro needs a large dict — lazy-loaded, API-side fallback.
+- Furigana needs its dict on disk — ships in-app (static/lindera),
+  offline-first, no download or fallback path.
 - Ancient-language voices are best-effort; stated in A6.
 - Rollback: branch before risky work; each stage is a reviewed commit.
 
@@ -289,7 +289,6 @@ Still phone-only work (needs a device/emulator; not started):
 - `https://github.com/cure53/DOMPurify`
 - `https://shiki.style/`
 - `https://github.com/zh-lx/pinyin-pro`
-- `https://github.com/hexenq/kuroshiro`
 - `https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesis`
 - `https://vitest.dev/`
 - `https://playwright.dev/`
