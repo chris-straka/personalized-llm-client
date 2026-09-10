@@ -23,15 +23,25 @@
                 <!-- AndroidTV support -->
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
-            <!-- OS text-selection menu ("Annotate" entry, ChatGPT-style):
-            selected text from any app launches here for composer prefill
-            (see MainActivity.handleProcessText). -->
+        </activity>
+        <!-- OS text-selection menu ("Annotate" entry, ChatGPT-style):
+        the system owns this item, so it survives the menu rebuilds
+        that drop code-added entries (AppCompat never consults the
+        activity for floating toolbars). Tapping it delivers the
+        selection here (see MainActivity.handleProcessText); the
+        frontend annotates text picked in-app and prefills shares
+        from other apps. -->
+        <activity-alias
+            android:name=".AnnotateAction"
+            android:label="Annotate"
+            android:targetActivity=".MainActivity"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.PROCESS_TEXT" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
-        </activity>
+        </activity-alias>
 
         <provider
           android:name="androidx.core.content.FileProvider"

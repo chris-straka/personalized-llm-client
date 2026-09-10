@@ -1,11 +1,12 @@
 //! External-text bridge for the "Annotate" system menu entries.
 //!
 //! Android exposes the app in the OS text-selection menu
-//! (`ACTION_PROCESS_TEXT`, plus an in-app `Annotate` action-mode item —
-//! see `MainActivity.kt`). Both arrive as native calls into this module,
-//! which forwards them as the `annotate-external` window event the
-//! frontend listens for. The web annotate row stays untouched: native
-//! entries are an additional trigger, never a replacement.
+//! (`ACTION_PROCESS_TEXT` via the AnnotateAction manifest alias —
+//! see `MainActivity.kt`, which forwards alias launches into the
+//! singleTask instance). Shares arrive as native calls into this
+//! module, which forwards them as the `annotate-external` window event
+//! the frontend listens for. The web annotate row stays untouched:
+//! native entries are an additional trigger, never a replacement.
 //!
 //! Payload shape: `{ "text": string | null }`. `Some` carries text
 //! selected OUTSIDE the app (composer prefill); `None` means "annotate
@@ -17,11 +18,25 @@
 //! itself is an Android-only dependency, so JNI paths stay fully
 //! qualified inside those fns).
 
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use tauri::{AppHandle, Emitter};
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
+
+/// Cold-start parking: a PROCESS_TEXT tap while the app is dead lands
+/// in Activity.onCreate before setup captures the handle, so there is
+/// nobody to emit to yet. The latest such share waits here until the
+/// frontend drains it after registering its listener.
+static PENDING: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+
+fn pending_slot() -> &'static Mutex<Option<String>> {
+    PENDING.get_or_init(|| Mutex::new(None))
+}
+
+fn lock_slot() -> std::sync::MutexGuard<'static, Option<String>> {
+    pending_slot().lock().unwrap_or_else(|e| e.into_inner())
+}
 
 /// Capture the handle for later native-triggered emits. Called once
 /// from `setup`, before any activity intent can reach the native fns.
@@ -46,8 +61,26 @@ struct ExternalPayload {
 }
 
 fn emit(text: Option<String>) {
-    if let Some(app) = APP.get() {
-        let _ = app.emit("annotate-external", ExternalPayload { text });
+    match APP.get() {
+        Some(app) => {
+            let _ = app.emit("annotate-external", ExternalPayload { text });
+        }
+        // No handle yet (cold start): park it for the drain below.
+        None => {
+            if let Some(text) = text {
+                *lock_slot() = Some(text);
+            }
+        }
+    }
+}
+
+/// Re-emit parked cold-start text, if any. Invoked once by the
+/// frontend after its `annotate-external` listener is registered;
+/// takes (clears) so a share is never delivered twice.
+#[tauri::command]
+pub fn drain_pending_external(app: AppHandle) {
+    if let Some(text) = lock_slot().take() {
+        let _ = app.emit("annotate-external", ExternalPayload { text: Some(text) });
     }
 }
 
@@ -73,17 +106,6 @@ pub unsafe extern "C" fn Java_studio_ccez_app_MainActivity_nativeOnExternalText(
     }
 }
 
-/// In-app Annotate menu item: no text crosses (the frontend annotates
-/// its live web selection, exactly like the web row's button).
-#[cfg(target_os = "android")]
-#[no_mangle]
-pub unsafe extern "C" fn Java_studio_ccez_app_MainActivity_nativeOnAnnotateTrigger(
-    _env: jni::JNIEnv,
-    _this: jni::objects::JObject,
-) {
-    emit(None);
-}
-
 #[cfg(test)]
 mod tests {
     use super::clean_external;
@@ -104,5 +126,13 @@ mod tests {
         let long = "x".repeat(5000);
         let out = clean_external(&long).expect("non-empty");
         assert_eq!(out.chars().count(), 4000);
+    }
+
+    #[test]
+    fn parks_text_before_remember() {
+        // Unit tests never call remember (it needs a real handle),
+        // so APP is unset and emit must park instead of dropping.
+        super::emit(Some("  hello  ".into()));
+        assert_eq!(super::lock_slot().take().as_deref(), Some("  hello  "));
     }
 }

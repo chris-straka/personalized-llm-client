@@ -49,6 +49,7 @@
 	import { listProviders, createProvider } from "$lib/providers/registry";
 	import { MockProvider, mockProviderEnabled } from "$lib/providers/mock";
 	import { getCurrentWindow } from "@tauri-apps/api/window";
+	import { invoke } from "@tauri-apps/api/core";
 	import { listen } from "@tauri-apps/api/event";
 	import {
 		createPromptEditor,
@@ -2365,21 +2366,38 @@
 				}
 			});
 		}
-		// External-text bridge (Android OS selection menu): shared-in
-		// text lands in the composer with the keyboard up; a bare
-		// trigger annotates the live web selection, exactly like the
-		// web row's button. The web row itself is untouched.
-		void listen<{ text: string | null }>("annotate-external", (event) => {
-			const text = event.payload?.text ?? null;
-			if (text) {
-				if (!chatState.activeChatId) newChat(chatState);
-				editor?.setText(joinExternalDraft(editor?.getText() ?? "", text));
-				editor?.focus();
-				return;
+		// External-text bridge (Android OS selection menu): the entry
+		// comes from the AnnotateAction manifest alias, so the text it
+		// carries is either a share from another app or the selection
+		// just made in-app. A pick matching the live web selection
+		// opens the annotation popover for it; anything else prefills
+		// the composer. The web row itself is untouched.
+		if (tauriBackendAvailable()) {
+			try {
+				void listen<{ text: string | null }>("annotate-external", (event) => {
+					const text = event.payload?.text ?? null;
+					const live = window.getSelection()?.toString() ?? "";
+					if (text && text !== live.trim()) {
+						if (!chatState.activeChatId) newChat(chatState);
+						editor?.setText(joinExternalDraft(editor?.getText() ?? "", text));
+						editor?.focus();
+						return;
+					}
+					if (text) placeSelMenu();
+					if (selMenu?.quote.trim()) annotate();
+					else flashToast("Select text first, then Annotate.");
+				}).then(() => {
+					// Cold start: a share that arrived before setup parked
+					// in Rust — the listener is registered now, so drain it.
+					void invoke("drain_pending_external").catch(() => {});
+				});
+			} catch (error) {
+				console.warn(
+					"External-text events unavailable:",
+					error instanceof Error ? error.message : String(error)
+				);
 			}
-			if (selMenu?.quote.trim()) annotate();
-			else flashToast("Select text first, then Annotate.");
-		});
+		}
 		// A pill-owned voice must not leak past its chat: when the
 		// launch chat carries no reply pill and nobody pinned the
 		// field, the voice falls back to the system default — new
