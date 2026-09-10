@@ -4,6 +4,7 @@
 	import { thinkingFor, resolveThinkingId } from "$lib/providers/thinking";
 	import { ejectProvider, restoreProvider } from "$lib/session";
 	import { hydrateSecrets, tauriBackendAvailable } from "$lib/secrets";
+	import { updateRouteFor } from "$lib/updates";
 	import { getCurrentWindow } from "@tauri-apps/api/window";
 	import { check } from "@tauri-apps/plugin-updater";
 	import {
@@ -42,6 +43,13 @@
 	let checkingUpdate = $state(false);
 	let modelLoading = $state(false);
 	let modelError = $state("");
+	/** Staleness marker for installed builds (compile time via vite
+	`define`, no declaration file needed via the guarded globalThis
+	read). Dev builds show nothing: "dev · live" reads as noise at
+	the bottom of the menu. */
+	const buildStamp =
+		((globalThis as unknown as { __BUILD_STAMP__?: string }).__BUILD_STAMP__ ?? "release");
+	const showStamp = !import.meta.env.DEV;
 
 	/**
 	 * Pull the provider's `/models` list into the Model picker's datalist.
@@ -136,6 +144,24 @@
 	async function checkUpdates() {
 		checkingUpdate = true;
 		updateStatus = "Checking…";
+		const route = updateRouteFor(androidUI === true);
+		if (route.kind === "releases") {
+			// No Tauri auto-updater on Android: open the Releases page instead.
+			try {
+				if (tauriBackendAvailable()) {
+					const { invoke } = await import("@tauri-apps/api/core");
+					await invoke("plugin:opener|open_url", { url: route.url, with: null });
+				} else {
+					window.open(route.url, "_blank", "noopener");
+				}
+				updateStatus = "Grab the newest APK from the releases page to update.";
+			} catch (error) {
+				updateStatus = `Couldn't open it automatically — get the newest APK at ${route.url}`;
+			} finally {
+				checkingUpdate = false;
+			}
+			return;
+		}
 		try {
 			const update = await check();
 			updateStatus = update
@@ -484,10 +510,8 @@
 	</label>
 	{#if thinkingSupport.options.length > 1}
 		<fieldset>
-			<legend
-				>Thinking level ({thinkingSupport.native ? "sent to the model" : "adds to system prompt"})</legend
-			>
-			<div class="segmented" role="radiogroup" aria-label="Thinking level">
+			<legend>Thinking level</legend>
+			<div class="segmented thinking" role="radiogroup" aria-label="Thinking level">
 				{#each thinkingSupport.options as option (option.id)}
 					<button
 						type="button"
@@ -503,6 +527,10 @@
 	{#if androidUI}
 		<fieldset>
 			<legend>Messages</legend>
+			<label class="check">
+				<input type="checkbox" bind:checked={settings.overlayActions} />
+				Switch message buttons to overlay menu
+			</label>
 			<label class="check">
 				<input type="checkbox" bind:checked={settings.hideButtons} />
 				Hide message buttons until tapped
@@ -535,52 +563,42 @@
 		</fieldset>
 	{/if}
 	{#if nativeVoice && androidUI}
-		<fieldset class="voice-engine">
-			<legend>Voice engine</legend>
-			<div class="segmented" role="radiogroup" aria-label="Voice engine">
-				<button
-					type="button"
-					role="radio"
-					aria-checked={settings.voiceEngine === "native"}
-					class:selected={settings.voiceEngine === "native"}
-					title="Read replies with device voices"
-					onclick={() => (settings.voiceEngine = "native")}>System voices</button
-				>
-			</div>
-			{#if voiceLoadError}
-				<p class="note" role="alert">Couldn't load the voice list: {voiceLoadError}</p>
+		<!-- Android has exactly one engine (forced native on boot), so
+		there is no heading and no pill to pick — just the voice
+		choice itself. -->
+		{#if voiceLoadError}
+			<p class="note" role="alert">Couldn't load the voice list: {voiceLoadError}</p>
+		{/if}
+		{#if !voiceLoadError}
+			{#if androidVoiceOptions.length > 0}
+				<div class="voice-pick">
+					<span class="voice-pick-label" id="system-voice-label-android"
+						>System voice ({voiceLangTag})</span
+					>
+					<select
+						value={settings.nativeVoiceId ?? ""}
+						aria-labelledby="system-voice-label-android"
+						onchange={(e) => {
+							settings.nativeVoiceId = e.currentTarget.value || null;
+						}}
+					>
+						<option value="">{autoLabel}</option>
+						{#each androidVoiceOptions as option (option.id)}
+							<option value={option.id}>
+								{option.name}{option.lang.toLowerCase() === voiceLangTag.toLowerCase()
+									? ""
+									: ` · ${option.lang}`}
+							</option>
+						{/each}
+					</select>
+				</div>
+			{:else if voicesLoaded}
+				<p class="note">
+					No voices installed for {voiceLangTag} — Auto uses your
+					system default.
+				</p>
 			{/if}
-			{#if !voiceLoadError}
-				{#if androidVoiceOptions.length > 0}
-					<div class="voice-pick">
-						<span class="voice-pick-label" id="system-voice-label-android"
-							>System voice ({voiceLangTag})</span
-						>
-						<select
-							value={settings.nativeVoiceId ?? ""}
-							aria-labelledby="system-voice-label-android"
-							onchange={(e) => {
-								settings.nativeVoiceId = e.currentTarget.value || null;
-							}}
-						>
-							<option value="">{autoLabel}</option>
-							{#each androidVoiceOptions as option (option.id)}
-								<option value={option.id}>
-									{option.name}{option.lang.toLowerCase() === voiceLangTag.toLowerCase()
-										? ""
-										: ` · ${option.lang}`}
-								</option>
-							{/each}
-						</select>
-					</div>
-				{:else if voicesLoaded}
-					<p class="note">
-						No voices installed for {voiceLangTag} — Auto uses your
-						system default.
-					</p>
-				{/if}
-			{/if}
-		</fieldset>
+		{/if}
 	{/if}
 	{#if nativeVoice && !androidUI}
 		<fieldset class="voice-engine">
@@ -701,10 +719,9 @@
 	</label>
 </section>
 
-<section aria-labelledby="appearance-heading">
-	<h2 id="appearance-heading">Appearance</h2>
-	<fieldset>
-		<legend>Color scheme</legend>
+<section aria-labelledby="color-scheme-heading">
+	<h2 id="color-scheme-heading">Color scheme</h2>
+	<fieldset class="theme">
 		<div class="segmented" role="radiogroup" aria-label="Color scheme">
 			<button
 				type="button"
@@ -751,6 +768,10 @@
 		{#if updateStatus}<p class="result" role="status">{updateStatus}</p>{/if}
 	</section>
 </div>
+
+{#if showStamp}
+	<p class="build-stamp">build {buildStamp}</p>
+{/if}
 
 <style>
 	/* The header is the close target and the window drag strip:
@@ -846,27 +867,30 @@
 	}
 	.keys-updates > section:first-of-type > h2 {
 		grid-area: 1 / 1;
+		justify-self: center;
 	}
 	.keys-updates > section:first-of-type > button {
 		grid-area: 2 / 1;
-		justify-self: start;
+		justify-self: center;
 	}
 	.keys-updates > section:last-of-type > h2 {
 		grid-area: 1 / 2;
+		justify-self: center;
 	}
 	.keys-updates > section:last-of-type > button {
 		grid-area: 2 / 2;
-		justify-self: start;
+		justify-self: center;
 	}
 	.keys-updates h2 {
 		margin: 0;
 	}
 	.keys-updates .result {
 		grid-area: 3 / 2;
+		justify-self: center;
 		margin: 0;
 	}
 	h2 {
-		font-size: 0.95rem;
+		font-size: 1rem;
 		font-weight: 650;
 		margin: 0 0 0.9rem;
 	}
@@ -884,7 +908,7 @@
 	.field,
 	.voice-pick {
 		display: block;
-		font-size: 0.83rem;
+		font-size: 0.87rem;
 		font-weight: 550;
 		margin-bottom: 0.9rem;
 	}
@@ -977,6 +1001,12 @@
 		color: #6e6e73;
 		overflow-wrap: anywhere;
 	}
+	.build-stamp {
+		margin: 1rem 0 0;
+		font-size: 0.75rem;
+		color: #6e6e73;
+		text-align: center;
+	}
 	.model-row {
 		display: flex;
 		gap: 0.5rem;
@@ -992,7 +1022,7 @@
 		/* Fixed floor: "…" must not reflow the row while refreshing. */
 		min-width: 4.6rem;
 		text-align: center;
-		font-size: 0.78rem;
+		font-size: 0.81rem;
 		border: 1px solid #c7c7cc;
 		border-radius: 8px;
 		background: #fff;
@@ -1013,7 +1043,7 @@
 		cursor: default;
 	}
 	.note {
-		font-size: 0.8rem;
+		font-size: 0.84rem;
 		color: #6e6e73;
 		margin: 0.2rem 0 0;
 		/* Long error strings must wrap, never shove the panel sideways. */
@@ -1034,7 +1064,7 @@
 		color: #1c1c1e;
 	}
 	.key-state {
-		font-size: 0.83rem;
+		font-size: 0.87rem;
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
@@ -1044,7 +1074,7 @@
 		font-family: ui-monospace, monospace;
 	}
 	.key-state button {
-		font-size: 0.78rem;
+		font-size: 0.81rem;
 		border: 1px solid #c7c7cc;
 		border-radius: 6px;
 		background: #fff;
@@ -1066,11 +1096,22 @@
 		flex-wrap: wrap;
 		margin-bottom: 1rem;
 	}
+	/* Thinking pills sit centered; the theme row keeps a tighter
+	footprint now that its heading carries the label. */
+	.segmented.thinking {
+		justify-content: center;
+	}
+	.theme {
+		margin-bottom: 0.3rem;
+	}
+	.theme .segmented {
+		margin-bottom: 0.5rem;
+	}
 	.provider-row button,
 	.segmented button {
 		padding: 0.3rem 0.65rem;
 		font: inherit;
-		font-size: 0.78rem;
+		font-size: 0.81rem;
 		white-space: nowrap;
 		border: 1px solid #c7c7cc;
 		border-radius: 999px;
@@ -1119,7 +1160,7 @@
 		margin-bottom: 0.3rem;
 	}
 	legend {
-		font-size: 0.83rem;
+		font-size: 0.87rem;
 		font-weight: 550;
 		padding: 0;
 		margin-bottom: 0.4rem;
@@ -1135,7 +1176,7 @@
 	section > button {
 		padding: 0.45rem 1rem;
 		font: inherit;
-		font-size: 0.83rem;
+		font-size: 0.87rem;
 		border: 1px solid #c7c7cc;
 		border-radius: 8px;
 		background: #fff;
@@ -1155,7 +1196,7 @@
 		cursor: default;
 	}
 	.result {
-		font-size: 0.83rem;
+		font-size: 0.87rem;
 		padding: 0.6rem 0.8rem;
 		border-radius: 8px;
 		background: #e6f4ea;
@@ -1234,7 +1275,8 @@
 		color: #636366;
 	}
 	:global(html[data-theme="dark"]) .hint,
-	:global(html[data-theme="dark"]) .note {
+	:global(html[data-theme="dark"]) .note,
+	:global(html[data-theme="dark"]) .build-stamp {
 		color: #98989f;
 	}
 	:global(html[data-theme="dark"]) .result {

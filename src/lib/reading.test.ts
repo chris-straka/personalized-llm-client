@@ -4,6 +4,8 @@ import {
 	detectScript,
 	detectScripts,
 	classifyAidLine,
+	hasAmbiguousAidLine,
+	preferredLocalAid,
 	extractWordAt,
 	ttsLangFor,
 	speakWord,
@@ -17,9 +19,11 @@ import {
 	localAidsFor,
 	LOCAL_AID_BUTTON,
 	LOCAL_AID_SHOW_ORIGINAL,
-	LOCAL_AID_ADD_TITLE
+	LOCAL_AID_ADD_TITLE,
+	aidTargetLines,
+	spliceAidResult
 } from "./reading";
-import { pinyinRuby } from "./pinyin";
+import { pinyinBlock, pinyinRuby } from "./pinyin";
 import { isFuriganaCached } from "./furigana";
 import type { ChatProvider } from "./providers/types";
 
@@ -61,6 +65,33 @@ describe("script detection", () => {
 		expect(classifyAidLine("")).toBeNull();
 		// Same-line mixing reads as Japanese (kana wins, as in detection).
 		expect(classifyAidLine("テストtest测试")).toBe("furigana");
+	});
+
+	it("lets the chat language own kanji-only lines", () => {
+		// A kanji-only line is genuinely ambiguous — same script in
+		// both languages — so the reply-language pill breaks the tie.
+		expect(classifyAidLine("「警察官、交通規則違反者検挙中」", "furigana")).toBe("furigana");
+		expect(classifyAidLine("「警察官、交通規則違反者検挙中」", "pinyin")).toBe("pinyin");
+		expect(classifyAidLine("「警察官、交通規則違反者検挙中」")).toBe("pinyin");
+		expect(classifyAidLine("你好！测试。", "furigana")).toBe("furigana");
+		// Kana is unambiguous: the pill never overrides it.
+		expect(classifyAidLine("漢字を読む", "pinyin")).toBe("furigana");
+		expect(classifyAidLine("Hello world", "furigana")).toBeNull();
+	});
+
+	it("spots messages with kanji-only lines", () => {
+		expect(hasAmbiguousAidLine("「警察官、交通規則違反者検挙中」")).toBe(true);
+		expect(hasAmbiguousAidLine("こんにちは！\n交通規則")).toBe(true);
+		expect(hasAmbiguousAidLine("漢字を読む")).toBe(false);
+		expect(hasAmbiguousAidLine("Hello world")).toBe(false);
+	});
+
+	it("maps reply-language pills to their local aid", () => {
+		expect(preferredLocalAid("ja")).toBe("furigana");
+		expect(preferredLocalAid("zh")).toBe("pinyin");
+		expect(preferredLocalAid("yue")).toBe("pinyin");
+		expect(preferredLocalAid("fr")).toBeNull();
+		expect(preferredLocalAid(null)).toBeNull();
 	});
 });
 
@@ -167,20 +198,58 @@ describe("model-assisted reading aids", () => {
 	});
 });
 
-describe("pinyin ruby", () => {
+describe("pinyin readings", () => {
 	it("annotates Han characters with tone-marked readings", () => {
 		const html = pinyinRuby("汉语拼音");
 		expect(html).toContain("<ruby>汉<rt>hàn</rt></ruby>");
 		expect(html).toContain("<ruby>语<rt>yǔ</rt></ruby>");
 	});
 
+	it("emits native ruby with no estimated spacing", () => {
+		// Spacing is the engine's job (each base fits its own
+		// annotation): the markup carries no padding or hook classes.
+		const html = pinyinRuby("中文");
+		expect(html).toBe("<ruby>中<rt>zhōng</rt></ruby><ruby>文<rt>wén</rt></ruby>");
+	});
+
+	it("converts only Han-only lines, passing Japanese through", () => {
+		// Pinyin readings on Japanese kanji are wrong readings: kana
+		// lines survive escaped and unannotated, line count preserved.
+		const html = pinyinBlock("你好\n漢字を読む");
+		expect(html).toBe("<ruby>你<rt>nǐ</rt></ruby><ruby>好<rt>hǎo</rt></ruby>\n漢字を読む");
+		expect(html.split("\n")).toHaveLength(2);
+	});
+
 	it("resolves polyphones from context and passes other text through", () => {
 		const html = pinyinRuby("银行， OK!");
-		expect(html).toContain("<rt>yín</rt>");
-		expect(html).toContain("<rt>háng</rt>");
+		expect(html).toContain("<ruby>银<rt>yín</rt></ruby>");
+		expect(html).toContain("<ruby>行<rt>háng</rt></ruby>");
 		expect(html).toContain("，");
 		expect(html).toContain("OK!");
 		expect(html).not.toContain("<rt>OK");
+	});
+});
+
+describe("multilingual model aids", () => {
+	it("targets only Arabic lines", () => {
+		expect(aidTargetLines("日本語\nمرحبا بالعالم\nEnglish")).toEqual([1]);
+		expect(aidTargetLines("مرحبا")).toEqual([0]);
+		expect(aidTargetLines("日本語\nEnglish")).toEqual([]);
+	});
+
+	it("splices vocalized lines back, keeping other scripts identical", () => {
+		const original = "日本語の文です\nمرحبا بالعالم\nEnglish text";
+		expect(spliceAidResult(original, [1], "مَرْحَبًا بِالْعَالَم")).toBe(
+			"日本語の文です\nمَرْحَبًا بِالْعَالَم\nEnglish text"
+		);
+	});
+
+	it("falls back to null when the model reshapes lines", () => {
+		const original = "日本語\nمرحبا\nبالعالم";
+		// Two lines back for two sent: fits.
+		expect(spliceAidResult(original, [1, 2], "مَرْحَبًا\nبِالْعَالَم")).toContain("日本語");
+		// One line back for two sent: no safe splice.
+		expect(spliceAidResult(original, [1, 2], "مَرْحَبًا بِالْعَالَم")).toBeNull();
 	});
 });
 

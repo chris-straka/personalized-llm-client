@@ -110,6 +110,13 @@ export interface AppSettings {
 	 * chrome on a phone. The checkbox lives in Messages on phones.
 	 */
 	hideButtons: boolean;
+	/**
+	 * Touch only: revealed rows float over the chat as their own pill
+	 * instead of sitting in flow. On by default (current look); off
+	 * keeps the in-flow row that reserves its space while hidden.
+	 * The checkbox lives in Messages on phones, under the heading.
+	 */
+	overlayActions: boolean;
 	/** Touch only: read a fresh text selection aloud on release. */
 	autoSpeakSelection: boolean;
 }
@@ -214,6 +221,7 @@ export function defaultSettings(): AppSettings {
 		theme: "system",
 		hideMessages: false,
 		hideButtons: true,
+		overlayActions: true,
 		autoSpeakSelection: true
 	};
 }
@@ -264,6 +272,9 @@ export function loadSettings(store?: KeyValueStore): AppSettings {
 		};
 		// Drop the removed translate-target setting from older saves.
 		delete (merged as unknown as Record<string, unknown>).translateTarget;
+		// Drop the retired iOS native-bubble toggle the same way:
+		// Apple's callout now always stays, with Annotate above it.
+		delete (merged as unknown as Record<string, unknown>).iosNativeCallout;
 		// Backfill user-added providers on older saves.
 		if (!Array.isArray(merged.customProviders)) merged.customProviders = [];
 		// An active provider that no longer exists (deleted custom) falls
@@ -290,6 +301,7 @@ export function loadSettings(store?: KeyValueStore): AppSettings {
 		// Touch-only toggles postdate older saves the same way.
 		if (typeof merged.hideMessages !== "boolean") merged.hideMessages = false;
 		if (typeof merged.hideButtons !== "boolean") merged.hideButtons = true;
+		if (typeof merged.overlayActions !== "boolean") merged.overlayActions = true;
 		if (typeof merged.autoSpeakSelection !== "boolean") merged.autoSpeakSelection = true;
 		// Retire the old "Be brief, no summaries." default: profiles that
 		// never customized it inherit the new (empty) default instead.
@@ -306,11 +318,12 @@ export function loadSettings(store?: KeyValueStore): AppSettings {
 				entry.apiKey = firstSet(env, ENV_ALIASES[id] ?? []);
 			}
 		}
-		// Reply languages are per-chat and per-session (loadChats strips
-		// them), so a restart opens with no pill anywhere. The voice the
-		// pill overrode comes back with it: a persisted voice matching the
-		// dropped pill's voice is the override's fingerprint. A deliberate
-		// pick (pinned, or a non-default voice no pill explains) survives.
+		// The global reply pill is retired (pills live per chat and
+		// persist across restarts). A leftover global code still clears,
+		// and the voice it overrode comes back with it: a persisted voice
+		// matching the dropped pill's voice is the override's
+		// fingerprint. A deliberate pick (pinned, or a non-default voice
+		// no pill explains) survives.
 		const dropped = merged.replyLang ? replyLanguageFor(merged.replyLang) : null;
 		merged.replyLang = null;
 		if (dropped && merged.voiceLang === dropped.voice) {

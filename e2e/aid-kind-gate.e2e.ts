@@ -27,7 +27,7 @@ test("hovering pinyin before any click previews nothing", async ({ page }) => {
 
 	await pinyinBtn.hover();
 	await page.waitForTimeout(400);
-	expect(await body.locator("ruby, rt").count()).toBe(0);
+	expect(await body.locator(".frb, .frt, ruby, rt").count()).toBe(0);
 	expect(await body.innerHTML()).toBe(before);
 });
 
@@ -42,19 +42,19 @@ test("only the clicked kind's hover previews", async ({ page }) => {
 	await pinyinBtn.click();
 	const showOriginal = page.locator(`${ARTICLE} .actions button[data-tip="${PINYIN_ORIGINAL}"]`);
 	await expect(showOriginal).toBeVisible();
-	expect(await body.locator("ruby, rt").count()).toBeGreaterThan(0);
+	expect(await body.locator(".frb, .frt, ruby, rt").count()).toBeGreaterThan(0);
 	await showOriginal.click();
 	await expect(pinyinBtn).toBeVisible();
 	await page.mouse.move(2, 2);
 
 	// Pinyin's own hover previews now...
 	await pinyinBtn.hover();
-	await expect(body.locator("ruby, rt").first()).toBeVisible();
+	await expect(body.locator(".frb, .frt, ruby, rt").first()).toBeVisible();
 	await page.mouse.move(2, 2);
 
 	// ...but furigana was never clicked, so its hover stays color-only.
 	await furiganaBtn.hover();
 	await page.waitForTimeout(400);
 	expect(await body.innerHTML()).toBe(before);
-	expect(await body.locator("ruby, rt").count()).toBe(0);
+	expect(await body.locator(".frb, .frt, ruby, rt").count()).toBe(0);
 });

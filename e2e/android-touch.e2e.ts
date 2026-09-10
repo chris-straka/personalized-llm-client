@@ -88,6 +88,34 @@ test("chats list is a bottom sheet on a phone", async ({ page }) => {
 	expect(bottom).toBe("0px");
 });
 
+/** Synthetic two-finger double-tap (owns the chats sidebar on Android). */
+async function doubleTapTwoFinger(page: Page): Promise<void> {
+	for (let tap = 0; tap < 2; tap++) {
+		await page.evaluate(() => {
+			const touch = (id: number, x: number, y: number) =>
+				new Touch({ identifier: id, target: document.body, clientX: x, clientY: y });
+			window.dispatchEvent(
+				new TouchEvent("touchstart", {
+					bubbles: true,
+					cancelable: true,
+					composed: true,
+					touches: [touch(1, 200, 500), touch(2, 240, 500)]
+				})
+			);
+			window.dispatchEvent(
+				new TouchEvent("touchend", {
+					bubbles: true,
+					cancelable: true,
+					composed: true,
+					touches: [],
+					changedTouches: [touch(1, 200, 500), touch(2, 240, 500)]
+				})
+			);
+		});
+		if (tap === 0) await page.waitForTimeout(120);
+	}
+}
+
 test("swipes dismiss before they summon on a phone", async ({ page }) => {
 	await seedEmpty(page);
 	const aside = page.locator("aside:has(button.new)");
@@ -99,9 +127,13 @@ test("swipes dismiss before they summon on a phone", async ({ page }) => {
 	await swipeX(page, 4, 144);
 	await expect(panel).toHaveClass(/closed/);
 	await expect(aside).toHaveClass(/collapsed/);
-	// Chats still summon from a clean slate; a leftward stroke with
-	// the sheet open just closes it, and settings summon after that.
+	// Since the gesture redesign, a rightward stroke never summons
+	// chats on Android — two-finger double-tap owns the sidebar. A
+	// leftward stroke with the sheet open just closes it, and
+	// settings summon after that.
 	await swipeX(page, 4, 144);
+	await expect(aside).toHaveClass(/collapsed/);
+	await doubleTapTwoFinger(page);
 	await expect(aside).not.toHaveClass(/collapsed/);
 	await swipeX(page, 408, 268);
 	await expect(aside).toHaveClass(/collapsed/);
@@ -110,13 +142,15 @@ test("swipes dismiss before they summon on a phone", async ({ page }) => {
 	await expect(panel).not.toHaveClass(/closed/);
 });
 
-test("two-finger swipe down steps to the newer chat", async ({ page }) => {
+test("two-finger swipe right steps to the newer chat", async ({ page }) => {
 	await seedTwoChats(page);
 	const before = await page.locator("article .rendered").first().innerText();
+	// Since the gesture redesign, chat steps glide horizontally (the
+	// vertical stroke belongs to scrolling); right steps newer.
 	await page.evaluate(() => {
 		const touch = (id: number, x: number, y: number) =>
 			new Touch({ identifier: id, target: document.body, clientX: x, clientY: y });
-		const start = [touch(1, 200, 500), touch(2, 240, 500)];
+		const start = [touch(1, 150, 500), touch(2, 190, 500)];
 		window.dispatchEvent(
 			new TouchEvent("touchstart", { bubbles: true, cancelable: true, composed: true, touches: start })
 		);
@@ -125,7 +159,7 @@ test("two-finger swipe down steps to the newer chat", async ({ page }) => {
 				bubbles: true,
 				cancelable: true,
 				composed: true,
-				touches: [touch(1, 200, 660), touch(2, 240, 660)]
+				touches: [touch(1, 310, 500), touch(2, 350, 500)]
 			})
 		);
 		window.dispatchEvent(
@@ -134,7 +168,7 @@ test("two-finger swipe down steps to the newer chat", async ({ page }) => {
 				cancelable: true,
 				composed: true,
 				touches: [],
-				changedTouches: [touch(1, 200, 660), touch(2, 240, 660)]
+				changedTouches: [touch(1, 310, 500), touch(2, 350, 500)]
 			})
 		);
 	});
@@ -168,7 +202,7 @@ test("double three-finger tap deletes the current chat", async ({ page }) => {
 	await expect(page.locator(".toast")).toHaveText("Chat deleted");
 });
 
-test("touch selection summons the Annotate menu below the selection", async ({ page }) => {
+test("touch selection docks Annotate in the composer, never floating", async ({ page }) => {
 	await seedTwoChats(page);
 	const box = await page.locator("article .rendered").first().boundingBox();
 	if (!box) throw new Error("no message box");
@@ -196,14 +230,15 @@ test("touch selection summons the Annotate menu below the selection", async ({ p
 		},
 		{ x: box.x + box.width / 2, y: box.y + box.height / 2 }
 	);
-	const menu = page.locator(".sel-menu");
-	await expect(menu.locator('button:has-text("Annotate")')).toBeVisible();
-	// Speech lives in the OS text toolbar (Read Aloud), never here.
-	await expect(menu.locator("button")).toHaveCount(1);
-	// Ours docks below the selection, clear of the OS toolbar above it.
+	// The floating menu is desktop-only now: nothing near the text.
+	await expect(page.locator(".sel-menu")).toHaveCount(0);
+	// The dock button lives in the composer tools, below the message.
+	const dock = page.locator(".ann-dock");
+	await expect(dock).toHaveText("Annotate");
+	await expect(dock).toBeVisible();
 	const msgBox = await page.locator("article .rendered").first().boundingBox();
-	const menuBox = await menu.boundingBox();
-	expect(menuBox?.y ?? 0).toBeGreaterThan((msgBox?.y ?? 0) + (msgBox?.height ?? 0));
+	const dockBox = await dock.boundingBox();
+	expect(dockBox?.y ?? 0).toBeGreaterThan((msgBox?.y ?? 0) + (msgBox?.height ?? 0));
 });
 
 test("a long chat scrolls inside the list, never squeezing the prompt", async ({ page }) => {
@@ -252,7 +287,9 @@ test("hide-messages mode reveals one message per tap", async ({ page }) => {
 		);
 	});
 	await page.goto("/");
-	await page.locator("article").first().waitFor();
+	// Collapsed rows reserve no space, so the hidden article is
+	// zero-height — wait for attachment, not visibility.
+	await page.locator("article").first().waitFor({ state: "attached" });
 	const body = page.locator("article .rendered").first();
 	await expect(body).toBeHidden();
 	await page.evaluate(() => {
@@ -388,9 +425,10 @@ test.describe("dark phone", () => {
 		expect(fit.font).not.toMatch(/mono/i);
 	});
 
-	/** A tap on Annotate opens the comment box: taps near a selection
-	handle are swallowed as handle nudges (no click ever arrives), so
-	the button runs off touchend instead of waiting for onclick. */
+	/** A tap on the docked Annotate opens the comment box: taps near a
+	selection handle are swallowed as handle nudges (no click ever
+	arrives), so the button runs off touchend instead of waiting for
+	onclick. */
 	test("a tap on Annotate opens the comment box", async ({ page }) => {
 		await seedTwoChats(page);
 		const box = await page.locator("article .rendered").first().boundingBox();
@@ -419,7 +457,7 @@ test.describe("dark phone", () => {
 			},
 			{ x: box.x + box.width / 2, y: box.y + box.height / 2 }
 		);
-		const btn = page.locator('.sel-menu button:has-text("Annotate")');
+		const btn = page.locator('.ann-dock:has-text("Annotate")');
 		await expect(btn).toBeVisible();
 		// A real tap on the button: on-device the handle eats the click,
 		// so the comment box must open off the touch sequence itself.
@@ -429,6 +467,48 @@ test.describe("dark phone", () => {
 		if (!btnBox) throw new Error("no annotate box");
 		await page.touchscreen.tap(btnBox.x + btnBox.width / 2, btnBox.y + btnBox.height / 2);
 		await expect(page.locator(".ann-pop")).toBeVisible();
+		// The composer gets out of the way while the box owns the
+		// keyboard, and comes back when the box closes.
+		await expect(page.locator(".prompt")).toHaveClass(/prompt-hidden/);
+		await expect(page.locator(".prompt")).not.toBeVisible();
+		await page.keyboard.press("Escape");
+		await expect(page.locator(".ann-pop")).toHaveCount(0);
+		await expect(page.locator(".prompt")).toBeVisible();
+	});
+
+	/** Double-tapping a message taller than the screen scrolls its
+	action row into view: phones have no hover to reveal it. Rows
+	already visible never move. */
+	test("double-tapping a tall message reveals its action row", async ({ page }) => {
+		const long = Array.from({ length: 60 }, (_, i) => `line ${i} of a very tall message`).join("\n");
+		await page.addInitScript((content: string) => {
+			window.localStorage.setItem("ccez-mock-provider", "1");
+			window.localStorage.setItem("ccez-studio-settings-v1", JSON.stringify({}));
+			window.localStorage.setItem(
+				"ccez-studio-chats-v1",
+				JSON.stringify([
+					{
+						id: "e2e-chat",
+						createdAt: 1,
+						replyLang: null,
+						messages: [{ id: "e2e-m0", role: "assistant", content, usage: null, error: null }]
+					}
+				])
+			);
+		}, long);
+		await page.goto("/");
+		const article = page.locator("article.assistant").first();
+		await expect(article).toBeVisible({ timeout: 60_000 });
+		const actions = article.locator(".actions");
+		// Park at the top so the action row starts below the fold.
+		await article.evaluate((el) => el.scrollIntoView({ block: "start" }));
+		await page.waitForTimeout(800);
+		const below = await actions.boundingBox();
+		expect(below?.y ?? 0).toBeGreaterThan(915);
+		await article.locator(".rendered").first().dblclick();
+		await expect
+			.poll(async () => (await actions.boundingBox())?.y ?? 9999, { timeout: 10_000 })
+			.toBeLessThan(915);
 	});
 });
 
@@ -437,27 +517,26 @@ churn (and the keyboard's viewport churn on phones) must never strand
 the emptied editor at zero height until the next keystroke heals it. */
 test("composer holds one line after the reply lands", async ({ page }) => {
 	await seedEmpty(page);
-	await page.locator(".cm-content").click();
+	// Android composes in a plain textarea, not CodeMirror.
+	const box = page.locator(".prompt .ta-input");
+	await box.click();
 	await page.keyboard.type("hello world");
 	await page.keyboard.press("Enter");
 	await expect(page.locator('article .rendered:has-text("Mock reply to:")')).toBeVisible({ timeout: 15000 });
 	const heights = await page.evaluate(() => {
-		const h = (sel: string): number => {
-			const el = document.querySelector(sel);
-			return el instanceof HTMLElement ? el.getBoundingClientRect().height : -1;
-		};
-		return { content: h(".prompt .cm-content"), placeholder: h(".prompt .cm-placeholder") };
+		const el = document.querySelector(".prompt .ta-input");
+		return el instanceof HTMLElement ? el.getBoundingClientRect().height : -1;
 	});
-	// One empty line plus the editor's vertical padding (~40px): the
+	// One empty line plus the field's vertical padding (~40px): the
 	// stranded state measured ~0 here with no placeholder at all.
-	expect(heights.content).toBeGreaterThan(30);
-	expect(heights.placeholder).toBeGreaterThan(10);
+	expect(heights).toBeGreaterThan(30);
+	expect(await box.getAttribute("placeholder")).toBeTruthy();
 	// A keyboard transition settles through the same re-measure path
 	// without disturbing the healthy composer.
 	await page.evaluate(() => window.visualViewport?.dispatchEvent(new Event("resize")));
 	await page.waitForTimeout(500);
 	const after = await page.evaluate(() => {
-		const el = document.querySelector(".prompt .cm-content");
+		const el = document.querySelector(".prompt .ta-input");
 		return el instanceof HTMLElement ? el.getBoundingClientRect().height : -1;
 	});
 	expect(after).toBeGreaterThan(30);
@@ -477,6 +556,28 @@ test("message buttons hide until tapped", async ({ page }) => {
 	await expect(row).toHaveCSS("opacity", "1");
 	// ...and it closes itself after ~3s.
 	await expect(row).toHaveCSS("opacity", "0", { timeout: 5000 });
+});
+
+/** A press inside an open row owns it: holding a button past the 3s
+mark must not watch the row vanish mid-press. Release happens off the
+button so no action fires; the cleared timer stays cleared. */
+test("holding a row button outlives the auto-dismiss", async ({ page }) => {
+	await seedTwoChats(page);
+	const row = page.locator("article.assistant .actions").first();
+	const body = page.locator("article.assistant .rendered").first();
+	await expect(body).toBeVisible();
+	await body.click();
+	await expect(row).toHaveCSS("opacity", "1");
+	const btn = row.locator("button").first();
+	const box = await btn.boundingBox();
+	if (!box) throw new Error("row button lost its box");
+	await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+	await page.mouse.down();
+	await page.waitForTimeout(3500);
+	await expect(row).toHaveCSS("opacity", "1");
+	await page.mouse.move(4, 300);
+	await page.mouse.up();
+	await expect(row).toHaveCSS("opacity", "1");
 });
 
 /** The buttons checkbox ships checked: hiding rows is the default,

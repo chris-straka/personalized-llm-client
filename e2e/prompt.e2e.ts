@@ -1,5 +1,62 @@
-import { expect, test } from "@playwright/test";
+import { devices, expect, test } from "@playwright/test";
 import { seedChat } from "./helpers";
+
+/** Staging (Alt+Enter, no reply stream) pins the scroller to the true
+bottom: measuring in the send tick reads the pre-append height and the
+scroll stops short by the new message (the short-landing send bug —
+a tall viewport can still show the message, so assert the scroller,
+not visibility). */
+test("staging pins the scroller to the true bottom", async ({ page }) => {
+	const history = Array.from({ length: 12 }, (_, i) => ({
+		role: i % 2 === 0 ? "user" : "assistant",
+		content: `history filler paragraph ${i} with enough words to wrap several lines on any phone or desktop column`
+	}));
+	await seedChat(page, [...history, { role: "assistant", content: "ready" }]);
+	await page.goto("/");
+	await page.locator(".cm-content").click();
+	await page.keyboard.type("staged hello");
+	await page.keyboard.press("Alt+Enter");
+	await expect(page.locator("article.user").last()).toContainText("staged hello");
+	// The smooth scroll lands after the render: poll past the motion.
+	await expect
+		.poll(async () =>
+			page.evaluate(() => {
+				const el = document.querySelector("main .messages");
+				return el ? el.scrollHeight - el.scrollTop - el.clientHeight : 999;
+			})
+		)
+		.toBeLessThanOrEqual(2);
+});
+
+/** The composer box dwarfs a one-line draft: tapping its empty floor
+focuses the editor instead of dying on the container. */
+test("clicking the composer floor focuses and types", async ({ page }) => {
+	await seedChat(page, []);
+	await page.goto("/");
+	// Mounted only — never clicked, so only the floor tap can focus.
+	await page.locator(".cm-content").first().waitFor({ timeout: 60_000 });
+	const box = await page.locator(".prompt").boundingBox();
+	if (!box) throw new Error("composer lost its box");
+	await page.mouse.click(box.x + 30, box.y + box.height - 12);
+	await page.keyboard.type("floor tap");
+	await expect(page.locator(".cm-content")).toContainText("floor tap");
+});
+
+test("phone floor tap focuses the textarea", async ({ browser }) => {
+	const ctx = await browser.newContext({ ...devices["iPhone 15"] });
+	const page = await ctx.newPage();
+	try {
+		await seedChat(page, []);
+		await page.goto("/");
+		await page.locator(".ta-input").first().waitFor({ timeout: 60_000 });
+		const box = await page.locator(".prompt").boundingBox();
+		if (!box) throw new Error("composer lost its box");
+		await page.touchscreen.tap(box.x + 30, box.y + box.height - 12);
+		await expect(page.locator(".ta-input")).toBeFocused();
+	} finally {
+		await ctx.close();
+	}
+});
 
 test("prompt types and sends without vim", async ({ page }) => {
 	await seedChat(page, []);
@@ -97,6 +154,21 @@ test("prompt typeface matches the chat typeface", async ({ page }) => {
 	if (!fonts) throw new Error("prompt or message node missing");
 	expect(fonts.prompt).toBe(fonts.message);
 	expect(fonts.prompt).not.toMatch(/fira|mono/i);
+});
+
+/** The document never scrolls: every pane moves inside .app, so iOS
+can't pan the page (and the header pill) up when the keyboard opens.
+Real keyboard travel is device-only; this pins the rule. */
+test("document scroll is locked", async ({ page }) => {
+	await seedChat(page, []);
+	await page.goto("/");
+	await page.locator(".cm-content").first().waitFor({ timeout: 60_000 });
+	const overflow = await page.evaluate(() => ({
+		html: getComputedStyle(document.documentElement).overflow,
+		body: getComputedStyle(document.body).overflow
+	}));
+	expect(overflow.html).toBe("hidden");
+	expect(overflow.body).toBe("hidden");
 });
 
 /** A cleared highlight drops the menu at once — taps elsewhere and

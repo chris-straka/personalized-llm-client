@@ -114,3 +114,20 @@ test("x cuts and Delete deletes the hovered message", async ({ page, context }) 
 	await expect(page.locator("article .rendered")).toHaveCount(0);
 	await expect(page.evaluate(() => navigator.clipboard.readText())).resolves.toBe("cut me");
 });
+
+/** Toasts clear the camera hole: parked below the island even with no
+safe-area inset (the WebView may report env() = 0). */
+test("toast sits below the status area", async ({ page, context }) => {
+	await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+	await seedChat(page, [{ role: "assistant", content: "cut me" }]);
+	await page.goto("/");
+	const first = page.locator("article .rendered").first();
+	await expect(first).toBeVisible();
+	await page.mouse.click(8, 200);
+	await first.hover();
+	await page.keyboard.press("x");
+	const toast = page.locator(".toast");
+	await expect(toast).toContainText("Cut to clipboard");
+	const top = await toast.evaluate((el) => el.getBoundingClientRect().top);
+	expect(top).toBeGreaterThanOrEqual(48);
+});

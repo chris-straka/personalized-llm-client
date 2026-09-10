@@ -30,8 +30,19 @@ export class MockProvider implements ChatProvider {
 		opts?: ChatOptions
 	): Promise<ChatResult> {
 		const full = canned(messages);
+		// Test hook: slow the word cadence (ms) so specs can act
+		// mid-stream (new-chat-while-thinking). Dev/test-only provider;
+		// unset or invalid keeps the 15ms default.
+		let wordMs = 15;
+		try {
+			const raw = typeof localStorage === "undefined" ? null : localStorage.getItem("ccez-mock-word-ms");
+			const n = raw === null ? NaN : Number(raw);
+			if (Number.isFinite(n) && n >= 0) wordMs = n;
+		} catch {
+			/* storage unavailable: default cadence */
+		}
 		for (const word of full.split(/(?<=\s)/)) {
-			await new Promise((r) => setTimeout(r, 15));
+			await new Promise((r) => setTimeout(r, wordMs));
 			opts?.signal?.throwIfAborted();
 			callbacks.onToken(word);
 		}

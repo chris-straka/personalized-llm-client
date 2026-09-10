@@ -26,13 +26,13 @@ test("hovering furigana fetches nothing; clicking fetches with dots", async ({
 	const before = await rowBoxes(page, ARTICLE);
 	const beforeHtml = await body.innerHTML();
 
-	// Hover must not start the dictionary load: no lit dots, no ruby,
+	// Hover must not start the dictionary load: no lit dots, no readings,
 	// the Japanese untouched, no button nudged.
 	await furiganaBtn.hover();
 	await page.waitForTimeout(1500);
 	await expect(dots).toHaveCount(0);
 	expect(await body.innerHTML()).toBe(beforeHtml);
-	expect(await body.locator("ruby").count()).toBe(0);
+	expect(await body.locator(".frb").count()).toBe(0);
 	expectBoxesStable(before, await rowBoxes(page, ARTICLE));
 
 	// Click pins (and fetches): dots while loading, then the pinned

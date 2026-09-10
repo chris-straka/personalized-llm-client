@@ -1,12 +1,18 @@
 /**
- * Kuroshiro-shaped ruby HTML from analyzed tokens, without kuroshiro.
+ * Kuroshiro-shaped reading HTML from analyzed tokens, without kuroshiro.
  *
- * Kuroshiro's furigana mode wraps each kanji run in
- * `<ruby>KANJI<rp>(</rp><rt>reading</rt><rp>)</rp></ruby>` and passes
- * everything else through untouched: okurigana splits off plain on both
- * sides (食(た)べ, お|会(あ)|い), kana/romaji/numbers never take ruby.
- * The output stays raw (unsanitized) exactly like kuroshiro's — the
- * caller sanitizes downstream, unchanged.
+ * Kuroshiro's furigana mode wraps each kanji run in ruby; this wraps it
+ * in plain positioned spans instead —
+ * `<span class="frb">KANJI<span class="frt">reading</span></span>` —
+ * because native ruby reserves the annotation's width in every engine
+ * that matters here (WebKit ignores out-of-flow positioning on `rt`
+ * entirely), pushing base characters onto the next line. Absolutely
+ * positioned spans render the same readings above the base with zero
+ * layout footprint in all engines. Everything else passes through
+ * untouched: okurigana splits off plain on both sides (食(た)べ,
+ * お|会(あ)|い), kana/romaji/numbers never take readings. The output
+ * stays raw (unsanitized) exactly like kuroshiro's — the caller
+ * sanitizes downstream, unchanged.
  *
  * Pure and unit-tested against kuroshiro's own outputs. The tokenizer
  * behind the tokens (lindera, kuromoji before it) only supplies
@@ -49,13 +55,49 @@ export function rubyHtmlForTokens(
 	return out;
 }
 
+/**
+ * Reading HTML for one token stream aligned back to its source text.
+ * Morphological tokenizers drop whitespace (and can skip clock
+ * numerals, emoji, and other unknowns), so joining token surfaces
+ * alone corrupts the text — "Here are three" comes back
+ * "Herearethree". Each token is matched sequentially against the
+ * source; whatever sits between matches (spaces, punctuation the
+ * tokenizer skipped) passes through verbatim, exactly like a
+ * kanji-less token surface does. A token that matches nowhere (the
+ * tokenizer normalized or reordered it) still renders rather than
+ * silently dropping its content. Raw like rubyToken's passthrough —
+ * the caller sanitizes downstream.
+ */
+export function rubyHtmlForText(
+	text: string,
+	tokens: RubyToken[],
+	toHiragana: (katakana: string) => string
+): string {
+	let out = "";
+	let pos = 0;
+	for (const token of tokens) {
+		const surface = token.surface;
+		if (!surface) continue;
+		const at = text.indexOf(surface, pos);
+		if (at < 0) {
+			out += rubyToken(token, toHiragana);
+			continue;
+		}
+		out += text.slice(pos, at);
+		pos = at + surface.length;
+		out += rubyToken(token, toHiragana);
+	}
+	out += text.slice(pos);
+	return out;
+}
+
 interface SurfaceRun {
 	text: string;
 	kanji: boolean;
 }
 
 /**
- * One ruby-annotated token. Kana runs anchor the reading: leading and
+ * One reading-annotated token. Kana runs anchor the reading: leading and
  * trailing okurigana split off plain (食(た)べ, お|会(あ)|い), and kana
  * *inside* a token pins the split between kanji runs (感(かん)じ取(と) —
  * lindera segments coarser than kuromoji did, so per-token edge
@@ -108,7 +150,7 @@ function rubyToken(token: RubyToken, toHiragana: (katakana: string) => string): 
 			pos = hira.length;
 		}
 		if (!share) return surface;
-		out += `<ruby>${run.text}<rp>(</rp><rt>${share}</rt><rp>)</rp></ruby>`;
+		out += `<span class="frb">${run.text}<span class="frt">${share}</span></span>`;
 	}
 	if (pos !== hira.length) return surface;
 	return out;

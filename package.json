@@ -14,7 +14,8 @@
     "test:e2e": "playwright test",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "release": "bun scripts/release.ts"
   },
   "license": "MIT",
   "dependencies": {

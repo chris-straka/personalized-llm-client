@@ -23,6 +23,7 @@ import {
 	sendMessage,
 	setPasteFold,
 	buildApiMessages,
+	visibleMessageCount,
 	type ChatState
 } from "./chat";
 import type { ChatProvider, ChatResult } from "./providers/types";
@@ -174,6 +175,115 @@ describe("chat", () => {
 		expect(aborted).toBe(true);
 		expect(state.sending).toBe(false);
 		expect(activeChat(state).messages).toHaveLength(0);
+	});
+
+	it("keeps streaming into its origin chat across a switch", async () => {
+		const { state, store } = stateWith(freshStore());
+		let onToken!: (token: string) => void;
+		let resolveStream!: (result: ChatResult) => void;
+		const gated: ChatProvider = {
+			id: "gated",
+			async chat(): Promise<ChatResult> {
+				throw new Error("unused");
+			},
+			stream(_m, callbacks): Promise<ChatResult> {
+				onToken = callbacks.onToken;
+				return new Promise<ChatResult>((resolve) => {
+					resolveStream = resolve;
+				});
+			}
+		};
+		const originId = state.activeChatId;
+		const sending = sendMessage(state, gated, "sys", "hi", {}, store);
+		await new Promise((r) => setTimeout(r, 20));
+		expect(state.sending).toBe(true);
+		expect(state.sendingChatId).toBe(originId);
+		// Away mid-stream: tokens must not land in the new chat, and
+		// the indicator's owner stays the origin.
+		newChat(state, store);
+		const awayId = state.activeChatId;
+		expect(awayId).not.toBe(originId);
+		onToken("hel");
+		await new Promise((r) => setTimeout(r, 20));
+		expect(state.chats.find((c) => c.id === awayId)?.messages).toHaveLength(0);
+		expect(state.chats.find((c) => c.id === originId)?.messages.map((m) => m.content)).toEqual([
+			"hi",
+			"hel"
+		]);
+		expect(state.sendingChatId).toBe(originId);
+		resolveStream({ content: "hello", usage: { prompt: 1, completion: 1, total: 2 } });
+		await sending;
+		expect(state.sending).toBe(false);
+		expect(state.sendingChatId).toBeNull();
+		expect(state.chats.find((c) => c.id === originId)?.messages.map((m) => m.content)).toEqual([
+			"hi",
+			"hello"
+		]);
+		expect(state.chats.find((c) => c.id === awayId)?.messages).toHaveLength(0);
+	});
+
+	it("labels the empty in-flight placeholder as not yet a message", async () => {
+		const { state, store } = stateWith(freshStore());
+		let onToken!: (token: string) => void;
+		let resolveStream!: (result: ChatResult) => void;
+		const gated: ChatProvider = {
+			id: "gated",
+			async chat(): Promise<ChatResult> {
+				throw new Error("unused");
+			},
+			stream(_m, callbacks): Promise<ChatResult> {
+				onToken = callbacks.onToken;
+				return new Promise<ChatResult>((resolve) => {
+					resolveStream = resolve;
+				});
+			}
+		};
+		const originId = state.activeChatId;
+		const sending = sendMessage(state, gated, "sys", "hi", {}, store);
+		await new Promise((r) => setTimeout(r, 20));
+		const origin = state.chats.find((c) => c.id === originId);
+		expect(origin?.messages).toHaveLength(2);
+		// Placeholder is empty: the label matches the one visible message.
+		expect(visibleMessageCount(state, origin!)).toBe(1);
+		// First token lands: the reply is visible, the label follows.
+		onToken("hel");
+		await new Promise((r) => setTimeout(r, 20));
+		expect(visibleMessageCount(state, origin!)).toBe(2);
+		resolveStream({ content: "hello", usage: { prompt: 1, completion: 1, total: 2 } });
+		await sending;
+		expect(visibleMessageCount(state, origin!)).toBe(2);
+		// A chat that owns no stream always counts straight.
+		newChat(state, store);
+		const away = state.chats.find((c) => c.id === state.activeChatId);
+		expect(visibleMessageCount(state, away!)).toBe(0);
+	});
+
+	it("locks send and stage while a reply streams", async () => {
+		const { state, store } = stateWith(freshStore());
+		let resolveStream!: (result: ChatResult) => void;
+		const gated: ChatProvider = {
+			id: "gated",
+			async chat(): Promise<ChatResult> {
+				throw new Error("unused");
+			},
+			stream(): Promise<ChatResult> {
+				return new Promise<ChatResult>((resolve) => {
+					resolveStream = resolve;
+				});
+			}
+		};
+		const sending = sendMessage(state, gated, "sys", "first", {}, store);
+		await new Promise((r) => setTimeout(r, 20));
+		expect(state.sending).toBe(true);
+		// A second send and a stage both wait for quiet: neither lands.
+		await sendMessage(state, gated, "sys", "second", {}, store);
+		stageMessage(state, "staged", [], store);
+		expect(activeChat(state).messages.map((m) => m.content)).toEqual(["first", ""]);
+		resolveStream({ content: "reply", usage: { prompt: 1, completion: 1, total: 2 } });
+		await sending;
+		// Quiet again: staging works, and the queued text was never lost.
+		stageMessage(state, "staged", [], store);
+		expect(activeChat(state).messages.map((m) => m.content)).toEqual(["first", "reply", "staged"]);
 	});
 
 	it("reruns from any user message, deleting everything after it", async () => {
@@ -349,7 +459,7 @@ describe("chat", () => {
 		expect(waypointLabel("   ")).toBe("");
 	});
 
-	it("keeps a reply pill per chat and strips it on load", async () => {
+	it("keeps a reply pill per chat and persists it on load", async () => {
 		const { state, store } = stateWith(freshStore());
 		newChat(state, store);
 		const [first, second] = state.chats;
@@ -361,7 +471,15 @@ describe("chat", () => {
 		expect(activeChat(state).replyLang).toBeNull();
 		const again = createChatState(store);
 		expect(again.chats[0]?.replyLang).toBeNull();
-		expect(again.chats[1]?.replyLang).toBeNull();
+		expect(again.chats[1]?.replyLang).toBe("ar");
+		// Unknown codes from retired languages fall back to no pill.
+		const raw = JSON.parse(store.getItem("ccez-studio-chats-v1") as string) as Array<{
+			replyLang: unknown;
+		}>;
+		raw[1]!.replyLang = "xx";
+		store.setItem("ccez-studio-chats-v1", JSON.stringify(raw));
+		const healed = createChatState(store);
+		expect(healed.chats[1]?.replyLang).toBeNull();
 	});
 
 	it("persists across instances and tolerates corruption", async () => {

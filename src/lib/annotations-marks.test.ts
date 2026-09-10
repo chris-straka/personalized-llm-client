@@ -24,7 +24,7 @@ function baseText(root: Element): string {
 	while (walker.nextNode()) {
 		const node = walker.currentNode;
 		const parent = node.parentNode;
-		if (parent instanceof Element && parent.closest("[data-ann-badge], rt, rp")) {
+		if (parent instanceof Element && parent.closest("[data-ann-badge], rt, rp, .frt")) {
 			continue;
 		}
 		parts.push(node.textContent ?? "");
@@ -130,30 +130,30 @@ describe("applyMarks wash fade", () => {
 	});
 });
 
-describe("applyMarks badges over ruby", () => {
-	function rubyBody(): HTMLDivElement {
+describe("applyMarks badges over reading overlays", () => {
+	function readingBody(): HTMLDivElement {
 		const root = document.createElement("div");
-		root.innerHTML = "<p><ruby>漢字<rp>(</rp><rt>かんじ</rt><rp>)</rp></ruby>を読む</p>";
+		root.innerHTML = '<p><span class="frb">漢字<span class="frt">かんじ</span></span>を読む</p>';
 		return root;
 	}
 
 	const one: AnnotationMark[] = [{ id: "a1" as AnnotationId, number: 1, quote: "漢字を読む" }];
 
 	it("floats the badge on an anchor instead of inline text", () => {
-		const root = rubyBody();
+		const root = readingBody();
 		applyMarks(root, one, false, null);
 		const badge = root.querySelector("[data-ann-badge]");
 		expect(badge?.textContent).toBe("1");
-		// The badge never lands inside ruby (which shoved readings
-		// aside); it rides a positioned anchor at the quote's middle.
-		expect(badge?.closest("ruby")).toBeNull();
+		// The badge never lands inside a reading base; it rides a
+		// positioned anchor at the quote's middle.
+		expect(badge?.closest(".frb")).toBeNull();
 		const anchor = badge?.parentElement;
 		expect(anchor?.classList.contains("ccez-ann-anchor")).toBe(true);
 		// 漢字を読む is five chars: the middle one (を) carries the badge.
 		expect(anchor?.textContent).toBe("を1");
 		// Stamping moved nothing: base text and readings intact.
 		expect(baseText(root)).toBe("漢字を読む");
-		expect(root.querySelector("rt")?.textContent).toBe("かんじ");
+		expect(root.querySelector(".frt")?.textContent).toBe("かんじ");
 	});
 
 	it("washes a preview without stamping its badge", () => {
@@ -173,14 +173,14 @@ describe("applyMarks badges over ruby", () => {
 	});
 
 	it("never matches a reading as message text", () => {
-		const root = rubyBody();
+		const root = readingBody();
 		applyMarks(root, [{ id: "a1" as AnnotationId, number: 1, quote: "かんじ" }], false, null);
 		expect(root.querySelector("[data-ann-badge]")).toBeNull();
-		expect(root.querySelector("rt")?.textContent).toBe("かんじ");
+		expect(root.querySelector(".frt")?.textContent).toBe("かんじ");
 	});
 
 	it("re-stamping unwraps anchors without accumulating", () => {
-		const root = rubyBody();
+		const root = readingBody();
 		applyMarks(root, one, false, null);
 		applyMarks(root, one, false, null);
 		expect(root.querySelectorAll("[data-ann-badge]")).toHaveLength(1);
@@ -188,8 +188,8 @@ describe("applyMarks badges over ruby", () => {
 		expect(baseText(root)).toBe("漢字を読む");
 	});
 
-	it("anchors inside the wash region over ruby", () => {
-		const root = rubyBody();
+	it("anchors inside the wash region over readings", () => {
+		const root = readingBody();
 		applyMarks(root, one, false, "a1");
 		const badge = root.querySelector("[data-ann-badge]");
 		// Same mid-quote anchor as the unwashed state (hovering the wash
@@ -198,7 +198,7 @@ describe("applyMarks badges over ruby", () => {
 		expect(badge?.parentElement?.classList.contains("ccez-ann-anchor")).toBe(true);
 		expect(badge?.closest("mark.ccez-ann")).not.toBeNull();
 		expect(baseText(root)).toBe("漢字を読む");
-		expect(root.querySelector("rt")?.textContent).toBe("かんじ");
+		expect(root.querySelector(".frt")?.textContent).toBe("かんじ");
 	});
 });
 

@@ -1,12 +1,14 @@
 import { pinyin } from "pinyin-pro";
 import { escapeHtml } from "./render";
-import { RUBY_SCRIPT_RE } from "./reading";
+import { classifyAidLine, RUBY_SCRIPT_RE, type LocalAid } from "./reading";
 
 /**
- * Pinyin ruby for Chinese text: per-character readings (pinyin-pro resolves
- * polyphones from surrounding context) wrapped as <ruby> annotations.
- * Han characters keep their tone-marked reading; everything else passes
- * through escaped and unannotated.
+ * Pinyin readings for Chinese text: per-character readings (pinyin-pro
+ * resolves polyphones from surrounding context) as native ruby. The
+ * engine fits each base to its annotation exactly, so room appears
+ * only where a reading overflows its Hanzi. Han characters keep their
+ * tone-marked reading; everything else passes through escaped and
+ * unannotated.
  */
 export function pinyinRuby(text: string): string {
 	const syllables = pinyin(text, { toneType: "symbol", type: "array" });
@@ -15,11 +17,33 @@ export function pinyinRuby(text: string): string {
 		.map((char, i) => {
 			const reading = syllables[i];
 			if (/\p{Script=Han}/u.test(char) && reading && reading !== char) {
+				// Native ruby: the engine sizes each base to its own
+				// annotation exactly — room appears only where a reading
+				// overflows its Hanzi, and neighbors never collide. No
+				// estimated padding: estimates spread every character
+				// whether it needs room or not.
 				return `<ruby>${escapeHtml(char)}<rt>${escapeHtml(reading)}</rt></ruby>`;
 			}
 			return escapeHtml(char);
 		})
 		.join("");
+}
+
+/**
+ * One message's pinyin conversion, gated per line exactly like the
+ * dual-aid path: lines the classifier owns convert, kana (Japanese)
+ * lines pass through escaped — pinyin readings on Japanese kanji are
+ * wrong readings. A reply-language preference moves kanji-only lines
+ * to furigana ownership, so pinning pinyin there renders them bare,
+ * exactly like pinning pinyin on a kana line already does. Line count
+ * is preserved 1:1, so `plainParagraphs` source-text alignment is
+ * unaffected.
+ */
+export function pinyinBlock(text: string, preferred: LocalAid | null = null): string {
+	return text
+		.split("\n")
+		.map((line) => (classifyAidLine(line, preferred) === "pinyin" ? pinyinRuby(line) : escapeHtml(line)))
+		.join("\n");
 }
 
 /**
@@ -30,28 +54,91 @@ export function pinyinRuby(text: string): string {
  * grow the message when an aid pins — the exact shift this avoids.
  * Callers pass converter output whose only `\n` are line separators
  * (converter tags never span lines), so splitting here is safe.
+ *
+ * With `sourceText`, simple markdown lists survive: consecutive
+ * `1.`/`-` lines group into `<ol>`/`<ul>` (with the list's start
+ * number) instead of flattening to `1.` paragraphs — flattening moved
+ * the numbers when an aid pinned. Detection runs on the source lines
+ * (a trailing space the tokenizer ate must not decide), markers strip
+ * from the converted lines only where the source classified them, so
+ * `3.14` decimals never match. Tight flat lists only: nesting,
+ * checkboxes, and loose lists fall back to paragraphs, exactly like
+ * an unrecognized line always has.
  */
-export function plainParagraphs(htmlInner: string): string {
-	const blocks: string[][] = [];
-	let current: string[] = [];
-	for (const line of htmlInner.split("\n")) {
-		if (!line.trim()) {
-			if (current.length) {
-				blocks.push(current);
-				current = [];
-			}
-		} else {
-			current.push(line);
-		}
-	}
-	if (current.length) blocks.push(current);
-	// Same ruby-room mark as the markdown renderer: paragraphs that can
+/**
+ * Inline bold/italic for aids mode (markdown is set aside there, so
+ * `**x**` would otherwise pin as literal asterisks — pinning furigana
+ * visibly "broke" the model's bold). Runs may span converter tags: a
+ * `*` never occurs inside generated markup, so every star in the line
+ * is a text marker and `**` + ruby spans + `**` matches as one bold.
+ * Opening runs must hug a non-space, so `2 * 3 * 4` math survives;
+ * unmatched runs pass through untouched.
+ */
+function inlineEmphasis(html: string): string {
+	return html
+		.replace(/\*\*(\S[^*]*?\S|\S)\*\*/g, "<strong>$1</strong>")
+		.replace(/\*(\S[^*]*?\S|\S)\*/g, "<em>$1</em>");
+}
+
+export function plainParagraphs(htmlInner: string, sourceText?: string): string {
+	const converted = htmlInner.split("\n").map(inlineEmphasis);
+	const sources = sourceText?.split("\n");
+	const lines: { html: string; kind: "para" | "ol" | "ul"; start: number }[] =
+		converted.map((html, i) => {
+			const src = sources && sources.length === converted.length ? (sources[i] ?? "") : html;
+			const ordered = src.match(/^\s*(\d+)[.)]\s+\S/);
+			if (ordered) return { html: html.replace(/^\s*\d+[.)]\s*/, ""), kind: "ol", start: Number(ordered[1]) };
+			if (/^\s*[-*+]\s+\S/.test(src)) return { html: html.replace(/^\s*[-*+]\s*/, ""), kind: "ul", start: 1 };
+			return { html, kind: "para", start: 1 };
+		});
+	// Same ruby-room mark as the markdown renderer: blocks that can
 	// carry ruby reserve it, English ones stay tight (see aid-space).
-	return blocks
-		.map((lines) => {
-			const inner = lines.join("<br>");
-			const cls = RUBY_SCRIPT_RE.test(inner.replace(/<[^>]*>/g, "")) ? ` class="cjk"` : "";
-			return `<p${cls}>${inner}</p>`;
-		})
-		.join("");
+	const cjk = (inner: string): string =>
+		RUBY_SCRIPT_RE.test(inner.replace(/<[^>]*>/g, "")) ? ` class="cjk"` : "";
+	const blocks: string[] = [];
+	let current: string[] = [];
+	let list: { kind: "ol" | "ul"; items: string[]; start: number } | null = null;
+	const flushPara = (): void => {
+		if (current.length) {
+			const inner = current.join("<br>");
+			// dir=auto like the markdown renderer: without it an Arabic
+			// paragraph inherits the app's LTR the moment an aid pins,
+			// visibly flipping its direction.
+			blocks.push(`<p${cjk(inner)} dir="auto">${inner}</p>`);
+			current = [];
+		}
+	};
+	const flushList = (): void => {
+		if (list) {
+			const { kind, items, start } = list;
+			const open = kind === "ol" && start !== 1 ? `<ol start="${start}">` : `<${kind}>`;
+			blocks.push(
+				open +
+					items.map((item) => `<li${cjk(item)} dir="auto">${item}</li>`).join("") +
+					`</${kind}>`
+			);
+			list = null;
+		}
+	};
+	for (const line of lines) {
+		if (!line.html.trim()) {
+			flushPara();
+			flushList();
+			continue;
+		}
+		if (line.kind === "para") {
+			flushList();
+			current.push(line.html);
+			continue;
+		}
+		flushPara();
+		if (!list || list.kind !== line.kind) {
+			flushList();
+			list = { kind: line.kind, items: [], start: line.start };
+		}
+		list.items.push(line.html);
+	}
+	flushPara();
+	flushList();
+	return blocks.join("");
 }

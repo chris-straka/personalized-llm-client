@@ -24,17 +24,35 @@ test("clicking the furigana aid pins kanji readings", async ({ page }) => {
 	if (!before) throw new Error("message body lost its box");
 	await aidBtn.hover();
 	await aidBtn.click();
-	// Golden shape: one ruby each for 漢字 and 読, okurigana plain.
-	await expect(body.locator("ruby")).toHaveCount(2, { timeout: 60_000 });
+	// Golden shape: one reading span each for 漢字 and 読, okurigana plain.
+	await expect(body.locator(".frb")).toHaveCount(2, { timeout: 60_000 });
 	await expect(body).toContainText("かんじ");
 	await expect(body).toContainText("よ");
-	// Readings are overlay, never layout: spawning ruby must not move
+	// Readings are overlay, never layout: spawning them must not move
 	// the base text by even a pixel.
 	const after = await body.boundingBox();
 	if (!after) throw new Error("message body lost its box");
 	for (const key of ["x", "y", "width", "height"] as const) {
 		expect(Math.abs(after[key] - before[key])).toBeLessThanOrEqual(1);
 	}
+});
+
+/** Bold markdown survives the aid round-trip: pinning furigana must
+render <strong>, never literal asterisks (aids mode sets markdown
+aside, so inline bold has to be rescued like lists were). */
+test("pinning furigana keeps bold markdown bold", async ({ page }) => {
+	await seedChat(page, [{ role: "assistant", content: "**漢字を読む**" }]);
+	await page.goto("/");
+	const body = page.locator("article.assistant .rendered");
+	await expect(page.locator("article.assistant .actions")).toBeVisible({ timeout: 60_000 });
+	// Unpinned (markdown path) renders bold, as the baseline.
+	await expect(body.locator("strong")).toHaveCount(1);
+	const aidBtn = page.locator('article.assistant .actions button:has-text("読み仮名")');
+	await aidBtn.hover();
+	await aidBtn.click();
+	await expect(body.locator(".frb").first()).toBeVisible({ timeout: 60_000 });
+	await expect(body.locator("strong")).toHaveCount(1);
+	await expect(body).not.toContainText("**");
 });
 
 /** A message with its own Japanese and Chinese sections offers both
@@ -72,9 +90,9 @@ test("pinning furigana and pinyin together renders each on its own lines", async
 	await expect(body).toContainText("かんじ");
 	await actions.locator('button:has-text("拼音")').click();
 	await expect(body).toContainText("nǐ");
-	// Both lines keep ruby: furigana on the Japanese line, pinyin on
+	// Both lines keep readings: furigana on the Japanese line, pinyin on
 	// the Chinese line.
-	await expect(body.locator("ruby")).not.toHaveCount(0);
+	await expect(body.locator(".frb")).not.toHaveCount(0);
 	await expect(body).toContainText("かんじ");
 	// Both buttons swapped in place to their own show-originals.
 	await expect(actions.locator('button:has-text("オリジナルを表示")')).toBeVisible();
@@ -97,4 +115,20 @@ test("clicking the pinyin aid pins Chinese readings", async ({ page }) => {
 	await expect(body.locator("ruby")).not.toHaveCount(0);
 	await expect(body).toContainText("nǐ");
 	await expect(actions.locator('button:has-text("显示原件")')).toBeVisible();
+});
+
+/** A Japanese pill owns kanji-only lines: furigana is offered on a
+kana-less sentence, and pinning it reads Japanese (not pinyin). */
+test("a Japanese pill gives kanji-only lines furigana", async ({ page }) => {
+	await seedChat(page, [{ role: "assistant", content: "「警察官、交通規則違反者検挙中」" }], "ja");
+	await page.goto("/");
+	const actions = page.locator("article.assistant .actions");
+	const body = page.locator("article.assistant .rendered");
+	await expect(actions).toBeVisible({ timeout: 60_000 });
+	// Both aids stay offered (the line is genuinely ambiguous).
+	await expect(actions.locator('button:has-text("読み仮名")')).toBeVisible();
+	await expect(actions.locator('button:has-text("拼音")')).toBeVisible();
+	await actions.locator('button:has-text("読み仮名")').click();
+	await expect(body.locator(".frb").first()).toBeVisible({ timeout: 60_000 });
+	await expect(body).toContainText("けいさつ");
 });

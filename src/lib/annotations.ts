@@ -1,7 +1,8 @@
 /**
  * Annotation: a quoted selection from a message plus an optional comment,
  * wrapped into the next query. Composer-scoped (like attachments): sending
- * bakes them into the message text, so they are never persisted separately.
+ * bakes them into the message text. Unsent drafts persist per chat across
+ * restarts (see load/saveDraftAnnotations); the baked blocks never do.
  */
 import type { ChatMsgId } from "./chat";
 
@@ -249,7 +250,7 @@ export interface AnnotationMark {
  * for 漢字). Only the base text is content.
  */
 export function quoteFragmentText(frag: DocumentFragment): string {
-	frag.querySelectorAll("[data-ann-badge], rt, rp").forEach((el) => el.remove());
+	frag.querySelectorAll("[data-ann-badge], rt, rp, .frt").forEach((el) => el.remove());
 	return frag.textContent?.trim() ?? "";
 }
 
@@ -264,7 +265,7 @@ export function quoteTextNodes(root: Node): Text[] {
 		// neither is message text. A reading left in the haystack
 		// mis-anchors badges (or wraps the reading itself and corrupts
 		// the ruby), so both stay out.
-		if (parent instanceof Element && parent.closest("[data-ann-badge], rt, rp")) continue;
+		if (parent instanceof Element && parent.closest("[data-ann-badge], rt, rp, .frt")) continue;
 		nodes.push(node);
 	}
 	return nodes;
@@ -671,6 +672,63 @@ export function withAnnotations(prompt: string, list: Annotation[]): string {
 	if (list.length === 0) return prompt;
 	const block = `Annotated selections:\n${formatAnnotations(list)}`;
 	return prompt ? `${prompt}\n\n${block}` : block;
+}
+
+/**
+ * Draft annotations persist per chat across restarts (live extras, not
+ * the baked blocks — sending still bakes and clears). Shape-checked on
+ * the way back in: corrupt entries drop, valid ones restore; quotes
+ * that no longer match simply list without a badge, never an error.
+ */
+const DRAFT_KEY = "ccez-studio-annotations-v1";
+
+function cleanDraftList(raw: unknown): Annotation[] {
+	if (!Array.isArray(raw)) return [];
+	const out: Annotation[] = [];
+	for (const item of raw) {
+		if (!item || typeof item !== "object") continue;
+		const a = item as Partial<Annotation>;
+		if (typeof a.id !== "string" || typeof a.messageId !== "string") continue;
+		if (typeof a.quote !== "string" || typeof a.comment !== "string") continue;
+		out.push({
+			id: a.id as AnnotationId,
+			messageId: a.messageId as ChatMsgId,
+			quote: a.quote,
+			comment: a.comment,
+			at: typeof a.at === "number" ? a.at : 0
+		});
+	}
+	return out;
+}
+
+export function loadDraftAnnotations(chatId: string): Annotation[] {
+	try {
+		if (typeof localStorage === "undefined") return [];
+		const raw = localStorage.getItem(DRAFT_KEY);
+		if (!raw) return [];
+		const record = JSON.parse(raw) as Record<string, unknown>;
+		return cleanDraftList(record?.[chatId]);
+	} catch {
+		return [];
+	}
+}
+
+export function saveDraftAnnotations(chatId: string, list: Annotation[], knownIds: string[]): void {
+	try {
+		if (typeof localStorage === "undefined") return;
+		let record: Record<string, unknown> = {};
+		try {
+			record = (JSON.parse(localStorage.getItem(DRAFT_KEY) ?? "{}") as Record<string, unknown>) ?? {};
+		} catch {
+			record = {};
+		}
+		if (list.length === 0) delete record[chatId];
+		else record[chatId] = list;
+		for (const key of Object.keys(record)) if (!knownIds.includes(key)) delete record[key];
+		localStorage.setItem(DRAFT_KEY, JSON.stringify(record));
+	} catch {
+		// Storage full or blocked: drafts stay memory-only.
+	}
 }
 
 /** One baked annotation reference, as displayed under its message. */

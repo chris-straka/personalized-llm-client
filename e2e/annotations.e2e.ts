@@ -274,6 +274,39 @@ test("enter with an empty draft files the annotation", async ({ page }) => {
 	await expect(page.locator(".prompt-tools .ann-pill")).toHaveText("1");
 });
 
+/** Flooding the comment box never spills past it: unbroken text wraps. */
+test("flooding the comment box stays inside it", async ({ page }) => {
+	await openAnnotate(page, "確認しました");
+	const box = page.locator(".ann-pop textarea");
+	await box.fill("a".repeat(500));
+	const sizes = await box.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+	expect(sizes.scroll).toBeLessThanOrEqual(sizes.client + 1);
+});
+
+/** A grown create-box rounds its corners less: the fresh pill starts
+as a 999px capsule, which reads over-rounded once it grows tall. */
+test("grown comment box rounds its corners less", async ({ page }) => {
+	await openAnnotate(page, "確認しました");
+	const pop = page.locator(".ann-pop");
+	await expect(pop).not.toHaveClass(/tall/);
+	await expect(pop).toHaveCSS("border-radius", "999px");
+	await page.locator(".ann-pop textarea").fill("a".repeat(500));
+	await expect(pop).toHaveClass(/tall/);
+	await expect(pop).toHaveCSS("border-radius", "12px");
+});
+
+/** Draft annotations survive a restart: reload restores badge and pill. */
+test("draft annotations survive a reload", async ({ page }) => {
+	await openAnnotate(page, "確認しました");
+	await page.locator(".ann-pop textarea").fill("go");
+	await page.keyboard.press("Enter");
+	await expect(page.locator("button.ccez-ann-badge")).toHaveCount(1);
+	await page.reload();
+	await expect(page.locator("article .rendered").first()).toBeVisible({ timeout: 60_000 });
+	await expect(page.locator("button.ccez-ann-badge")).toHaveCount(1);
+	await expect(page.locator(".prompt-tools .ann-pill")).toHaveText("1");
+});
+
 /** Re-pressing the open badge closes its edit menu like cancel. */
 test("badge re-press closes the edit menu", async ({ page }) => {
 	await openAnnotate(page, "確認しました");
@@ -403,7 +436,7 @@ test("E key edits the hovered own message", async ({ page }) => {
 });
 
 /** Clear-all sits at the bottom-right of the review overlay. */
-test("clear-all lives at the bottom of the review", async ({ page }) => {
+test("clear-all lives at the top right of the review", async ({ page }) => {
 	await openAnnotate(page, "確認しました");
 	await page.keyboard.press("Enter");
 	await hoverPromptPill(page);
@@ -413,8 +446,8 @@ test("clear-all lives at the bottom of the review", async ({ page }) => {
 	const reviewBox = await review.boundingBox();
 	const toolsBox = await tools.boundingBox();
 	if (!reviewBox || !toolsBox) throw new Error("review lost its box");
-	// Bottom edge: the tools row ends where the overlay ends.
-	expect(reviewBox.y + reviewBox.height - (toolsBox.y + toolsBox.height)).toBeLessThan(24);
+	// Top edge: the tools row starts where the overlay starts.
+	expect(toolsBox.y - reviewBox.y).toBeLessThan(32);
 	// Right edge: the tools row ends where the overlay ends.
 	expect(reviewBox.x + reviewBox.width - (toolsBox.x + toolsBox.width)).toBeLessThan(40);
 	await tools.locator("button").click();

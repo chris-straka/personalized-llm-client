@@ -3,8 +3,9 @@ import { seedChat } from "./helpers";
 
 /**
  * Android milestone (S24 Galaxy): key chords don't exist on a phone, so
- * the shortcuts modal teaches touch gestures, and edge swipes open the
- * sidebars. The phone build is future work — these specs pin the
+ * the shortcuts modal teaches touch gestures. Since the gesture
+ * redesign, rightward strokes never summon the chats sheet (two-finger
+ * double-tap owns it) — they only dismiss settings. These specs pin the
  * UA-gated branches that ship on desktop today.
  */
 test.use({
@@ -46,11 +47,12 @@ test("shortcuts modal teaches touch gestures on Android", async ({ page }) => {
 	await expect(page.locator("#shortcuts-heading")).toHaveText("Touch gestures");
 	const modal = page.locator(".modal-veil");
 	await expect(modal.locator('dt:has-text("Chats list")')).toBeVisible();
-	await expect(modal.locator("dd:has-text(\"Swipe right from the left edge\")")).toBeVisible();
+	await expect(modal.locator('dd:has-text("Two-finger double-tap")')).toBeVisible();
 	await expect(modal.locator('dt:has-text("Chats sidebar")')).toHaveCount(0);
 	await expect(modal.locator('dt:has-text("Newer / older chat")')).toBeVisible();
+	await expect(modal.locator('dd:has-text("Two-finger swipe right / left")')).toBeVisible();
 	await expect(modal.locator('dt:has-text("Delete current chat")')).toBeVisible();
-	await expect(modal.locator('dt:has-text("Reply language")')).toBeVisible();
+	await expect(modal.locator('dd:has-text("Double three-finger tap")')).toBeVisible();
 });
 
 /** Synthetic edge swipe (untrusted TouchEvents still hit window listeners). */
@@ -73,16 +75,26 @@ async function swipeFromLeftEdge(page: Page): Promise<void> {
 	});
 }
 
-test("edge swipe from the left toggles the chat sidebar", async ({ page }) => {
+test("edge swipe from the left never flips the chat sidebar", async ({ page }) => {
 	const aside = page.locator("aside:has(button.side-chat)");
-	// State varies by persisted settings; read it, then flip twice.
+	const panel = page.locator(".settings-panel");
+	// State varies by persisted settings; read it, then prove the
+	// stroke leaves it alone — two-finger double-tap owns the sheet.
 	const startedOpen = !(await aside.getAttribute("class"))?.includes("collapsed");
-	await swipeFromLeftEdge(page);
-	if (startedOpen) await expect(aside).toHaveClass(/collapsed/);
-	else await expect(aside).not.toHaveClass(/collapsed/);
 	await swipeFromLeftEdge(page);
 	if (startedOpen) await expect(aside).not.toHaveClass(/collapsed/);
 	else await expect(aside).toHaveClass(/collapsed/);
+	// Dismiss half still works: with the sheet closed, open settings
+	// from the right edge, then watch a rightward stroke close them.
+	if (startedOpen) {
+		await swipeMidScreen(page, 260, 150);
+		await expect(aside).toHaveClass(/collapsed/);
+	}
+	await swipeFromRightEdge(page);
+	await expect(panel).not.toHaveClass(/closed/);
+	await swipeFromLeftEdge(page);
+	await expect(panel).toHaveClass(/closed/);
+	await expect(aside).toHaveClass(/collapsed/);
 });
 
 /** Synthetic mid-screen swipe (same untrusted-event path as edges). */
@@ -108,12 +120,24 @@ async function swipeMidScreen(page: Page, x0: number, x1: number): Promise<void>
 	);
 }
 
-test("mid-screen swipe right toggles the chat sidebar", async ({ page }) => {
+test("mid-screen swipe right never flips the chat sidebar", async ({ page }) => {
 	const aside = page.locator("aside:has(button.side-chat)");
+	const panel = page.locator(".settings-panel");
+	// Same ownership as the edge rule: the stroke leaves the sheet
+	// alone in either state, and still dismisses an open settings.
 	const startedOpen = !(await aside.getAttribute("class"))?.includes("collapsed");
 	await swipeMidScreen(page, 150, 260);
-	if (startedOpen) await expect(aside).toHaveClass(/collapsed/);
-	else await expect(aside).not.toHaveClass(/collapsed/);
+	if (startedOpen) await expect(aside).not.toHaveClass(/collapsed/);
+	else await expect(aside).toHaveClass(/collapsed/);
+	if (startedOpen) {
+		await swipeMidScreen(page, 260, 150);
+		await expect(aside).toHaveClass(/collapsed/);
+	}
+	await swipeFromRightEdge(page);
+	await expect(panel).not.toHaveClass(/closed/);
+	await swipeMidScreen(page, 150, 260);
+	await expect(panel).toHaveClass(/closed/);
+	await expect(aside).toHaveClass(/collapsed/);
 });
 
 test("mid-screen swipe left toggles the settings panel", async ({ page }) => {

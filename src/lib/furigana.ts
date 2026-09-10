@@ -1,6 +1,6 @@
 import { escapeHtml, sanitize } from "./render";
 import { pinyinRuby, plainParagraphs } from "./pinyin";
-import { classifyAidLine } from "./reading";
+import { classifyAidLine, type LocalAid } from "./reading";
 
 /**
  * Japanese furigana via lindera (IPAdic) in a Web Worker. Conversion
@@ -120,16 +120,23 @@ async function fragment(line: string): Promise<string> {
 	return raw;
 }
 
-export async function furiganaHtml(text: string): Promise<string> {
+export async function furiganaHtml(text: string, preferred: LocalAid | null = null): Promise<string> {
 	// Line by line: tokenization must never see (or eat) a newline, so
 	// multi-line messages keep their line structure no matter what the
 	// tokenizer does with whitespace. Blank lines convert to nothing;
 	// plainParagraphs turns them into paragraph breaks like markdown.
+	// Only kana (Japanese) lines convert — readings the tokenizer
+	// invents for Chinese Han characters are wrong readings, so
+	// Han-only lines pass through escaped, exactly like the dual path.
 	const lines = text.split("\n");
 	const converted = await Promise.all(
-		lines.map((line) => (line.trim() ? fragment(line) : Promise.resolve("")))
+		lines.map((line) => {
+			if (!line.trim()) return Promise.resolve("");
+			if (classifyAidLine(line, preferred) !== "furigana") return Promise.resolve(escapeHtml(line));
+			return fragment(line);
+		})
 	);
-	return sanitize(plainParagraphs(converted.join("\n")));
+	return sanitize(plainParagraphs(converted.join("\n"), text));
 }
 
 /**
@@ -138,16 +145,16 @@ export async function furiganaHtml(text: string): Promise<string> {
  * rest plain), so both aids pin at once and neither touches the other's
  * parts. Same paragraph shape as the single-aid paths.
  */
-export async function dualAidHtml(text: string): Promise<string> {
+export async function dualAidHtml(text: string, preferred: LocalAid | null = null): Promise<string> {
 	const lines = text.split("\n");
 	const converted = await Promise.all(
 		lines.map((line) => {
 			if (!line.trim()) return Promise.resolve("");
-			const kind = classifyAidLine(line);
+			const kind = classifyAidLine(line, preferred);
 			if (kind === "furigana") return fragment(line);
 			if (kind === "pinyin") return Promise.resolve(pinyinRuby(line));
 			return Promise.resolve(escapeHtml(line));
 		})
 	);
-	return sanitize(plainParagraphs(converted.join("\n")));
+	return sanitize(plainParagraphs(converted.join("\n"), text));
 }

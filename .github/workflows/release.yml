@@ -1,0 +1,87 @@
+name: release
+
+# Cut a release: push a tag like `v0.1.0` and CI builds the
+# signed-for-updates ARM64 macOS .dmg/.app bundle and the signed Android
+# APK, attaching both to a GitHub Release as a draft.
+#
+# One-time setup before the first release (repo Settings -> Secrets -> Actions):
+#   updater (both jobs sign macOS updates with this):
+#     TAURI_SIGNING_PRIVATE_KEY            (contents of ~/.tauri/ccez.key)
+#     TAURI_SIGNING_PRIVATE_KEY_PASSWORD   (the password set at key generation)
+#   android (`keytool -genkey -v -keystore ~/upload-keystore.jks -keyalg RSA
+#     -keysize 2048 -validity 10000 -alias upload`, same password twice):
+#     ANDROID_KEYSTORE_BASE64  (`base64 -i ~/upload-keystore.jks | pbcopy`)
+#     ANDROID_KEYSTORE_PASSWORD
+#     ANDROID_KEY_ALIAS          (e.g. `upload`)
+# No Apple Developer account needed: the macOS bundle is ad-hoc signed, so
+# the first launch on another Mac needs right-click -> Open. The APK
+# installs directly from the Releases page (allow unknown sources once).
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release-macos:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - run: bun install
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Ccez LLM ${{ github.ref_name }}"
+          releaseDraft: true
+          args: --target aarch64-apple-darwin
+
+  release-android:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - name: Install Android platform and NDK
+        run: |
+          sdkmanager "platforms;android-36" "ndk;30.0.16138531"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/30.0.16138531" >> "$GITHUB_ENV"
+      - run: bun install
+      - name: Write keystore.properties from secrets
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload-keystore.jks"
+          cat > src-tauri/gen/android/keystore.properties <<EOF
+          storeFile=$RUNNER_TEMP/upload-keystore.jks
+          keyAlias=$ANDROID_KEY_ALIAS
+          password=$ANDROID_KEYSTORE_PASSWORD
+          EOF
+      - name: Build signed APK
+        run: bun run tauri android build --apk --target aarch64
+      - name: Attach APK to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: true
+          files: src-tauri/gen/android/app/build/outputs/apk/**/release/*.apk

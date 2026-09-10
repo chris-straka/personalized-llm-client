@@ -21,8 +21,12 @@ export interface SeedMessage {
  * the app boots, so e2e specs open on a deterministic conversation with
  * no API key and no typing.
  */
-export async function seedChat(page: Page, messages: SeedMessage[]): Promise<void> {
-	await page.addInitScript((msgs: SeedMessage[]) => {
+export async function seedChat(
+	page: Page,
+	messages: SeedMessage[],
+	replyLang: string | null = null
+): Promise<void> {
+	await page.addInitScript((seed: { messages: SeedMessage[]; replyLang: string | null }) => {
 		window.localStorage.setItem("ccez-mock-provider", "1");
 		window.localStorage.setItem(
 			"ccez-studio-settings-v1",
@@ -34,8 +38,8 @@ export async function seedChat(page: Page, messages: SeedMessage[]): Promise<voi
 				{
 					id: "e2e-chat",
 					createdAt: 1,
-					replyLang: null,
-					messages: msgs.map((m, i) => ({
+					replyLang: seed.replyLang,
+					messages: seed.messages.map((m, i) => ({
 						id: `e2e-m${i}`,
 						role: m.role,
 						content: m.content,
@@ -45,7 +49,7 @@ export async function seedChat(page: Page, messages: SeedMessage[]): Promise<voi
 				}
 			])
 		);
-	}, messages);
+	}, { messages, replyLang });
 }
 
 /** Bounding boxes for every button in an assistant message's action row. */

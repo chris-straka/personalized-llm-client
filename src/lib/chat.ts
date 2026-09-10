@@ -7,6 +7,7 @@ import type {
 import type { Attachment } from "./attachments";
 import type { KeyValueStore } from "./settings";
 import { memoryStore } from "./settings";
+import { replyLanguageFor } from "./languages";
 
 /**
  * Opaque identifiers: still plain strings at runtime (comparisons,
@@ -59,6 +60,13 @@ export interface ChatState {
 	chats: Chat[];
 	activeChatId: ChatId;
 	sending: boolean;
+	/**
+	 * Chat that owns the in-flight reply (null when idle). A send keeps
+	 * streaming into its own chat when the user looks elsewhere, so the
+	 * Thinking indicator — and the tokens — never leak onto whatever
+	 * chat replaces it. Never persisted: reloads always boot idle.
+	 */
+	sendingChatId: ChatId | null;
 }
 
 const STORAGE_KEY = "ccez-studio-chats-v1";
@@ -85,7 +93,7 @@ function browserStore(): KeyValueStore | null {
 }
 
 export function createChatState(store?: KeyValueStore): ChatState {
-	const state: ChatState = { chats: [], activeChatId: "" as ChatId, sending: false };
+	const state: ChatState = { chats: [], activeChatId: "" as ChatId, sending: false, sendingChatId: null };
 	loadChats(state, store ?? browserStore() ?? memoryStore);
 	if (state.chats.length === 0) {
 		const chat = blankChat();
@@ -176,8 +184,9 @@ let inflight: AbortController | null = null;
 
 /**
  * Abort the in-flight send, if any. Dropping a chat mid-stream must kill
- * its network request too — otherwise `sending` strands "Thinking..." on
- * whatever chat replaces it.
+ * its network request too — otherwise it pointlessly finishes into a
+ * chat that no longer exists. (Merely looking at another chat never
+ * aborts: the stream stays pinned to its origin via sendingChatId.)
  */
 export function abortSend(): void {
 	inflight?.abort();
@@ -221,6 +230,7 @@ export function deleteMessage(state: ChatState, index: number, store?: KeyValueS
 /**
  * Stage the draft as the most recent message (⌥+Enter) without sending.
  * The model never sees it until the next submit carries the full history.
+ * No-op while a reply streams (same quiet rule as sends).
  */
 export function stageMessage(
 	state: ChatState,
@@ -229,7 +239,7 @@ export function stageMessage(
 	store?: KeyValueStore
 ): void {
 	const trimmed = text.trim();
-	if (!trimmed && attachments.length === 0) return;
+	if ((!trimmed && attachments.length === 0) || state.sending) return;
 	const chat = activeChat(state);
 	chat.messages = [
 		...chat.messages,
@@ -478,6 +488,7 @@ export async function streamAssistantReply(
 ): Promise<void> {
 	if (state.sending) return;
 	const chat = activeChat(state);
+	const chatId = chat.id;
 	const apiMessages = buildApiMessages(chat, systemPrompt);
 	const replyId = newChatMsgId();
 	chat.messages = [
@@ -485,6 +496,7 @@ export async function streamAssistantReply(
 		{ id: replyId, role: "assistant", content: "", usage: null, error: null }
 	];
 	state.sending = true;
+	state.sendingChatId = chatId;
 	// Own controller (chained off a caller-provided signal, if any) so
 	// dropping the chat can abort the network request, not just orphan it.
 	const controller = new AbortController();
@@ -496,7 +508,11 @@ export async function streamAssistantReply(
 	// notifies reliably. The running text lives in this local accumulator.
 	let streamed = "";
 	const replaceReply = (patch: Partial<ChatMsg>) => {
-		const target = activeChat(state);
+		// Pinned to the originating chat, never the active one: looking
+		// at another chat mid-stream must not swallow (or misroute) the
+		// reply. A deleted origin simply matches nothing.
+		const target = state.chats.find((c) => c.id === chatId);
+		if (!target) return;
 		target.messages = target.messages.map((m) =>
 			m.id === replyId ? { ...m, ...patch } : m
 		);
@@ -517,8 +533,29 @@ export async function streamAssistantReply(
 	} finally {
 		if (inflight === controller) inflight = null;
 		state.sending = false;
+		if (state.sendingChatId === chatId) state.sendingChatId = null;
 		persistChats(state, store);
 	}
+}
+
+/**
+ * Sidebar label count for one chat: the in-flight assistant placeholder
+ * carries no text yet (nothing visible to count), so it joins the total
+ * only once tokens — or an error — land. Keeps the "N msg" label equal
+ * to the messages actually shown.
+ */
+export function visibleMessageCount(state: ChatState, chat: Chat): number {
+	const msgs = chat.messages;
+	const last = msgs[msgs.length - 1];
+	if (
+		state.sending &&
+		state.sendingChatId === chat.id &&
+		last?.role === "assistant" &&
+		last.content === "" &&
+		!last.error
+	)
+		return msgs.length - 1;
+	return msgs.length;
 }
 
 function persistChats(state: ChatState, store?: KeyValueStore): void {
@@ -548,9 +585,12 @@ function loadChats(state: ChatState, store: KeyValueStore): void {
 				.map((c) => {
 					// The old pins array is gone; top-posted messages replaced it.
 					delete c.pins;
-					// Reply languages are per-session: a restart opens
-					// with no pill on any chat (and backfills old saves).
-					c.replyLang = null;
+					// Each chat keeps its reply pill across restarts (the
+					// launch effect reinstalls its voice); unknown codes
+					// from retired languages fall back to no pill.
+					if (typeof c.replyLang !== "string" || !replyLanguageFor(c.replyLang)) {
+						c.replyLang = null;
+					}
 					return c;
 				});
 			if (state.chats.length > 0) {

@@ -78,7 +78,7 @@ function metaSpark(): ThinkingSupport {
 }
 
 /**
- * DeepSeek v4 (`deepseek-v4-*`): top-level `reasoning_effort` (`high`
+ * DeepSeek (`deepseek-flash`, `deepseek-v4-*`): top-level `reasoning_effort` (`high`
  * the default, `max` for harder pushes) plus a `thinking` toggle. Effort
  * only spans two rungs, so Off/High/Max is the whole dial. Off fully
  * disables thinking rather than lowering it — the model then answers
@@ -110,7 +110,7 @@ function deepseekV4(): ThinkingSupport {
  */
 export function thinkingFor(providerId: string, model: string): ThinkingSupport {
 	if (providerId === "muse") return metaSpark();
-	if (providerId === "deepseek" && /v4/i.test(model)) return deepseekV4();
+	if (providerId === "deepseek" && /v4|flash/i.test(model)) return deepseekV4();
 	return generic();
 }
 

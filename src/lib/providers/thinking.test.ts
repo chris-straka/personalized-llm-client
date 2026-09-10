@@ -19,7 +19,7 @@ describe("thinking", () => {
 	});
 
 	it("offers off/high/max on DeepSeek v4", () => {
-		const support = thinkingFor("deepseek", "deepseek-v4-pro");
+		const support = thinkingFor("deepseek", "deepseek-flash");
 		expect(support.native).toBe(true);
 		expect(support.options.map((o) => o.id)).toEqual(["off", "high", "max"]);
 		expect(support.defaultId).toBe("high");

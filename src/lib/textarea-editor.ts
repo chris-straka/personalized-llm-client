@@ -28,7 +28,12 @@ export function createTextareaEditor(
 	if (options.initialDoc) ta.value = options.initialDoc;
 	parent.prepend(ta);
 
+	// field-sizing: content (see .ta-input CSS) sizes the composer up to
+	// its max-height where supported; only measure by hand elsewhere.
+	const cssOwnsHeight =
+		typeof CSS !== "undefined" && CSS.supports("field-sizing: content");
 	const autogrow = (): void => {
+		if (cssOwnsHeight) return;
 		// Height follows content up to the CSS max-height, then scrolls.
 		ta.style.height = "auto";
 		ta.style.height = `${ta.scrollHeight}px`;

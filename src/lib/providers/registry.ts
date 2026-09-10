@@ -21,7 +21,7 @@ export const PROVIDERS: ProviderDef[] = [
 		id: "deepseek",
 		label: "DeepSeek",
 		defaultBaseUrl: "https://api.deepseek.com",
-		defaultModel: "deepseek-v4-pro",
+		defaultModel: "deepseek-flash",
 		keyHint: "Starts with sk-"
 	}
 ];

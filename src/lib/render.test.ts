@@ -95,6 +95,26 @@ describe("markdown rendering", () => {
 		expect(html).toContain('<p dir="auto" class="cjk">');
 	});
 
+	it("keeps blank-line breaks between CJK paragraphs", () => {
+		const { html } = renderMarkdown("秋が近づく。\n\n空が高くなる。\n\n紅葉が色づく。");
+		expect(html.match(/<p dir="auto" class="cjk">/g)).toHaveLength(3);
+	});
+
+	it("marks CJK list items like the aid path does", () => {
+		const { html } = renderMarkdown("3. 漢字を読む\n4. 空が高くなる");
+		expect(html).toContain('<li dir="auto" class="cjk">');
+		expect(html).not.toMatch(/<li dir="auto">[^<]*[一-鿿]/);
+		const plain = renderMarkdown("3. read this\n4. then that");
+		expect(plain.html).toContain('<li dir="auto">read this</li>');
+		expect(plain.html).not.toContain("cjk");
+	});
+
+	it("keeps task checkboxes working with the item mark", () => {
+		const { html } = renderMarkdown("- [ ] 漢字を読む\n- [x] done");
+		expect(html).toContain('type="checkbox"');
+		expect(html).toContain('<li dir="auto" class="cjk">');
+	});
+
 	it("directs every text block by its own content", () => {
 		const { html } = renderMarkdown("# Title\n\n- item\n\n> quote\n\nplain");
 		for (const tag of ["h1", "li", "blockquote", "p"]) {

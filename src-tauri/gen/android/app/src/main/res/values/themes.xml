@@ -1,9 +1,13 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Theme.ccez_studio" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Android 12+ launch splash: launcher icon on the icon tile
-        tone, so cold start doesn't flash white. Framework attrs only
+        <!-- Android 12+ launch splash: white to match the light app
+        background (#fff), so cold start doesn't contrast-flash.
+        The night theme carries the dark twin. Framework attrs only
         (no splashscreen dep). Re-apply after `tauri android init`. -->
-        <item name="android:windowSplashScreenBackground">#FF28282F</item>
+        <item name="android:windowSplashScreenBackground">#FFFFFFFF</item>
+        <!-- Window behind the WebView between splash dismissal and
+        first web paint. -->
+        <item name="android:windowBackground">#FFFFFFFF</item>
     </style>
 </resources>

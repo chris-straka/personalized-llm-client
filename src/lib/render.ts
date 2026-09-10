@@ -119,9 +119,10 @@ function renderInto(markdownText: string, codes: Array<{ lang: string; code: str
 		renderer: {
 			// Paragraphs that can carry ruby reserve its vertical room
 			// (see aid-space): English paragraphs stay tight so their
-			// selection highlight hugs the text. Only paragraphs get the
-			// mark — list and heading renderers keep their defaults (task
-			// checkboxes, loose-list wrapping) untouched.
+			// selection highlight hugs the text. Lists get the same mark
+			// on the item (body renders exactly like the default — task
+			// checkboxes and loose-list wrapping untouched), or toggling
+			// furigana jumps line-height normal-to-tall on every item.
 			paragraph(this: Renderer, { tokens }: Tokens.Paragraph): string {
 				// Block tokens arrive unparsed: inline markup (bold, code
 				// spans) still needs the parser before detection.
@@ -129,6 +130,14 @@ function renderInto(markdownText: string, codes: Array<{ lang: string; code: str
 				const bare = inner.replace(/<[^>]*>/g, "");
 				const cls = RUBY_SCRIPT_RE.test(bare) ? ` class="cjk"` : "";
 				return `<p${cls}>${inner}</p>\n`;
+			},
+			listitem(this: Renderer, item: Tokens.ListItem): string {
+				// marked v18 default is `<li>${parse(tokens)}</li>`: same
+				// body, plus the ruby-room mark the aid path already adds.
+				const body = this.parser.parse(item.tokens);
+				const bare = body.replace(/<[^>]*>/g, "");
+				const cls = RUBY_SCRIPT_RE.test(bare) ? ` class="cjk"` : "";
+				return `<li${cls}>${body}</li>\n`;
 			},
 			code({ text, lang }: { text: string; lang?: string }): string {
 				const language = (lang ?? "").trim() || "text";

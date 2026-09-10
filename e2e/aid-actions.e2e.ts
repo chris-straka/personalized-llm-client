@@ -56,6 +56,41 @@ test("clicking tashkeel pins it, and show-original restores the text", async ({
 	await expect(body).toContainText("مرحبا");
 });
 
+/** Tashkeel composes with pinyin: pinning the model aid keeps the
+ruby on the Chinese lines instead of replacing it. */
+test("tashkeel keeps pinned pinyin up", async ({ page }) => {
+	await seedChat(page, [{ role: "assistant", content: "你好世界\nمرحبا بالعالم" }]);
+	await page.goto("/");
+	const actions = page.locator(`${ARTICLE} .actions`);
+	const body = page.locator(`${ARTICLE} .rendered`);
+	await expect(actions).toBeVisible({ timeout: 60_000 });
+	await actions.locator('button:has-text("拼音")').click();
+	await expect(body.locator("ruby").first()).toBeVisible({ timeout: 60_000 });
+	const aidBtn = page.locator(`${ARTICLE} .actions button[data-tip="${AID_TITLE}"]`);
+	await aidBtn.hover();
+	await aidBtn.click();
+	await expect(body).toContainText("Mock reply to:", { timeout: 60_000 });
+	// Both: vocalized text shows, ruby still on the Chinese.
+	expect(await body.locator("ruby").count()).toBeGreaterThan(0);
+});
+
+/** Tashkeel on a multilingual message vocalizes the Arabic line only:
+other scripts stay byte-identical instead of vanishing with the
+whole-text replace. */
+test("tashkeel keeps non-Arabic paragraphs", async ({ page }) => {
+	await seedChat(page, [{ role: "assistant", content: "日本語の文です\nمرحبا بالعالم\nEnglish text" }]);
+	await page.goto("/");
+	const body = page.locator(`${ARTICLE} .rendered`);
+	await expect(page.locator(`${ARTICLE} .actions`)).toBeVisible({ timeout: 60_000 });
+	const aidBtn = page.locator(`${ARTICLE} .actions button[data-tip="${AID_TITLE}"]`);
+	await aidBtn.hover();
+	await aidBtn.click();
+	await expect(body).toContainText("Mock reply to:", { timeout: 60_000 });
+	// The Arabic line went to the model; the rest never moved.
+	await expect(body).toContainText("日本語の文です");
+	await expect(body).toContainText("English text");
+});
+
 /** Arabic+Japanese+Chinese offers all three aids side by side. */
 test("a trilingual message offers tashkeel, furigana, and pinyin", async ({
 	page

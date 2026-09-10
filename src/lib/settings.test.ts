@@ -9,7 +9,8 @@ import {
 	activeThinkingId,
 	effectiveSystemPrompt,
 	systemLocale,
-	resolveTheme
+	resolveTheme,
+	type AppSettings
 } from "./settings";
 
 /** Blank slate: tests must never see the developer's real `.env`. */
@@ -35,7 +36,7 @@ describe("settings", () => {
 		expect(s.voiceEngine).toBe("native");
 		expect(s.voiceLang).toBe("en-US");
 		expect(s.systemPrompt).toBe(DEFAULT_SYSTEM_PROMPT);
-		expect(s.providers["deepseek"]!.model).toBe("deepseek-v4-pro");
+		expect(s.providers["deepseek"]!.model).toBe("deepseek-flash");
 		expect(s.providers["muse"]!.model).toBe("muse-spark-1.3-contributor");
 		expect(s.providers["muse"]!.models).toEqual([]);
 	});
@@ -285,16 +286,26 @@ describe("touch toggles", () => {
 		expect(s.hideButtons).toBe(true);
 		expect(s.autoSpeakSelection).toBe(true);
 	});
-	it("heals non-boolean saved values", () => {
+	it("defaults the overlay pill on", () => {
+		expect(blankSettings().overlayActions).toBe(true);
+	});
+	it("drops the retired iOS bubble toggle from older saves", () => {
 		const store = memoryStore;
 		const s = blankSettings();
-		saveSettings(
-			{ ...s, hideMessages: "yes" as never, hideButtons: 0 as never, autoSpeakSelection: 0 as never },
-			store
-		);
+		const stale = {
+			...s,
+			hideMessages: "yes",
+			hideButtons: 0,
+			autoSpeakSelection: 0,
+			overlayActions: 0
+		} as unknown as Record<string, unknown>;
+		stale.iosNativeCallout = true;
+		saveSettings(stale as unknown as AppSettings, store);
 		const healed = loadSettings(store);
 		expect(healed.hideMessages).toBe(false);
 		expect(healed.hideButtons).toBe(true);
 		expect(healed.autoSpeakSelection).toBe(true);
+		expect(healed.overlayActions).toBe(true);
+		expect("iosNativeCallout" in healed).toBe(false);
 	});
 });

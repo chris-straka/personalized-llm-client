@@ -1,13 +1,17 @@
 import { describe, it, expect } from "vitest";
 import { toHiragana } from "wanakana";
-import { rubyHtmlForTokens, type RubyToken } from "./furiganaRuby";
+import { rubyHtmlForTokens, rubyHtmlForText, type RubyToken } from "./furiganaRuby";
 
 const ruby = (tokens: RubyToken[]): string => rubyHtmlForTokens(tokens, toHiragana);
+const aligned = (text: string, tokens: RubyToken[]): string =>
+	rubyHtmlForText(text, tokens, toHiragana);
 
 /**
- * Exact kuroshiro outputs (captured from kuroshiro 1.2.0 + kuromoji
- * before the lindera swap). Token streams mirror the analyzer's
- * segmentation; the builder must reproduce the HTML verbatim.
+ * Kuroshiro's tokenization (captured from kuroshiro 1.2.0 + kuromoji
+ * before the lindera swap), rendered as positioned spans instead of
+ * kuroshiro's native ruby (see furiganaRuby: same segmentation and
+ * reading splits, zero layout footprint). Token streams mirror the
+ * analyzer's segmentation; the builder must reproduce the HTML verbatim.
  */
 describe("rubyHtmlForTokens", () => {
 	it("matches kuroshiro on 漢字を読む", () => {
@@ -19,7 +23,7 @@ describe("rubyHtmlForTokens", () => {
 				{ surface: "む", reading: "ム" }
 			])
 		).toBe(
-			"<ruby>漢字<rp>(</rp><rt>かんじ</rt><rp>)</rp></ruby>を<ruby>読<rp>(</rp><rt>よ</rt><rp>)</rp></ruby>む"
+			'<span class="frb">漢字<span class="frt">かんじ</span></span>を<span class="frb">読<span class="frt">よ</span></span>む',
 		);
 	});
 
@@ -35,7 +39,7 @@ describe("rubyHtmlForTokens", () => {
 				{ surface: "う", reading: "ウ" }
 			])
 		).toBe(
-			"<ruby>感<rp>(</rp><rt>かん</rt><rp>)</rp></ruby>じ<ruby>取<rp>(</rp><rt>と</rt><rp>)</rp></ruby>れたら<ruby>手<rp>(</rp><rt>て</rt><rp>)</rp></ruby>を<ruby>繋<rp>(</rp><rt>つな</rt><rp>)</rp></ruby>ごう"
+			'<span class="frb">感<span class="frt">かん</span></span>じ<span class="frb">取<span class="frt">と</span></span>れたら<span class="frb">手<span class="frt">て</span></span>を<span class="frb">繋<span class="frt">つな</span></span>ごう',
 		);
 	});
 
@@ -50,7 +54,7 @@ describe("rubyHtmlForTokens", () => {
 				{ surface: "ている", reading: "テイル" }
 			])
 		).toBe(
-			"<ruby>美<rp>(</rp><rt>うつく</rt><rp>)</rp></ruby>しい<ruby>花<rp>(</rp><rt>はな</rt><rp>)</rp></ruby>が<ruby>咲<rp>(</rp><rt>さ</rt><rp>)</rp></ruby>いている"
+			'<span class="frb">美<span class="frt">うつく</span></span>しい<span class="frb">花<span class="frt">はな</span></span>が<span class="frb">咲<span class="frt">さ</span></span>いている',
 		);
 	});
 
@@ -66,7 +70,7 @@ describe("rubyHtmlForTokens", () => {
 				{ surface: "いしました", reading: "イシマシタ" }
 			])
 		).toBe(
-			"<ruby>株式会社<rp>(</rp><rt>かぶしきがいしゃ</rt><rp>)</rp></ruby>の<ruby>田中<rp>(</rp><rt>たなか</rt><rp>)</rp></ruby>さんにお<ruby>会<rp>(</rp><rt>あ</rt><rp>)</rp></ruby>いしました"
+			'<span class="frb">株式会社<span class="frt">かぶしきがいしゃ</span></span>の<span class="frb">田中<span class="frt">たなか</span></span>さんにお<span class="frb">会<span class="frt">あ</span></span>いしました',
 		);
 	});
 
@@ -74,7 +78,7 @@ describe("rubyHtmlForTokens", () => {
 		// Lindera segments 感じ取れ as one token where kuromoji gave
 		// 感じ|取れ: the interior じ must still pin the split.
 		expect(ruby([{ surface: "感じ取れ", reading: "カンジトレ" }])).toBe(
-			"<ruby>感<rp>(</rp><rt>かん</rt><rp>)</rp></ruby>じ<ruby>取<rp>(</rp><rt>と</rt><rp>)</rp></ruby>れ"
+			'<span class="frb">感<span class="frt">かん</span></span>じ<span class="frb">取<span class="frt">と</span></span>れ',
 		);
 	});
 
@@ -84,7 +88,7 @@ describe("rubyHtmlForTokens", () => {
 
 	it("keeps 々 inside the kanji run", () => {
 		expect(ruby([{ surface: "様々", reading: "サマザマ" }])).toBe(
-			"<ruby>様々<rp>(</rp><rt>さまざま</rt><rp>)</rp></ruby>"
+			'<span class="frb">様々<span class="frt">さまざま</span></span>',
 		);
 	});
 
@@ -105,3 +109,44 @@ describe("rubyHtmlForTokens", () => {
 		expect(ruby([{ surface: "あ亜", reading: "ア" }])).toBe("あ亜");
 	});
 });
+
+describe("rubyHtmlForText", () => {
+	it("keeps spaces the tokenizer dropped", () => {
+		// Lindera emits no whitespace tokens: aligning back to the
+		// source is what keeps "Here are three" from becoming one word.
+		expect(
+			aligned("Here are three", [
+				{ surface: "Here", reading: "*" },
+				{ surface: "are", reading: "*" },
+				{ surface: "three", reading: "*" }
+			])
+		).toBe("Here are three");
+	});
+
+	it("annotates kanji runs while keeping surrounding spaces", () => {
+		expect(
+			aligned("Hello 漢字 today", [
+				{ surface: "Hello", reading: "*" },
+				{ surface: "漢字", reading: "カンジ" },
+				{ surface: "today", reading: "*" }
+			])
+		).toBe("Hello <span class=\"frb\">漢字<span class=\"frt\">かんじ</span></span> today");
+	});
+
+	it("passes through gaps the tokenizer skipped", () => {
+		// Unknown/skipped punctuation between matches is content, not
+		// a token boundary: it stays verbatim.
+		expect(aligned("あ※い", [{ surface: "あ", reading: "*" }])).toBe("あ※い");
+	});
+
+	it("renders tokens that match nowhere instead of dropping them", () => {
+		expect(aligned("漢字", [{ surface: "漢字", reading: "カンジ" }])).toContain("かんじ");
+		expect(
+			aligned("abc", [
+				{ surface: "abc", reading: "*" },
+				{ surface: "zzz-normalized-away", reading: "*" }
+			])
+		).toBe("abczzz-normalized-away");
+	});
+});
+

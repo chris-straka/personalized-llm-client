@@ -1,7 +1,8 @@
 import init, { TokenizerBuilder, loadDictionaryFromBytes } from "lindera-wasm";
 import { unzipSync } from "fflate";
 import { toHiragana } from "wanakana";
-import { rubyHtmlForTokens, type RubyToken } from "./furiganaRuby";
+import { appRoot } from "./workerUrl";
+import { rubyHtmlForText, type RubyToken } from "./furiganaRuby";
 
 /**
  * Furigana conversion off the main thread. Lindera's dictionary build
@@ -31,8 +32,8 @@ interface WorkerScope {
 
 const scope = self as unknown as WorkerScope;
 
-const base = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
-const DICT_URL = `${base}/lindera/lindera-ipadic-6.0.0.zip`;
+/* App-rooted (never worker-relative): see workerUrl.ts. */
+const DICT_URL = `${appRoot(self.location.href)}/lindera/lindera-ipadic-6.0.0.zip`;
 
 /** Zip member names (under the lindera-ipadic/ prefix) in load order. */
 const DICT_FILES = [
@@ -110,7 +111,7 @@ function toRubyToken(token: LinderaToken): RubyToken {
 async function convert(text: string): Promise<string> {
 	const tokenizer = await ensureReady();
 	const tokens = (tokenizer.tokenize(text) as LinderaToken[]).map(toRubyToken);
-	return rubyHtmlForTokens(tokens, toHiragana);
+	return rubyHtmlForText(text, tokens, toHiragana);
 }
 
 scope.addEventListener("message", (event: Event) => {

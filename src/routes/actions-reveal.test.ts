@@ -12,11 +12,14 @@ import { describe, it, expect } from "vitest";
  * starts. will-change looks like removable dead weight; it is not.
  */
 function pageStyle(): string {
-	const source = readFileSync(new URL("./+page.svelte", import.meta.url), "utf8");
-	const match = source.match(/<style>([\s\S]*)<\/style>/);
+	const match = pageSource().match(/<style>([\s\S]*)<\/style>/);
 	if (!match) throw new Error("+page.svelte has no <style> block");
 	// Strip CSS comments so prose can't trip the assertions below.
 	return match[1]!.replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+function pageSource(): string {
+	return readFileSync(new URL("./+page.svelte", import.meta.url), "utf8");
 }
 
 describe("hover-only message actions", () => {
@@ -30,6 +33,35 @@ describe("hover-only message actions", () => {
 		const css = pageStyle();
 		expect(css).toContain("article.user.speaking .actions");
 		expect(css).toContain("article.assistant.speaking .actions");
+	});
+
+	it("keeps the row up while an aid loads", () => {
+		const css = pageStyle();
+		expect(css).toContain("article.user.aid-loading .actions");
+		expect(css).toContain("article.assistant.aid-loading .actions");
+	});
+
+	it("holds the touch row while aids load or audio runs", () => {
+		const source = pageSource();
+		const timer = source.match(/function armActionsTimer\(id: ChatMsgId\): void \{([\s\S]*?)\n\t\}/);
+		expect(timer, "armActionsTimer is gone or reshaped — move the busy hold with it").toBeTruthy();
+		const body = timer![1]!;
+		// Every in-flight state that owns the row must re-arm, never close.
+		for (const state of ["aidBusy.has(id)", "vocalizing.has(id)", "speakingId === id", "speakingSelection === id"]) {
+			expect(body).toContain(state);
+		}
+		expect(body).toContain("armActionsTimer(id)");
+	});
+
+	it("stops speech from the composer button without flipping the setting", () => {
+		const source = pageSource();
+		const toggle = source.match(/function toggleVoice\(\): void \{([\s\S]*?)\n\t\}/);
+		expect(toggle, "toggleVoice is gone or reshaped — keep the global stop in it").toBeTruthy();
+		const body = toggle![1]!;
+		expect(body).toContain("speakingId !== null");
+		expect(body).toContain("stopVoice()");
+		// The stop path returns before the setting toggle.
+		expect(body.indexOf("stopVoice()")).toBeLessThan(body.indexOf("setVoiceEnabled"));
 	});
 
 	it("keeps will-change on the hover-hidden rows", () => {

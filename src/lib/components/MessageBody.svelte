@@ -2,7 +2,7 @@
 	import { tick, untrack } from "svelte";
 	import { createAidLoadingReporter, furiganaRequestKey } from "$lib/aidLoading";
 	import { detectScripts, localAidsFor, type LocalAid } from "$lib/reading";
-	import { pinyinRuby, plainParagraphs } from "$lib/pinyin";
+	import { pinyinBlock, plainParagraphs } from "$lib/pinyin";
 	import { dualAidHtml, furiganaHtml } from "$lib/furigana";
 	import {
 		renderMessage,
@@ -51,6 +51,12 @@
 		 * lines); empty renders the original (aids are per-message only).
 		 */
 		aidKinds?: LocalAid[] | undefined;
+		/**
+		 * The chat reply pill's local aid: kanji-only lines (Han, no
+		 * kana) belong to it instead of defaulting to pinyin. Null
+		 * keeps the script-only default.
+		 */
+		aidPreferred?: LocalAid | null;
 		/** Reports furigana dictionary loads so the button can show it. */
 		onAidLoadingChange?: (loading: boolean) => void;
 		/**
@@ -92,6 +98,7 @@
 		contentOverride = null,
 		aidPreview = false,
 		aidKinds = undefined,
+		aidPreferred = null,
 		onAidLoadingChange,
 		onAidError
 	}: Props = $props();
@@ -124,9 +131,6 @@
 	 * other, or both on mixed messages.
 	 */
 	const aidKindList = $derived(aidKinds ?? []);
-	const aidMode = $derived<"model" | "local" | "none">(
-		textOverride ? "model" : !streaming && aidKindList.length > 0 ? "local" : "none"
-	);
 	/** Displayed text: contentOverride redacts baked annotation blocks,
 	which are metadata, never prose. Paste-fold offsets still apply —
 	redaction only ever trims the trailing block, so prefix offsets hold. */
@@ -134,8 +138,12 @@
 	/** Aid-visible text: the baked block stripped even when unfolded for
 	reading (an unfolded refs-only message shows its block, but aids
 	still ignore metadata — matching the row's buttons, which key off
-	the same redacted text). */
-	const aidBase = $derived(annRefsFor(displayBase)?.text ?? displayBase);
+	the same redacted text). Model-aid text (e.g. tashkeel) composes
+	with local kinds: ruby lands on the shown text, so the base follows
+	the override when one is pinned. */
+	const aidBase = $derived(
+		annRefsFor(textOverride ?? displayBase)?.text ?? (textOverride ?? displayBase)
+	);
 	/** Scripts with a local aid always reserve ruby's vertical room, so
 	hovering or pinning one never shoves the message down — any script
 	in the text counts, not just the first, since each kind renders its
@@ -154,10 +162,9 @@
 		const wash = washId;
 		const skipMarks = streaming || folded;
 		// Aids render from raw text (markdown set aside); model-aid text
-		// (e.g. tashkeel) arrives via textOverride and takes the normal path.
-		// Arabic has no local aid: its model-aid button lives in the
-		// message actions, and the body renders identically either way.
-		const localAids = aidMode === "local" ? aidKindList : [];
+		// (e.g. tashkeel) arrives via textOverride and composes with
+		// pinned local kinds, each rendering its own lines onto it.
+		const localAids = !streaming && aidKindList.length > 0 ? aidKindList : [];
 		const furigana = localAids.includes("furigana");
 		const pinyin = localAids.includes("pinyin");
 		// Marks apply after Svelte flushes the new HTML (see applyMarks).
@@ -172,7 +179,7 @@
 			html = foldSegments(aidBase, message.pasteFolds)
 				.map((segment) =>
 					segment.kind === "text"
-						? plainParagraphs(pinyinRuby(segment.text))
+						? plainParagraphs(pinyinBlock(segment.text, aidPreferred), segment.text)
 						: pasteFoldButton(segment.index, segment.chars)
 				)
 				.join("");
@@ -197,7 +204,7 @@
 			const run = ++aidRun;
 			const segments = foldSegments(aidBase, message.pasteFolds);
 			const convert = (text: string): Promise<string> =>
-				pinyin && furigana ? dualAidHtml(text) : furiganaHtml(text);
+				pinyin && furigana ? dualAidHtml(text, aidPreferred) : furiganaHtml(text, aidPreferred);
 			void Promise.all(
 				segments.map((segment) =>
 					segment.kind === "text"
@@ -377,37 +384,91 @@
 	}
 	/* Ruby's vertical room is always reserved where a local aid exists,
 	so previewing or pinning it never reflows the message — but only on
-	paragraphs that can actually carry ruby (marked cjk at render). An
-	English paragraph in a mixed message keeps its normal leading, so
-	its selection highlight hugs the text instead of spanning the ruby
-	void above. WebKit sizes in-flow ruby annotations by glyphs (no
-	line-height trick contains them), so the reservation itself must
-	cover base plus annotation: 2.7 swallows the measured overhang with
-	headroom for other stacks. */
-	.rendered.aid-space :global(p.cjk) {
+	blocks that can actually carry ruby (marked cjk at render, including
+	list items now that aids keep list structure). An English paragraph
+	in a mixed message keeps its normal leading, so its selection
+	highlight hugs the text instead of spanning the ruby void above.
+	WebKit sizes in-flow ruby annotations by glyphs (no line-height
+	trick contains them), so the reservation itself must cover base
+	plus annotation: 2.7 swallows the measured overhang with headroom
+	for other stacks. */
+	.rendered.aid-space :global(p.cjk),
+	.rendered.aid-space :global(li.cjk) {
 		line-height: 2.7;
+		/* pretty rebalances CJK lines short and uneven across
+		paragraphs (kinsoku + ruby spans confuse it): fill the column
+		with plain wrapping like before. */
+		text-wrap: auto;
 	}
-	.rendered :global(ruby) {
-		ruby-align: center;
+	.rendered.aid-space :global(p.cjk) {
+		/* Tall lines swallow the base 0.4em gap, so CJK paragraphs get
+		a fuller break plus the standard 1em first-line indent (字下げ):
+		three paragraphs read as three even before ruby loads. */
+		margin: 0.9em 0;
+		text-indent: 1em;
 	}
-	.rendered :global(rt) {
+	.rendered.aid-space :global(p.cjk:last-child) {
+		/* The break belongs between paragraphs, not between the last
+		line and the action row (outranks the rule above). */
+		margin-bottom: 0;
+	}
+	/* The native selection callout stays enabled over message text:
+	Apple gives apps no way to extend it, so our Annotate button
+	floats above the highlight while the system bubble (Copy /
+	Translate) keeps its below slot. Selection itself is unaffected:
+	handles, drags, and JS ranges all still work. */
+	/* Reading base: inline span, breaking between tokens exactly like
+	unannotated text in every engine (native ruby reserves the
+	annotation's width per base — and WebKit ignores out-of-flow
+	positioning on rt entirely — pushing characters down a line).
+	Relative only as the positioning context for its reading. */
+	.rendered :global(.frb) {
+		position: relative;
+		/* Atomic: a multi-kanji base must never fragment across a line
+		break — an absolutely positioned reading centers against the
+		fragmented box and lands shifted right of its kanji. Whole
+		tokens wrap to the next line instead. */
+		white-space: nowrap;
+	}
+	/* Readings are overlay, never layout: absolutely positioned above
+	the base, centered, painting into the aid-space leading reserved
+	on cjk paragraphs — vertical rhythm unchanged, breaking matches
+	plain text exactly, and quote extraction strips them as before. */
+	.rendered :global(.frt) {
+		position: absolute;
+		bottom: 100%;
+		left: 50%;
+		transform: translateX(-50%);
+		/* Optical: readings sit a hair right of their kanji, so pull
+		back one pixel (absolute, never layout). */
+		margin-left: -1px;
+		white-space: nowrap;
 		font-size: 0.62em;
-		/* Zero strut: the annotation's line box contributes nothing, so
-		WebKit can't grow the line for it — glyphs still paint (visible
-		overflow) into the aid-space leading reserved above. */
-		line-height: 0;
+		line-height: 1.2;
 		color: #6e6e73;
-		animation: rt-in 0.18s ease;
+		color: var(--muted);
+		pointer-events: none;
 	}
-	/* Readings (and their fallback parens) are overlay, never content:
-	they neither select nor highlight, and quote extraction already
-	strips them for the same reason. */
-	.rendered :global(rt),
-	.rendered :global(rp) {
-		user-select: none;
-		-webkit-user-select: none;
+	/* Entrance fade everywhere except iOS, where it breaks the reveal
+	(visible flicker/shift). .app carries data-ios, outside this
+	component, hence the leading :global. */
+	:global(.app:not([data-ios])) .rendered :global(.frt) {
+		animation: frt-in 0.18s ease;
 	}
-	@keyframes rt-in {
+	/* Per-platform nudge: kana bearings differ per OS font (Hiragino
+	on iOS needs a stronger pull than desktop). Scoped so each
+	platform keeps its own tuned value — Android gets its line here
+	once it's eyeballed on-device. */
+	:global(.app[data-ios]) .rendered :global(.frt) {
+		margin-left: -8px;
+	}
+	/* Same leftward pull on Android (eyeballed on-device to match
+	iOS). data-android is also set on iPhones (any phone), so iOS
+	is excluded — it keeps its own line above. */
+	:global(.app[data-android]:not([data-ios])) .rendered :global(.frt) {
+		margin-left: -8px;
+	}
+	@keyframes frt-in {
 		from {
 			opacity: 0;
 		}
@@ -535,12 +596,48 @@
 	.rendered :global(mark.ccez-ann.leaving) {
 		animation: ann-wash-out 0.18s ease forwards;
 	}
-	/* Reading-aid ruby text is overlay, not content: never selectable,
+	/* Reading-aid text is overlay, not content: never selectable,
 	so it stays out of selections and selection-copies. */
-	.rendered :global(ruby rt),
-	.rendered :global(ruby rp) {
+	.rendered :global(.frt) {
 		user-select: none;
 		-webkit-user-select: none;
+	}
+	/* Pinyin rides native ruby instead of overlay spans: the engine
+	expands each base to fit its own annotation exactly, so space
+	appears only where a reading overflows its Hanzi — neighbors never
+	collide and fitting readings cost nothing. (Furigana keeps overlay
+	spans: kana readings fit their bases, and overlay keeps them out of
+	layout and selection entirely.) */
+	.rendered :global(ruby) {
+		ruby-align: center;
+	}
+	.rendered :global(rt) {
+		font-size: 0.62em;
+		/* Zero strut: the annotation's line box contributes nothing, so
+		no engine grows the line for it — glyphs paint into the
+		aid-space leading reserved above. No entrance fade: it read as
+		flicker on reveal. (iOS 26.5 sizes the annotation by glyphs past
+		the zero strut and clears the reservation by ~1px anyway — the
+		iOS override below fits it back. Pinning then moves nothing.) */
+		line-height: 0;
+		color: #6e6e73;
+		color: var(--muted);
+		/* Keeps readings out of drag-select copies on engines that
+		honor it (Chromium); the Copy button reads message source, so
+		it never sees readings either way. */
+		user-select: none;
+		-webkit-user-select: none;
+	}
+	/* Per-platform fit: iOS WebKit sizes in-flow ruby annotations by
+	glyphs, and at 0.62em their extents clear the 2.7 aid-space strut
+	by ~1px — pinning grows the line and drops the base, the buttons,
+	and everything below (measured +1px block / +1px base on iPhone
+	WebKit 26.5, zero on desktop). 0.6em fits the tallest stacks
+	(nǚ lǜ zhuāng chuāng) with the rightward spread untouched;
+	desktop and Android keep 0.62 (Android gets its line here once
+	it's eyeballed on-device). */
+	:global(.app[data-ios]) .rendered :global(rt) {
+		font-size: 0.6em;
 	}
 	/* Badge anchors ride on the quote's last character (or its wash
 	mark): unstyled inline wrappers, so stamping never reflows text. */

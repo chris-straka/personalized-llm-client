@@ -1,6 +1,10 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Theme.ccez_studio" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
+        <!-- Dark twin of the launch splash: matches the app's dark
+        background (#17171a) so night-mode cold start doesn't flash white.
+        Re-apply after `tauri android init`. -->
+        <item name="android:windowSplashScreenBackground">#FF17171A</item>
+        <item name="android:windowBackground">#FF17171A</item>
     </style>
 </resources>

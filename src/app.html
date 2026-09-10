@@ -6,7 +6,17 @@
     <!-- viewport-fit=cover lets the app paint under the status bar and
     home indicator (no letterbox black bars); safe-area insets in the
     stylesheet keep content clear of them. Ignored off iOS. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- interactive-widget=resizes-content makes the keyboard resize the
+    layout viewport instead of panning the visual one: .app (100dvh
+    flex) glides with the keyboard instead of snapping 250ms late,
+    and the caret reveal no longer pans by tap position (top taps
+    parked the composer far too high). The visualViewport height pin
+    in +page.svelte then sees tracked heights and stays inert; it
+    remains as the fallback for pre-108 WebViews. Ignored on iOS. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <!-- Status-bar / task-switcher tint, matched to the app's light/dark --bg. -->
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#17171a" media="(prefers-color-scheme: dark)" />
     <title>Tauri + SvelteKit + Typescript App</title>
     <style>
       /* Bundled coding font (OFL): identical rendering on desktop and
@@ -24,6 +34,17 @@
         font-weight: 700;
         font-style: normal;
         font-display: swap;
+      }
+      /* First-paint background before SvelteKit CSS loads: mirrors the
+      app's light/dark --bg so Android cold start doesn't flash white.
+      The app stylesheet takes over from here. */
+      html {
+        background: #fff;
+      }
+      @media (prefers-color-scheme: dark) {
+        html {
+          background: #17171a;
+        }
       }
     </style>
     %sveltekit.head%

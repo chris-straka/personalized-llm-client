@@ -29,13 +29,16 @@
     "updater": {
       "active": true,
       "dialog": false,
-      "endpoints": ["https://ccez.studio/updates/{{target}}/{{current_version}}"],
-      "pubkey": "UPDATE_PUBKEY_NOT_CONFIGURED_SEE_PLAN_MD"
+      "endpoints": [
+        "https://github.com/chris-straka/personalized-llm-client/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ4NkFDNkZFREE5MkJEMwpSV1RUSzZudGI2eUdCQlFJQjJMaFhocFk1V0RXYmVWZExwOEdRSFBlSUhDZkVGV3JUWGlCVTdKQgo="
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

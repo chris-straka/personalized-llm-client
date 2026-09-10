@@ -10,6 +10,12 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(() => ({
   plugins: [sveltekit()],
+  // Staleness marker (settings footer): installed builds show when
+  // they were compiled, so "am I behind?" is one glance. Dev shows
+  // "live" instead (HMR is always fresh; a server-start stamp would lie).
+  define: {
+    __BUILD_STAMP__: JSON.stringify(new Date().toISOString().slice(0, 16).replace("T", " ") + "Z")
+  },
   optimizeDeps: {
     // lindera-wasm resolves its .wasm sibling via `new URL(..., import.meta.url)`;
     // pre-bundling would relocate the glue and break that link (per its docs).

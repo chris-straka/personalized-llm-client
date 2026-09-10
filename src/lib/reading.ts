@@ -50,13 +50,37 @@ export function detectScripts(text: string): AidScript[] {
 
 /**
  * Which local aid owns one rendered line: kana lines read as Japanese,
- * Han-only lines as Chinese, anything else converts nothing. Dual-aid
- * rendering applies each aid only to its own lines, so pinning both
- * reads a mixed message end to end.
+ * anything else converts nothing. A Han-only line is genuinely
+ * ambiguous — kanji are Han characters in both languages — so the
+ * chat's reply language breaks the tie when one is set, and Chinese
+ * wins by default exactly as before. Kana is unambiguous: no pill
+ * ever overrides it. Dual-aid rendering applies each aid only to its
+ * own lines, so pinning both reads a mixed message end to end.
  */
-export function classifyAidLine(line: string): LocalAid | null {
+export function classifyAidLine(line: string, preferred: LocalAid | null = null): LocalAid | null {
 	if (KANA_RE.test(line)) return "furigana";
-	if (/\p{Script=Han}/u.test(line)) return "pinyin";
+	if (/\p{Script=Han}/u.test(line)) return preferred ?? "pinyin";
+	return null;
+}
+
+/**
+ * True when the text holds a Han-only line (Han, no kana): the lines
+ * no script test can own, where the reply-language pill decides.
+ */
+export function hasAmbiguousAidLine(text: string): boolean {
+	return text
+		.split("\n")
+		.some((line) => /\p{Script=Han}/u.test(line) && !KANA_RE.test(line));
+}
+
+/**
+ * The chat reply pill's local aid, if it has one: Japanese owns
+ * kanji-only lines, Chinese and Cantonese keep the default. Anything
+ * else (and no pill) leaves ownership untouched.
+ */
+export function preferredLocalAid(code: string | null): LocalAid | null {
+	if (code === "ja") return "furigana";
+	if (code === "zh" || code === "yue") return "pinyin";
 	return null;
 }
 
@@ -171,9 +195,39 @@ export const MODEL_AIDS: Record<string, ModelAid> = {
 		revertTip: "Back to the original text",
 		instruction:
 			"Add full Arabic diacritics (tashkeel) to the following text. " +
-			"Reply with the vocalized text only, no explanations."
+			"Reply with the vocalized text only, one line per input line, no explanations."
 	}
 };
+
+/** Lines carrying Arabic script: the only lines tashkeel may touch. */
+const ARABIC_LINE_RE = /[\u0600-\u06FF\u0750-\u077F]/;
+
+export function aidTargetLines(text: string): number[] {
+	const indexes: number[] = [];
+	text.split("\n").forEach((line, i) => {
+		if (ARABIC_LINE_RE.test(line)) indexes.push(i);
+	});
+	return indexes;
+}
+
+/**
+ * Splice vocalized lines back into the original line structure, so a
+ * model aid on a multilingual message replaces only its own script —
+ * Japanese/Chinese/English paragraphs stay byte-identical, and the
+ * model call itself carries (and bills) only the Arabic. Null when
+ * the shape doesn't fit (one result line per sent line), so callers
+ * fall back to the whole-text replace rather than scrambling.
+ */
+export function spliceAidResult(original: string, indexes: number[], result: string): string | null {
+	const out = result.split("\n");
+	if (out.length !== indexes.length) return null;
+	const lines = original.split("\n");
+	indexes.forEach((lineIdx, k) => {
+		const replacement = out[k];
+		if (lineIdx < lines.length && replacement !== undefined) lines[lineIdx] = replacement;
+	});
+	return lines.join("\n");
+}
 
 /** Aid-script → model-aid id. Local-compute aids (pinyin, furigana) map to null. */
 export const MODEL_AID_FOR_SCRIPT: Record<AidScript, string | null> = {
