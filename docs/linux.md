@@ -1,5 +1,8 @@
 # Linux distribution: .deb, AUR, AppImage
 
+> Status: **UNTESTED on Linux hardware** — static analysis only.
+> The first `v*` tag CI run is the real test.
+
 Ccez LLM is a Tauri v2 app (currently tauri 2.11.5 / tauri-build 2.6.3 per
 `src-tauri/Cargo.lock`). Every Linux build needs the WebKitGTK 4.1 stack at
 **build time** and the WebKitGTK/GTK runtime libs at **install time**.

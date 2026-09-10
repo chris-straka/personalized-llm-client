@@ -1,5 +1,8 @@
 # Windows installer (NSIS)
 
+> Status: **UNTESTED on Windows hardware** — config schema-verified only.
+> The first `v*` tag CI run is the real test.
+
 The Windows build produces **NSIS `.exe` installers** (one per architecture)
 on GitHub Actions only. There is no Microsoft Store (MSIX) package and no
 supported local Windows build — maintainers develop on macOS.
