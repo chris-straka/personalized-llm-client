@@ -9,27 +9,43 @@ mod menu;
 mod tts;
 #[cfg(target_os = "android")]
 mod tts_android;
+#[cfg(target_os = "android")]
+mod secrets_android;
 
-/// macOS Keychain (via the `keyring` crate) backing for API keys.
-/// Service name matches the Tauri bundle identifier.
+/// API-key storage: macOS Keychain via the `keyring` crate, Android
+/// Keystore via `secrets_android` (keyring has no Android backend — it
+/// falls back to an in-memory mock). Service name matches the Tauri
+/// bundle identifier.
 const KEYCHAIN_SERVICE: &str = "studio.ccez.app";
 
 /// Read a secret; `None` when nothing is stored under `account`.
 #[tauri::command]
 fn keychain_get(account: String) -> Result<Option<String>, String> {
-    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, &account).map_err(|e| e.to_string())?;
-    match entry.get_password() {
-        Ok(secret) => Ok(Some(secret)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(e.to_string()),
+    #[cfg(target_os = "android")]
+    return secrets_android::get(KEYCHAIN_SERVICE, &account);
+    #[cfg(not(target_os = "android"))]
+    {
+        let entry =
+            keyring::Entry::new(KEYCHAIN_SERVICE, &account).map_err(|e| e.to_string())?;
+        match entry.get_password() {
+            Ok(secret) => Ok(Some(secret)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(e.to_string()),
+        }
     }
 }
 
 /// Write (create or replace) a secret.
 #[tauri::command]
 fn keychain_set(account: String, secret: String) -> Result<(), String> {
-    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, &account).map_err(|e| e.to_string())?;
-    entry.set_password(&secret).map_err(|e| e.to_string())
+    #[cfg(target_os = "android")]
+    return secrets_android::set(KEYCHAIN_SERVICE, &account, &secret);
+    #[cfg(not(target_os = "android"))]
+    {
+        let entry =
+            keyring::Entry::new(KEYCHAIN_SERVICE, &account).map_err(|e| e.to_string())?;
+        entry.set_password(&secret).map_err(|e| e.to_string())
+    }
 }
 
 /// Open System Settings at the Accessibility pane, where voice downloads
@@ -61,11 +77,17 @@ fn open_voice_settings() -> Result<(), String> {
 /// Delete a secret; missing entries are not an error.
 #[tauri::command]
 fn keychain_delete(account: String) -> Result<(), String> {
-    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, &account).map_err(|e| e.to_string())?;
-    match entry.delete_credential() {
-        Ok(()) => Ok(()),
-        Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(e.to_string()),
+    #[cfg(target_os = "android")]
+    return secrets_android::delete(KEYCHAIN_SERVICE, &account);
+    #[cfg(not(target_os = "android"))]
+    {
+        let entry =
+            keyring::Entry::new(KEYCHAIN_SERVICE, &account).map_err(|e| e.to_string())?;
+        match entry.delete_credential() {
+            Ok(()) => Ok(()),
+            Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
     }
 }
 

@@ -29,6 +29,8 @@ class MainActivity : TauriActivity() {
     }
     // Voice bridge: the Rust side calls Tts without passing contexts.
     Tts.init(this)
+    // Secrets bridge: same pattern for the Android Keystore backend.
+    Secrets.init(this)
     if (isAliasLaunch(intent)) {
       // The AnnotateAction alias always starts a NEW activity record
       // (launchMode lives on the activity element and never applies to
