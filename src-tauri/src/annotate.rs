@@ -45,7 +45,10 @@ pub fn remember(app: &AppHandle) {
 }
 
 /// External selections are user text, not code: trim, drop empties, and
-/// cap length so a foreign share can't flood the composer.
+/// cap length so a foreign share can't flood the composer. Live only via
+/// the Android JNI entry below (plus tests), so non-Android builds would
+/// warn as dead code without the allow.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
 pub fn clean_external(text: &str) -> Option<String> {
     const MAX_CHARS: usize = 4000;
     let trimmed = text.trim();
@@ -60,6 +63,8 @@ struct ExternalPayload {
     text: Option<String>,
 }
 
+/// Same Android-only liveness as `clean_external` (plus tests).
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
 fn emit(text: Option<String>) {
     match APP.get() {
         Some(app) => {
