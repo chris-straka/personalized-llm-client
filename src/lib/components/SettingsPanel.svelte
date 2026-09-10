@@ -15,6 +15,7 @@
 		openVoiceSettings
 	} from "$lib/nativeTts";
 	import { hasQualityVoices, voicesForLang, allVoicesForLang, autoVoiceForLang } from "$lib/voiceTiers";
+	import { currentPlatform } from "$lib/platform";
 	import type { NativeVoice } from "$lib/nativeTts";
 	import { onMount } from "svelte";
 
@@ -85,6 +86,8 @@
 	let nativeVoice = $state(false);
 	/** Plain browser on a Mac: no inventory API, but download guidance applies. */
 	let isMacBrowser = $state(false);
+	/** Plain browser on Windows: same, with the Windows install path. */
+	let isWindowsBrowser = $state(false);
 	/** A quality voice (premium/enhanced/Siri) is installed, so System voices is worth picking. */
 	let qualityVoices = $state(false);
 	let voiceSetupError = $state("");
@@ -188,13 +191,16 @@
 		// hydrateSecrets mutates the shared proxy, which is already reactive.
 		void hydrateSecrets(settings);
 		maybeFetchModels();
+		// Browser voice-install guidance (no shell, so no inventory API
+		// and no Rust opener): the OS-specific path below. Browsers
+		// cannot install voices themselves.
 		try {
-			const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
-			const platform = nav.userAgentData?.platform ?? nav.platform ?? "";
-			isMacBrowser =
-				!inShell && (/\bmac/i.test(platform) || /\bmacintosh|mac os x/i.test(nav.userAgent));
+			const { isMac, isWindows } = currentPlatform();
+			isMacBrowser = !inShell && isMac;
+			isWindowsBrowser = !inShell && !isMac && isWindows;
 		} catch {
 			isMacBrowser = false;
+			isWindowsBrowser = false;
 		}
 		void nativeTtsSupported().then(async (supported) => {
 			nativeVoice = supported;
@@ -633,11 +639,17 @@
 				>
 			</div>
 			<p class="note">
-				System voices use macOS speech and sound much better. To install
-				system voices, go to
-				<button type="button" title="Open Accessibility settings" onclick={openVoiceSetup}>a11y</button>
-				→ Read &amp; Speak → System Voice → ⓘ to install new system voices.
-				{#if voiceSetupError}<span role="alert"> (couldn't open it automatically)</span>{/if}
+				System voices use macOS speech and sound much better.
+				{#if inShell}
+					To install system voices, go to
+					<button type="button" title="Open Accessibility settings" onclick={openVoiceSetup}>a11y</button>
+					→ Read &amp; Speak → System Voice → ⓘ to install new system voices.
+					{#if voiceSetupError}<span role="alert"> (couldn't open it automatically)</span>{/if}
+				{:else}
+					<!-- No shell, so no Rust opener: the browser branch
+					below carries the OS-specific install path. -->
+					To install system voices, see the browser guidance below.
+				{/if}
 			</p>
 			{#if voiceLoadError}
 				<p class="note" role="alert">Couldn't load the voice list: {voiceLoadError}</p>
@@ -680,14 +692,25 @@
 				<legend>Voice engine</legend>
 				<p class="note" role="alert">System voices are unavailable: {voiceLoadError}</p>
 			</fieldset>
-		{:else if isMacBrowser && !androidUI}
+		{:else if !inShell && !androidUI}
 			<fieldset>
 				<legend>Voice engine</legend>
 				<p class="note">
-					This browser preview can only use web voices — the
-					downloaded-voice inventory lives in the Mac app. To download
-					more voices on your Mac: System Settings → Accessibility,
-					then Read &amp; Speak → System Voice → Manage Voices.
+					This browser preview can only use web voices — browsers
+					cannot install voices themselves.
+					{#if isMacBrowser}
+						To download more voices on your Mac: System Settings →
+						Accessibility → Spoken Content → System Voice → Manage
+						voices, then reload this page.
+					{:else if isWindowsBrowser}
+						To add voices on Windows: Settings → Time &amp;
+						language → Speech → Manage voices → Add voices, then
+						reload this page so the browser picks them up.
+					{:else}
+						Chrome loads its voices over the network: stay online
+						and reload this page so new voices appear (on a managed
+						device an admin may have to allow them).
+					{/if}
 				</p>
 			</fieldset>
 	{/if}

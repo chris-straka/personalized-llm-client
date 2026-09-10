@@ -5,6 +5,11 @@ import {
 	isCoarsePointer,
 	isIPadDesktopMode,
 	isTouchTablet,
+	isMacPlatform,
+	isWindowsPlatform,
+	modKeyLabel,
+	altKeyLabel,
+	shiftKeyLabel,
 	edgeSwipeTarget,
 	contentSwipeTarget,
 	visibleProviderIds,
@@ -127,6 +132,60 @@ describe("isTouchTablet", () => {
 		const probe = { ua: ANDROID_UA, coarse: true, maxTouchPoints: 5, smallestScreenDim: 500 };
 		expect(isTouchTablet(probe, 600)).toBe(false);
 		expect(isTouchTablet(probe, 480)).toBe(true);
+	});
+});
+
+describe("isMacPlatform", () => {
+	it("reads the legacy platform string without hints", () => {
+		expect(isMacPlatform("MacIntel")).toBe(true);
+		expect(isMacPlatform("MacPPC")).toBe(true);
+		expect(isMacPlatform("Win32")).toBe(false);
+		expect(isMacPlatform("Linux x86_64")).toBe(false);
+		expect(isMacPlatform("")).toBe(false);
+	});
+	it("lets Client Hints win over the legacy string", () => {
+		expect(isMacPlatform("Win32", "macOS")).toBe(true);
+		expect(isMacPlatform("MacIntel", "Windows")).toBe(false);
+		expect(isMacPlatform("", "macOS")).toBe(true);
+		expect(isMacPlatform("MacIntel", "  ")).toBe(true);
+	});
+});
+
+describe("isWindowsPlatform", () => {
+	it("reads the legacy platform string without hints", () => {
+		expect(isWindowsPlatform("Win32")).toBe(true);
+		expect(isWindowsPlatform("Win64")).toBe(true);
+		expect(isWindowsPlatform("MacIntel")).toBe(false);
+		expect(isWindowsPlatform("Linux x86_64")).toBe(false);
+		expect(isWindowsPlatform("")).toBe(false);
+	});
+	it("lets Client Hints win over the legacy string", () => {
+		expect(isWindowsPlatform("MacIntel", "Windows")).toBe(true);
+		expect(isWindowsPlatform("Win32", "macOS")).toBe(false);
+		expect(isWindowsPlatform("", "Windows")).toBe(true);
+	});
+	it("never claims both platforms at once", () => {
+		for (const [platform, hint] of [
+			["MacIntel", ""],
+			["Win32", ""],
+			["Linux x86_64", ""],
+			["", "macOS"],
+			["", "Windows"],
+			["", ""]
+		] as const) {
+			expect(isMacPlatform(platform, hint) && isWindowsPlatform(platform, hint)).toBe(false);
+		}
+	});
+});
+
+describe("modifier labels", () => {
+	it("shows glyphs on Mac, names elsewhere", () => {
+		expect(modKeyLabel(true)).toBe("⌘");
+		expect(altKeyLabel(true)).toBe("⌥");
+		expect(shiftKeyLabel(true)).toBe("⇧");
+		expect(modKeyLabel(false)).toBe("Ctrl");
+		expect(altKeyLabel(false)).toBe("Alt");
+		expect(shiftKeyLabel(false)).toBe("Shift");
 	});
 });
 

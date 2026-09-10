@@ -41,6 +41,77 @@ export function isIPadDesktopMode(ua: string, maxTouchPoints: number): boolean {
 	return /macintosh/i.test(ua) && maxTouchPoints > 1;
 }
 
+/**
+ * Desktop modifier labels (shortcuts modal, tooltips): macOS shows the
+ * ⌘/⌥/⇧ glyphs, Windows/Linux show the Ctrl/Alt/Shift names. The key
+ * handlers accept both metaKey and ctrlKey (and altKey either way), so
+ * the label only names the platform's primary modifier — it always
+ * matches a combo the handler takes. Call sites read navigator (see
+ * `currentPlatform`); tests pass explicit values — Vitest runs in
+ * node, where navigator doesn't exist.
+ */
+
+/**
+ * True when the platform reports macOS. `navigator.userAgentData.platform`
+ * (User-Agent Client Hints: "macOS") wins when present; otherwise the
+ * legacy `navigator.platform` ("MacIntel"). Empty/unknown reads as
+ * non-Mac, so the Ctrl/Alt labels show — every handler accepts those.
+ */
+export function isMacPlatform(platform: string, uaDataPlatform = ""): boolean {
+	const hint = uaDataPlatform.trim();
+	if (hint) return /mac/i.test(hint);
+	return /mac/i.test(platform);
+}
+
+/**
+ * True when the platform reports Windows. Same precedence as
+ * `isMacPlatform`: Client Hints ("Windows") win, else `navigator.platform`
+ * ("Win32"). Feeds the browser voice-install guidance in settings.
+ */
+export function isWindowsPlatform(platform: string, uaDataPlatform = ""): boolean {
+	const hint = uaDataPlatform.trim();
+	if (hint) return /win/i.test(hint);
+	return /win/i.test(platform);
+}
+
+/** Primary modifier label: ⌘ on Mac, Ctrl elsewhere. */
+export function modKeyLabel(isMac: boolean): string {
+	return isMac ? "⌘" : "Ctrl";
+}
+
+/** Secondary modifier label: ⌥ on Mac, Alt elsewhere. */
+export function altKeyLabel(isMac: boolean): string {
+	return isMac ? "⌥" : "Alt";
+}
+
+/** Shift label: ⇧ on Mac, Shift elsewhere. */
+export function shiftKeyLabel(isMac: boolean): string {
+	return isMac ? "⇧" : "Shift";
+}
+
+/**
+ * Runtime desktop-OS probe for the shortcuts modal and voice guidance:
+ * reads `navigator.platform` with User-Agent Client Hints winning when
+ * present. Never throws; unknown platforms read as non-Mac/non-Windows
+ * so the Ctrl/Alt labels and generic guidance show.
+ */
+export function currentPlatform(): { isMac: boolean; isWindows: boolean } {
+	try {
+		const nav = navigator as Navigator & {
+			userAgentData?: { platform?: string };
+			platform?: string;
+		};
+		const platform = nav.platform ?? "";
+		const hint = nav.userAgentData?.platform ?? "";
+		return {
+			isMac: isMacPlatform(platform, hint),
+			isWindows: isWindowsPlatform(platform, hint)
+		};
+	} catch {
+		return { isMac: false, isWindows: false };
+	}
+}
+
 /** Inputs for the touch-tablet probe (call sites read navigator/screen). */
 export interface TouchTabletProbe {
 	ua: string;

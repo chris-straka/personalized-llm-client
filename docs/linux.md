@@ -3,10 +3,11 @@
 Ccez LLM is a Tauri v2 app (currently tauri 2.11.5 / tauri-build 2.6.3 per
 `src-tauri/Cargo.lock`). Every Linux build needs the WebKitGTK 4.1 stack at
 **build time** and the WebKitGTK/GTK runtime libs at **install time**.
-`src-tauri/tauri.conf.json` currently has no `bundle.linux` section and
-`bundle.targets` is `"all"` (see the required patch in
-[Required tauri.conf.json patch](#required-tauriconfjson-patch) — owned by
-another agent, do NOT edit that file from this track).
+`src-tauri/tauri.conf.json` now has the `bundle.linux` section (plus
+`category`/descriptions) applied alongside `bundle.windows`, with
+`bundle.targets` still `"all"` (see
+[Required tauri.conf.json patch](#required-tauriconfjson-patch), kept as the
+record of what was merged).
 
 ## .deb (Debian / Ubuntu / Pop!_OS)
 
@@ -193,11 +194,145 @@ Checked on macOS (Darwin arm64) 2026-09-10:
   (`pkgname -bin`, `arch=('x86_64')`, `!strip`, `bsdtar` two-step .deb
   extraction, matching `sha256sums` entries).
 
-NOT verifiable on this host (no Linux tooling: `dpkg-deb`,
-`desktop-file-validate`, `appimagetool`, `makepkg` all absent):
+NOT verifiable on this host (no Linux tooling — re-confirmed
+2026-09-10: `dpkg-deb`, `desktop-file-validate`, `appimagetool`,
+`makepkg`, `namcap`, `desktop-file-install` all absent on this Mac):
+
+> NOTE (2026-09-10 quirk-hunt, static analysis only): the
+> `bundle.linux` patch above has since been applied to
+> `src-tauri/tauri.conf.json` (linux.deb.depends +
+> linux.appimage.bundleMediaFramework=false, category Education),
+> so the "currently has no `bundle.linux` section" premise at the
+> top of this file is stale. Findings Q1–Q9 below were verified by
+> reads on macOS; "needs runner" items require CI/Linux hardware.
 
 - actual `tauri build --bundles deb,appimage` output and .deb contents;
 - `desktop-file-validate packaging/ccez-llm.desktop`;
 - `makepkg --printsrcinfo` / `.SRCINFO` generation and `namcap` lint of
   the PKGBUILD;
 - end-to-end `release-linux.yml` run (needs a `v*` tag push + secrets).
+
+## Quirk-hunt findings (2026-09-10, static analysis on macOS, no edits to code)
+
+Q1 — `open_voice_settings` Linux branch errors cleanly
+(`src-tauri/src/lib.rs:71-74` returns
+`"opening System Settings requires macOS"`; no `xdg-open`, no desktop
+detection). The SettingsPanel fallback reads sanely: on Linux
+`nativeTtsSupported()` is false (`src-tauri/src/tts.rs:639-640`), so
+`SettingsPanel.svelte:199-206` forces `voiceEngine` to `"web"` and the
+desktop voice-engine block (`SettingsPanel.svelte:612`) never renders —
+the `openVoiceSetup` button (`:230-241`, `:638`) is unreachable there.
+Cosmetic nit only: the fallback message shows the generic
+`"Native speech is not available in this build."`
+(`src/lib/nativeTts.ts:70`) instead of the friendlier
+`"System voices need the Mac app…"` mapping (`:115-117`), because the
+`tts_supported → false` path never emits the `"requires macos"` string
+that mapping keys on. Proposed patch (frontend text only):
+in `nativeTtsSupported()`, set
+`lastNativeError = "Native speech is not available in this build."`
+unchanged, but extend `friendlyNativeError` with
+`if (/not available in this build/i.test(message)) return "System voices need the Mac app (this build only has web voices).";`
+Status: confirmed by read; needs runner only for visual check.
+
+Q2 — webkit2gtk 4.1 pin matches the distro spread. `.deb depends`
+(`src-tauri/tauri.conf.json:46-52`:
+`libwebkit2gtk-4.1-0`, `libgtk-3-0`, `libayatana-appindicator3-0`) is
+exactly the Tauri v2 Debian-guide set; `libayatana-appindicator3-0`
+exists on Ubuntu 22.04/24.04, Debian bookworm, and Pop!_OS, and is
+harmless where no tray is used (there is no tray plugin in
+`src-tauri/Cargo.toml` — the dep is belt-and-braces, cosmetic).
+Arch (`packaging/aur/PKGBUILD:33`: `webkit2gtk-4.1`, `gtk3`,
+`libappindicator-gtk3`) and Fedora docs (`webkit2gtk4.1-devel`) use the
+right per-distro names. `bundleMediaFramework: false`
+(`tauri.conf.json:53-55`) is correct — no audio/video playback in the
+app — consequence is only that a future media feature must flip it to
+`true` (and then only Ubuntu builders fully support it). Status:
+confirmed by read + `Cargo.lock` (`tauri 2.11.5`); needs runner for
+`dpkg-deb -f` / install test on each distro.
+
+Q3 — keyring on Linux needs a D-Bus Secret Service (`src-tauri/src/lib.rs:28-48`,
+`keyring 3.6.3` + `zbus 5.19.0` in `Cargo.lock`: pure-Rust D-Bus, no
+`.so` link dep, so no new `.deb depends` entry is required). On minimal
+WMs / headless boxes without gnome-keyring or kwallet,
+`keychain_set/get` return Err and `src/lib/secrets.ts:240-261` degrades
+to session-only keys — and `withBlankedKeys` (`:321-327`) still blanks
+the persisted settings, so the key is lost on restart. Breaks runtime
+persistence (not build). Proposed patch (docs + optional dep):
+document `gnome-keyring` (or kwallet) + unlock-at-login as a Linux
+requirement in this file, and consider appending
+`"libsecret-1-0"` to `linux.deb.depends` so the service backend is
+present (it does not hurt GNOME-less systems). Status: backend chain
+confirmed by read; actual no-daemon behavior needs runner.
+
+Q4 — no native file-dialog / portal surface to quirk. No
+`tauri-plugin-dialog`, `-fs`, `-notification`, tray, or deep-link code
+anywhere (`Cargo.toml`, `src-tauri/src`, `capabilities/default.json`
+has only `core`, `opener`, `updater`); attachments ride web
+`<input type=file>` + canvas (`src/lib/attachments.ts`), updates go
+through `plugin:opener|open_url` (`SettingsPanel.svelte:162`, xdg-open
+under the hood). So xdg-portal/sandbox file-chooser quirks do not
+apply. GPU/software-rendering: nothing sets
+`WEBKIT_DISABLE_DMABUF_RENDERER` / `LIBGL_ALWAYS_SOFTWARE`, so VMs
+without GL fall back (or fail) on WebKitGTK defaults — runtime,
+needs-runner (launch with `-v` on a GL-less VM to prove). glibc floor:
+`release-linux.yml:26` pins `ubuntu-22.04` (glibc 2.35) — correct,
+confirmed.
+
+Q5 — `release-linux.yml` deps match this doc's Debian list verbatim
+(lines 32-44 vs "System dependencies" above) and the workflow parses
+(`yaml.safe_load`, 7 steps, `runs-on: ubuntu-22.04`). Two needs-runner
+notes: (a) `tauri-action@v1` already uploads bundles AND the
+`softprops/action-gh-release` step (`:67-78`, `if: always()`)
+re-attaches them to the same draft `release.yml` creates — a double
+writer on the same draft, unproven until a real `v*` tag push;
+(b) updater `.sig` files are only produced when `TAURI_SIGNING_*`
+secrets exist, else the `*.tar.gz.sig` glob silently matches nothing
+(`fail_on_unmatched_files: false`).
+
+Q6 — desktop-file / PKGBUILD nits (cosmetic, needs-runner).
+`packaging/ccez-llm.desktop:7` `Exec=ccez-studio %U` matches the
+`ccez-studio` binary (`src-tauri/Cargo.toml:2`) — good. But:
+(a) `StartupWMClass=ccez-llm` (`:13`) vs the actual WM_CLASS WebKitGTK
+sets (usually the product name/binary id) — verify with `xprop`;
+wrong value only breaks dock grouping. Proposed patch: launch the .deb
+on GNOME, read `xprop WM_CLASS`, set `StartupWMClass` to match.
+(b) `MimeType=x-scheme-handler/ccez-llm;` (`:14`) claims a URL handler
+nothing implements (no deep-link plugin) — dead claim; proposed patch:
+delete the `MimeType` line unless deep links land. (c) `Categories=
+Education;Utility;` vs generated `Education;` from `category` — drift
+only; harmless. (d) `Icon=studio.ccez.app` — confirm the installed
+hicolor name after one real `tauri build`. None lintable here
+(`desktop-file-validate`, `makepkg` absent — see above).
+
+Q7 — macOS-isms in shared UI are all gated; no Linux breakage found.
+`Command::new("open")` is `cfg(target_os = "macos")`-gated
+(`lib.rs:58-70`); `tts.rs`/`keyboard.rs` macOS blocks are `cfg`-gated
+with `None`/`false`/Err stubs elsewhere (`tts.rs:639-665`,
+`keyboard.rs:43-49`); SettingsPanel `isMacBrowser` gate (`:194-195`)
+requires `!inShell`, so Linux shell never shows Mac guidance; the
+`"Keys stay in the macOS Keychain"` string (`:503`) renders only under
+`inShell && !androidUI` — which IS true on Linux, so Linux users read
+"macOS Keychain" inaccurately (cosmetic; the Rust side is actually
+Secret Service there). Proposed patch (text only): branch that note on
+platform, e.g. `Keys stay in your login keyring…` on Linux. No hardcoded
+`/Users/`, `/Library/`, `/Applications`, `C:\`, `%APPDATA%`, or
+case-sensitive path assumptions found in `src`/`src-tauri/src`
+(grep-verified); `TEXT_EXTENSIONS` lookup lowercases first
+(`attachments.ts:100`).
+
+Q8 — `titleBarStyle: "Overlay"` + `trafficLightPosition`
+(`tauri.conf.json:16-17`) are macOS-only keys; Tauri ignores them on
+Linux (WM draws decorations). Cosmetic at most — needs runner for one
+visual confirm. `data-tauri-drag-region` + `startDragging()`
+(`SettingsPanel.svelte:320-343`, `+page.svelte:3855`) degrade to no-op
+clicks on Linux WMs that disallow client drag — the close-on-click path
+still works.
+
+Q9 — Linux speech QA gap (runtime, needs-runner). On Linux the engine
+is always web `speechSynthesis` inside WebKitGTK, whose voice inventory
+is frequently empty/silent — and `webVoiceAvailable`
+(`src/lib/voice.ts:54-59`) returns `true` on an empty list by design,
+so the UI offers speech it may not produce. Proposed patch: none
+without hardware data; first measurement is `getVoices().length` +
+audible check on the CI-built .deb and AppImage, then decide (e.g.
+disable voice UI when the inventory stays empty post-`voiceschanged`).

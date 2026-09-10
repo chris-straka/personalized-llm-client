@@ -105,6 +105,9 @@
 	isIOSUserAgent,
 	isCoarsePointer,
 	isTouchTablet,
+	currentPlatform,
+	modKeyLabel,
+	altKeyLabel,
 	edgeSwipeTarget,
 	contentSwipeTarget,
 	twoFingerSwipeDir,
@@ -565,6 +568,16 @@
 	function tip(desktop: string, mobile: string): string {
 		return androidUI ? mobile : desktop;
 	}
+	/**
+	 * Modifier labels for the shortcuts modal and tooltips: macOS shows
+	 * the ⌘/⌥/⇧ glyphs, Windows/Linux show Ctrl/Alt/Shift. The key
+	 * handlers accept both metaKey and ctrlKey (altKey either way), so
+	 * whichever label shows names a combo the handler takes. Mac-first
+	 * default: set properly on mount from navigator (see below).
+	 */
+	let isMac = $state(true);
+	const mod = $derived(modKeyLabel(isMac));
+	const altm = $derived(altKeyLabel(isMac));
 	/** Composer hints: touch wording on phones, shortcut wording elsewhere. */
 	function promptPlaceholder(): string {
 		return androidUI ? ANDROID_PROMPT_PLACEHOLDER : PROMPT_PLACEHOLDER;
@@ -2598,6 +2611,10 @@
 			androidUI = false;
 			iosUI = false;
 		}
+		// Shortcuts-modal labels: navigator.platform with User-Agent
+		// Client Hints winning (see currentPlatform). Unknown platforms
+		// read as non-Mac, so the Ctrl/Alt labels show.
+		isMac = currentPlatform().isMac;
 		// The web engine does not exist in this shell, so phones pin
 		// to native when the bridge is up (and fall back when it is
 		// not). The settings panel repeats the probe for its picker;
@@ -3871,7 +3888,7 @@
 		<button
 			type="button"
 			class="new"
-			title={tip("New chat (⌘N or ⇧⌘N)", "New chat")}
+			title={tip(isMac ? "New chat (⌘N or ⇧⌘N)" : "New chat (Ctrl+N or Ctrl+Shift+N)", "New chat")}
 			aria-label="New chat"
 			onclick={() => doNewChat()}
 		>
@@ -4112,7 +4129,7 @@
 							type="button"
 							class="icon-btn"
 							class:folded={isFolded}
-							data-tip={tip("Fold this message (F or Option-click)", "Fold this message")}
+							data-tip={tip(isMac ? "Fold this message (F or Option-click)" : "Fold this message (F or Alt-click)", "Fold this message")}
 							aria-label={isFolded ? "Unfold this message" : "Fold this message"}
 							onclick={() => toggleFold(msg.id)}
 						>
@@ -4139,8 +4156,8 @@
 						<button
 							type="button"
 							class="icon-btn"
-							data-tip={tip("Delete this message (⌘D)", "Delete this message")}
-							aria-label={tip("Delete this message (⌘D)", "Delete this message")}
+							data-tip={tip(isMac ? "Delete this message (⌘D)" : "Delete this message", "Delete this message")}
+							aria-label={tip(isMac ? "Delete this message (⌘D)" : "Delete this message", "Delete this message")}
 							onclick={() => deleteMessage(chatState, i)}
 						>
 							<ActionIcon kind="delete" />
@@ -4515,7 +4532,7 @@
 					type="button"
 					class="voice-float"
 					class:on={settings.voice}
-					title={speakingId !== null ? "Stop reading aloud" : tip("Toggle voice readback (Ctrl+⌥+S)", "Toggle voice readback")}
+					title={speakingId !== null ? "Stop reading aloud" : tip(`Toggle voice readback (Ctrl+${altm}+S)`, "Toggle voice readback")}
 					aria-label={speakingId !== null ? "Stop reading aloud" : "Toggle voice readback"}
 					aria-pressed={settings.voice}
 					onclick={toggleVoice}
@@ -4528,7 +4545,7 @@
 				class="send-btn"
 				class:wide={altHeld}
 				disabled={!canSubmit}
-				title={altHeld ? "Stage (⌥+Enter)" : "Send (Enter)"}
+				title={altHeld ? `Stage (${altm}+Enter)` : "Send (Enter)"}
 				aria-label={altHeld ? "Stage" : "Send"}
 				onclick={(event) => onSubmit(altHeld || event.altKey ? "stage" : "send")}
 			>
@@ -4763,7 +4780,7 @@
 					<button
 						type="button"
 						aria-label="Close shortcuts"
-						title={tip("Close (⇧⌘/)", "Close")}
+						title={tip(isMac ? "Close (⇧⌘/)" : "Close (Ctrl+Shift+/)", "Close")}
 						onclick={() => (shortcutsOpen = false)}
 					>
 						×
@@ -4783,27 +4800,28 @@
 				{:else}
 				<dl class="keys">
 					<div><dt>New line</dt><dd>Shift+Enter</dd></div>
-					<div><dt>Stage message</dt><dd>⌥+Enter</dd></div>
-					<div><dt>Shortcuts show/hide</dt><dd>⇧⌘/</dd></div>
-					<div><dt>Switch model / key</dt><dd>Ctrl+⌥+← / →</dd></div>
-					<div><dt>Thinking level</dt><dd>Ctrl+⌥+↓ / ↑ (cycles levels)</dd></div>
+					<div><dt>Stage message</dt><dd>{altm}+Enter</dd></div>
+					<div><dt>Shortcuts show/hide</dt><dd>{isMac ? "⇧⌘/" : "Ctrl+Shift+/"}</dd></div>
+					<div><dt>Switch model / key</dt><dd>Ctrl+{altm}+← / →</dd></div>
+					<div><dt>Thinking level</dt><dd>Ctrl+{altm}+↓ / ↑ (cycles levels)</dd></div>
 					<div><dt>Scroll messages</dt><dd>J / K · gg top · G bottom · Ctrl+U / Ctrl+D skip</dd></div>
-					<div><dt>Chat list</dt><dd>⌘B, then J / K · Space or L enters its prompt</dd></div>
-					<div><dt>Newer / older chat</dt><dd>⇧⌘J / ⇧⌘K (J mints one past the newest)</dd></div>
-					<div><dt>Voice readback on/off</dt><dd>Ctrl+⌥+S</dd></div>
+					<div><dt>Chat list</dt><dd>{isMac ? "⌘B" : "Ctrl+B"}, then J / K · Space or L enters its prompt</dd></div>
+					<div><dt>Newer / older chat</dt><dd>{isMac ? "⇧⌘J / ⇧⌘K" : "Ctrl+Shift+J / Ctrl+Shift+K"} (J mints one past the newest)</dd></div>
+					<div><dt>Voice readback on/off</dt><dd>Ctrl+{altm}+S</dd></div>
 					<div><dt>Speak hovered word</dt><dd>Right click word</dd></div>
 					<div><dt>Speak highlight</dt><dd>Select text, then right click</dd></div>
 					<div><dt>Thoughts show/hide</dt><dd>Ctrl+O</dd></div>
-					<div><dt>Translate selection</dt><dd>⌘T (to English, feeds annotation)</dd></div>
+					<div><dt>Translate selection</dt><dd>{isMac ? "⌘T" : "Ctrl+T"} (to English, feeds annotation)</dd></div>
 					<div><dt>Stop voice / close menus</dt><dd>Esc (outside the prompt)</dd></div>
-					<div><dt>Delete a message</dt><dd>Hover the message, then ⌘D or Delete</dd></div>
-					<div><dt>Fold / unfold message</dt><dd>Hover the message, then F or Option-click</dd></div>
+					<!-- ⌘D is meta-only (Ctrl+D skips in scroll mode), so Windows names Delete alone. -->
+					<div><dt>Delete a message</dt><dd>{isMac ? "Hover the message, then ⌘D or Delete" : "Hover the message, then Delete"}</dd></div>
+					<div><dt>Fold / unfold message</dt><dd>Hover the message, then F or {isMac ? "Option" : "Alt"}-click</dd></div>
 					<div><dt>Rerun a prompt</dt><dd>Rerun button (deletes everything after; Branch keeps it)</dd></div>
-					<div><dt>Reply language</dt><dd>⌘1…⌘0 (repeat the key to clear)</dd></div>
-					<div><dt>Delete this chat</dt><dd>⇧⌘Delete</dd></div>
-					<div><dt>Delete every chat</dt><dd>⌥⇧⌘Delete</dd></div>
+					<div><dt>Reply language</dt><dd>{isMac ? "⌘1…⌘0" : "Ctrl+1…Ctrl+0"} (repeat the key to clear)</dd></div>
+					<div><dt>Delete this chat</dt><dd>{isMac ? "⇧⌘Delete" : "Ctrl+Shift+Delete"}</dd></div>
+					<div><dt>Delete every chat</dt><dd>{isMac ? "⌥⇧⌘Delete" : "Ctrl+Shift+Alt+Delete"}</dd></div>
 					<div><dt>Cut / delete hovered message</dt><dd>X cuts (copies first) · Delete deletes</dd></div>
-					<div><dt>Text size up / down</dt><dd>⌘+ / ⌘−</dd></div>
+					<div><dt>Text size up / down</dt><dd>{mod}+ / {mod}−</dd></div>
 				</dl>
 				{/if}
 			</div>
