@@ -31,6 +31,40 @@ export function isCoarsePointer(query: (media: string) => { matches: boolean }):
 	}
 }
 
+/**
+ * iPad in desktop-mode Safari: the UA reports "Macintosh" (no iPad
+ * token), but the device has a touchscreen. `navigator.maxTouchPoints`
+ * (> 1 on touch hardware, 0/1 on real Macs) tells the two apart. Pure
+ * so the shape unit-tests without tablet hardware.
+ */
+export function isIPadDesktopMode(ua: string, maxTouchPoints: number): boolean {
+	return /macintosh/i.test(ua) && maxTouchPoints > 1;
+}
+
+/** Inputs for the touch-tablet probe (call sites read navigator/screen). */
+export interface TouchTabletProbe {
+	ua: string;
+	/** Primary input is touch (pass `isCoarsePointer` over matchMedia). */
+	coarse: boolean;
+	/** `navigator.maxTouchPoints` (0 where unsupported). */
+	maxTouchPoints: number;
+	/** Shorter screen side in CSS px (`screen.width/height`). */
+	smallestScreenDim: number;
+}
+
+/**
+ * True when a touch tablet should get the touch UI. Covers iPads in
+ * desktop-mode Safari (Macintosh UA + touch points) and any other
+ * coarse-pointer tablet at least `minTabletDim` px on its short side —
+ * phones already match the UA gates above, and touchscreen laptops
+ * report a fine primary pointer, so neither is pulled in. Pure so the
+ * contract unit-tests without the hardware.
+ */
+export function isTouchTablet(probe: TouchTabletProbe, minTabletDim = 600): boolean {
+	if (isIPadDesktopMode(probe.ua, probe.maxTouchPoints)) return true;
+	return probe.coarse && probe.maxTouchPoints > 1 && probe.smallestScreenDim >= minTabletDim;
+}
+
 export type EdgePanel = "chats" | "settings";
 
 /** One tracked touch point (identifier + last-seen position). */

@@ -44,9 +44,28 @@ describe("secrets fallback (no Tauri shell)", () => {
 		expect(await getSecret(secretAccount("deepseek"))).toBeNull();
 		await setSecret(secretAccount("deepseek"), "sk-test");
 		expect(await getSecret(secretAccount("deepseek"))).toBe("sk-test");
-		expect(localStorage.getItem("ccez-keychain:provider:deepseek")).toBe("sk-test");
 		await deleteSecret(secretAccount("deepseek"));
 		expect(await getSecret(secretAccount("deepseek"))).toBeNull();
+	});
+
+	it("never leaves the key as plaintext where WebCrypto exists", async () => {
+		if (!globalThis.crypto?.subtle) return; // Compat path: plaintext, see below.
+		await setSecret(secretAccount("deepseek"), "sk-test");
+		const stored = localStorage.getItem("ccez-keychain:provider:deepseek");
+		expect(stored).toContain("gcm1:");
+		expect(stored).not.toContain("sk-test");
+		expect(await getSecret(secretAccount("deepseek"))).toBe("sk-test");
+	});
+
+	it("still reads legacy plaintext entries (pre-encryption)", async () => {
+		localStorage.setItem("ccez-keychain:provider:legacy", "sk-plain");
+		expect(await getSecret(secretAccount("legacy"))).toBe("sk-plain");
+		// The next write re-encrypts the entry.
+		await setSecret(secretAccount("legacy"), "sk-plain");
+		expect(await getSecret(secretAccount("legacy"))).toBe("sk-plain");
+		if (globalThis.crypto?.subtle) {
+			expect(localStorage.getItem("ccez-keychain:provider:legacy")).toContain("gcm1:");
+		}
 	});
 
 	it("hydrates blank settings keys from storage", async () => {

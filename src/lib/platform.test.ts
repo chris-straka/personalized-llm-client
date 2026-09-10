@@ -3,6 +3,8 @@ import {
 	isAndroidUserAgent,
 	isIOSUserAgent,
 	isCoarsePointer,
+	isIPadDesktopMode,
+	isTouchTablet,
 	edgeSwipeTarget,
 	contentSwipeTarget,
 	visibleProviderIds,
@@ -62,6 +64,69 @@ describe("isCoarsePointer", () => {
 				throw new Error("no matchMedia");
 			})
 		).toBe(false);
+	});
+});
+
+describe("isIPadDesktopMode", () => {
+	const IPAD_DESKTOP_UA =
+		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15";
+	it("spots desktop-mode iPads by touch points, not the UA token", () => {
+		expect(isIPadDesktopMode(IPAD_DESKTOP_UA, 5)).toBe(true);
+	});
+	it("keeps real Macs and touch-less agents on desktop", () => {
+		expect(isIPadDesktopMode(MAC_UA, 0)).toBe(false);
+		expect(isIPadDesktopMode(IPAD_DESKTOP_UA, 1)).toBe(false);
+		expect(isIPadDesktopMode(IPAD_DESKTOP_UA, 0)).toBe(false);
+		expect(isIPadDesktopMode(ANDROID_UA, 5)).toBe(false);
+		expect(isIPadDesktopMode("", 5)).toBe(false);
+	});
+});
+
+describe("isTouchTablet", () => {
+	const IPAD_DESKTOP_UA =
+		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15";
+	it("sends desktop-mode iPads to the touch UI", () => {
+		expect(
+			isTouchTablet({ ua: IPAD_DESKTOP_UA, coarse: true, maxTouchPoints: 5, smallestScreenDim: 820 })
+		).toBe(true);
+	});
+	it("sends other coarse touch tablets to the touch UI", () => {
+		expect(
+			isTouchTablet({
+				ua: "Mozilla/5.0 (Linux; Android 13; Pixel Tablet) AppleWebKit/537.36 Chrome/126.0 Safari/537.36",
+				coarse: true,
+				maxTouchPoints: 10,
+				smallestScreenDim: 800
+			})
+		).toBe(true);
+	});
+	it("keeps real Macs, touchscreen laptops, and phones out", () => {
+		// Real Mac: Macintosh UA, no touch points.
+		expect(
+			isTouchTablet({ ua: MAC_UA, coarse: false, maxTouchPoints: 0, smallestScreenDim: 900 })
+		).toBe(false);
+		// Touchscreen laptop: fine primary pointer.
+		expect(
+			isTouchTablet({
+				ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36",
+				coarse: false,
+				maxTouchPoints: 10,
+				smallestScreenDim: 900
+			})
+		).toBe(false);
+		// Phone-size touch device: below the tablet cutoff.
+		expect(
+			isTouchTablet({ ua: ANDROID_UA, coarse: true, maxTouchPoints: 5, smallestScreenDim: 412 })
+		).toBe(false);
+		// No touch hardware at all.
+		expect(
+			isTouchTablet({ ua: MAC_UA, coarse: false, maxTouchPoints: 0, smallestScreenDim: 412 })
+		).toBe(false);
+	});
+	it("honors a custom size cutoff", () => {
+		const probe = { ua: ANDROID_UA, coarse: true, maxTouchPoints: 5, smallestScreenDim: 500 };
+		expect(isTouchTablet(probe, 600)).toBe(false);
+		expect(isTouchTablet(probe, 480)).toBe(true);
 	});
 });
 

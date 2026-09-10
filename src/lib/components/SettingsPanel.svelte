@@ -141,10 +141,19 @@
 		ejectedIds = ejectedIds.filter((id) => id !== settings.activeProviderId);
 	}
 
+	/** Where "check for updates" goes: releases page, Tauri updater, or nowhere (web). */
+	const updateRoute = $derived(updateRouteFor(androidUI === true, inShell));
+
 	async function checkUpdates() {
 		checkingUpdate = true;
 		updateStatus = "Checking…";
-		const route = updateRouteFor(androidUI === true);
+		const route = updateRoute;
+		if (route.kind === "none") {
+			// Web build: a redeploy updates the site, so there is nothing to check.
+			updateStatus = "This web build updates with the site — nothing to check.";
+			checkingUpdate = false;
+			return;
+		}
 		if (route.kind === "releases") {
 			// No Tauri auto-updater on Android: open the Releases page instead.
 			try {
@@ -155,7 +164,7 @@
 					window.open(route.url, "_blank", "noopener");
 				}
 				updateStatus = "Grab the newest APK from the releases page to update.";
-			} catch (error) {
+			} catch {
 				updateStatus = `Couldn't open it automatically — get the newest APK at ${route.url}`;
 			} finally {
 				checkingUpdate = false;
@@ -762,10 +771,14 @@
 
 	<section aria-labelledby="updates-heading">
 		<h2 id="updates-heading">Updates</h2>
-		<button type="button" onclick={() => void checkUpdates()} disabled={checkingUpdate}>
-			{checkingUpdate ? "Checking…" : "Check for updates"}
-		</button>
-		{#if updateStatus}<p class="result" role="status">{updateStatus}</p>{/if}
+		{#if updateRoute.kind === "none"}
+			<p class="result">This web build updates with the site — nothing to check.</p>
+		{:else}
+			<button type="button" onclick={() => void checkUpdates()} disabled={checkingUpdate}>
+				{checkingUpdate ? "Checking…" : "Check for updates"}
+			</button>
+			{#if updateStatus}<p class="result" role="status">{updateStatus}</p>{/if}
+		{/if}
 	</section>
 </div>
 

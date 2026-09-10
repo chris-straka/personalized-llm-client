@@ -1,0 +1,82 @@
+name: release-windows
+
+# Build the Windows NSIS installer(s) and attach them to the same draft
+# GitHub Release that release.yml creates for a `v*` tag:
+#   - NSIS .exe installer (per-arch: x64 + ARM64)
+#   - updater artifacts (*.nsis.zip + *.nsis.zip.sig), signed with the SAME
+#     TAURI_SIGNING_* secrets as release.yml -- no new secrets needed.
+#
+# Runs only on GitHub-hosted Windows runners; there is deliberately no local
+# Windows build path (maintainers develop on macOS). See docs/windows.md.
+#
+# Code signing note: the .exe is NOT Authenticode-signed (no certificate is
+# configured), so Windows SmartScreen shows an "Unknown publisher" prompt on
+# first install. The in-app updater signature (TAURI_SIGNING_*) is unrelated
+# to SmartScreen and IS configured here. See docs/windows.md.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release-windows:
+    strategy:
+      matrix:
+        include:
+          # x64: the mainstream Windows install base.
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            arch: x64
+          # ARM64: native build on a native ARM64 runner (cross-linking
+          # ARM64 from an x64 runner is NOT trivial, hence a second entry).
+          # windows-11-arm is GA for public repositories; it does NOT work
+          # in private repositories -- if this repo ever goes private, drop
+          # this entry (x64 keeps working) per docs/windows.md.
+          - target: aarch64-pc-windows-msvc
+            runner: windows-11-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - run: bun install
+
+      # tauri-action provisions NSIS on the runner and builds only the NSIS
+      # bundle (--bundles nsis skips the WiX .msi; MSI distribution is
+      # out of scope). TAURI_SIGNING_* reuses release.yml's secrets so the
+      # updater artifacts are signed for the in-app updater.
+      - name: Build NSIS installer (${{ matrix.arch }})
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Ccez LLM ${{ github.ref_name }}"
+          releaseDraft: true
+          args: --target ${{ matrix.target }} --bundles nsis
+
+      # tauri-action already uploads the bundles above; this step is a
+      # belt-and-braces re-attach so the artifacts land on the draft even
+      # if the action's upload step is skipped on a partial failure.
+      - name: Attach NSIS bundles to draft release
+        if: always()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: true
+          fail_on_unmatched_files: false
+          files: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.nsis.zip
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.nsis.zip.sig

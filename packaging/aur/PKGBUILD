@@ -1,0 +1,65 @@
+# Maintainer: ccez <https://github.com/chris-straka/personalized-llm-client>
+# Binary AUR package for Ccez LLM (Tauri v2 + SvelteKit desktop chatbot).
+#
+# Strategy (-bin): download the official .deb built by CI
+# (.github/workflows/release-linux.yml) from the GitHub release tag and
+# repackage its contents. No compilation happens here, so this works on any
+# Arch machine without the webkit2gtk build toolchain.
+#
+# Install notes (see docs/linux.md for details):
+#   git clone https://aur.archlinux.org/ccez-llm-bin.git
+#   cd ccez-llm-bin
+#   makepkg -si
+# Or with an AUR helper:  yay -S ccez-llm-bin  /  paru -S ccez-llm-bin
+#
+# Runtime dependency: webkit2gtk-4.1 is required by every Tauri v2 app.
+# The .deb declares it, but pacman cannot see .deb metadata, so it is
+# listed in depends=() below. Install it if you build from source instead:
+#   sudo pacman -S --needed webkit2gtk-4.1 base-devel curl wget file \
+#     openssl appmenu-gtk-module libappindicator-gtk3 librsvg xdotool
+#
+# Submitting/updating: bump pkgver to the release tag (without the leading
+# v), set the real sha256 of the .deb, then regenerate .SRCINFO on Arch:
+#   makepkg --printsrcinfo > .SRCINFO
+
+pkgname=ccez-llm-bin
+_pkgdeb=ccez-llm
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="BYOK desktop chatbot with language-learner aids (Tauri + SvelteKit)"
+arch=('x86_64')
+url="https://github.com/chris-straka/personalized-llm-client"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3' 'libappindicator-gtk3' 'librsvg' 'openssl')
+optdepends=('libayatana-appindicator: tray indicator support on GNOME')
+provides=('ccez-llm')
+conflicts=('ccez-llm')
+options=('!strip')
+source=("${_pkgdeb}-${pkgver}.deb::${url}/releases/download/v${pkgver}/${_pkgdeb}_${pkgver}_amd64.deb"
+        "LICENSE::${url}/raw/refs/tags/v${pkgver}/LICENSE")
+# Release .debs are published by CI; replace SKIP with the real checksum:
+#   updpkgsums  (or: sha256sum ${_pkgdeb}-${pkgver}.deb)
+sha256sums=('SKIP'
+            'SKIP')
+
+package() {
+  # A .deb is an ar archive containing control.tar.* + data.tar.*.
+  # bsdtar (libarchive, part of base pacman) reads both layers, whatever
+  # inner compression zstd/xz the Tauri bundler chose.
+  cd "$srcdir"
+  bsdtar -xf "${_pkgdeb}-${pkgver}.deb" 'data.tar.*'
+  bsdtar -xf data.tar.* -C "$pkgdir"
+
+  # The .deb ships /usr/bin/ccez-studio, /usr/share/applications/*.desktop
+  # and /usr/share/icons/**. Fix up anything the bundler layouts leaves
+  # slightly off for Arch conventions:
+  #
+  # 1. Convenience symlink under the AUR package name.
+  install -dm755 "$pkgdir/usr/bin"
+  if [ ! -e "$pkgdir/usr/bin/ccez-llm" ] && [ -e "$pkgdir/usr/bin/ccez-studio" ]; then
+    ln -s ccez-studio "$pkgdir/usr/bin/ccez-llm"
+  fi
+
+  # 2. License (Tauri .debs do not ship one under /usr/share/licenses).
+  install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/${pkgname}/LICENSE"
+}

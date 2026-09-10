@@ -103,6 +103,8 @@
 	import {
 	isAndroidUserAgent,
 	isIOSUserAgent,
+	isCoarsePointer,
+	isTouchTablet,
 	edgeSwipeTarget,
 	contentSwipeTarget,
 	twoFingerSwipeDir,
@@ -2580,8 +2582,17 @@
 	onMount(() => {
 		try {
 			// iOS rides the same phone UI (touch composer, no hover,
-			// native voice picker): the name is historical.
-			androidUI = isAndroidUserAgent(navigator.userAgent) || isIOSUserAgent(navigator.userAgent);
+			// native voice picker): the name is historical. Touch
+			// tablets join it too: iPads in desktop-mode Safari report
+			// a Macintosh UA, so touch points plus the coarse pointer
+			// and screen size pick them up (see isTouchTablet).
+			androidUI = isAndroidUserAgent(navigator.userAgent) || isIOSUserAgent(navigator.userAgent)
+				|| isTouchTablet({
+					ua: navigator.userAgent,
+					coarse: isCoarsePointer((q) => window.matchMedia(q)),
+					maxTouchPoints: navigator.maxTouchPoints ?? 0,
+					smallestScreenDim: Math.min(window.screen?.width ?? 0, window.screen?.height ?? 0)
+				});
 			iosUI = isIOSUserAgent(navigator.userAgent);
 		} catch {
 			androidUI = false;

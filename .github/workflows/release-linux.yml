@@ -1,0 +1,78 @@
+name: release-linux
+
+# Build the Linux distribution artifacts and attach them to the same draft
+# GitHub Release that release.yml creates for a `v*` tag:
+#   - .deb bundle  (Debian / Ubuntu / Pop!_OS / Asahi-Debian-remix installs)
+#   - .AppImage bundle (distro-agnostic fallback)
+#   - updater artifacts (*.AppImage.tar.gz + *.sig), signed when the
+#     TAURI_SIGNING_* secrets are present (same secrets as release.yml).
+#
+# The AUR -bin package (packaging/aur/PKGBUILD) downloads the .deb attached
+# here, so a Linux release is not complete until this job is green.
+#
+# Baseline: ubuntu-22.04 on purpose. Tauri links against the build host's
+# glibc/WebKitGTK, so building on the OLDEST supported base (22.04, which
+# ships libwebkit2gtk-4.1) keeps the binaries runnable on newer systems.
+# Building on 24.04+ raises the minimum glibc and breaks older installs.
+# See docs/linux.md.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release-linux:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: bun install
+
+      - name: Build .deb and .AppImage bundles
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Ccez LLM ${{ github.ref_name }}"
+          releaseDraft: true
+          args: --bundles deb,appimage
+
+      # tauri-action already uploads the bundles above; this step is a
+      # belt-and-braces re-attach so the artifacts land on the draft even
+      # if the action's upload step is skipped on a partial failure.
+      - name: Attach Linux bundles to draft release
+        if: always()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: true
+          fail_on_unmatched_files: false
+          files: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/appimage/*.AppImage.tar.gz
+            src-tauri/target/release/bundle/appimage/*.AppImage.tar.gz.sig

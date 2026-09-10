@@ -1,0 +1,33 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Ccez LLM
+GenericName=Language-learning chat client
+Comment=BYOK desktop chatbot with language-learner aids (Tauri + SvelteKit)
+Exec=ccez-studio %U
+Icon=studio.ccez.app
+Terminal=false
+Categories=Education;Utility;
+Keywords=chat;llm;language;learning;
+StartupNotify=true
+StartupWMClass=ccez-llm
+MimeType=x-scheme-handler/ccez-llm;
+X-Tauri-Bundle-Identifier=studio.ccez.app
+
+# Reference / fallback desktop entry for the Linux .deb and AppImage builds.
+#
+# Normally you do NOT install this file by hand: the Tauri bundler
+# auto-generates an equivalent entry from src-tauri/tauri.conf.json
+# (productName + identifier + bundle.category) and ships it inside the
+# .deb and the AppImage. This copy exists so Pop!_OS / Debian / Arch
+# packagers and reviewers can see exactly what the launcher entry
+# contains, and as a manual fallback:
+#
+#   sudo desktop-file-install packaging/ccez-llm.desktop
+#   sudo update-desktop-database
+#
+# Validation status (2026-09-10, macOS host): desktop-file-validate is not
+# available on this machine, so this file has NOT been linted yet. Before
+# relying on it, run on any Debian/Arch box:
+#
+#   desktop-file-validate packaging/ccez-llm.desktop

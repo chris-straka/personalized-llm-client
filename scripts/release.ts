@@ -1,5 +1,11 @@
 // Release helper: bump the version everywhere it lives, commit the
-// version files only, tag, and push. The `v*` tag is what starts release CI.
+// version files only, tag, and push. The `v*` tag is what starts release CI:
+// one tag fans out to every platform job in .github/workflows/release.yml
+// (macOS ad-hoc-signed ARM64 .dmg + updater artifacts, signed Android APK,
+// plus the windows/linux/web sibling jobs). All targets read the same four
+// version files below, so a single bump versions everything at once.
+// No Apple Developer account, no notarization: the macOS bundle is ad-hoc
+// signed (see docs/mac.md for the first-launch Gatekeeper steps).
 // Usage: `bun run release [--major | --minor] [--dry-run]` (default: patch)
 import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -88,5 +94,5 @@ run(`git tag -a ${tag} -m "Ccez LLM ${tag}"`);
 run(`git push origin HEAD`);
 run(`git push origin ${tag}`);
 console.log(
-	DRY ? "(dry run — nothing changed)" : `Released ${tag}. CI is building; publish the draft when green.`
+	DRY ? "(dry run — nothing changed)" : `Released ${tag}. CI is building all targets; publish the draft when green.`
 );
