@@ -1,8 +1,11 @@
 # Ccez Studio — Plan (merged)
 
-Single source of truth. Merges `AI.md` (decisions), `AI2.md` (build plan), and
-`TODO.md` progress. Spec is `README.md` plus the `imgs/` annotation screenshots.
-`AI.md` / `AI2.md` / `TODO.md` are superseded; `README.md` and `imgs/` remain.
+Single source of truth for decisions and stages. Spec is `README.md`
+plus the `imgs/` annotation screenshots. `AI.md` / `AI2.md` are
+superseded and gone. For day-to-day agent handoff (commands, build
+gates, architecture rules) see `AGENTS.md`; for the working checklist
+see `TODO.md`. This file keeps the decisions and the stage history
+those two don't.
 
 ## Goal
 
@@ -10,27 +13,18 @@ A macOS desktop chatbot (BYOK: DeepSeek v4 Pro + Muse Spark 1.3 Contributor):
 clean ChatGPT-desktop/AI-Studio-inspired chat with highlight-to-comment
 annotation, language-learner reading aids, type-then-it-talks voice readback,
 vim-flavored prompt editing — no clutter (no chat titles, no cloud sync, no
-sharing, no plugins, no agentic/build features).
-
-## Success Criteria
-
-- Every `README.md` bullet is shipped, explicitly deferred with a reason, or
-  rejected with a reason. Nothing silently dropped. Code blocks fold and whole
-  messages fold.
-- Only two model providers exist: DeepSeek and Muse Spark. No Gemini.
-- Each stage ends green: typecheck, Vitest, production build, plus a Playwright
-  browser pass over the new behavior.
-- Keys live in OS-backed storage, never in the repo.
+sharing, no plugins, no agentic/build features). Android rides along on
+the same codebase via the Tauri mobile target (see milestone below).
 
 ## Key Decisions (from AI.md)
 
-1. **Shell: Tauri 2** (`https://v2.tauri.app/`). Web UI + Rust backend; macOS
-   target only (no Windows machine). Swift/Kotlin bridges only if a feature
-   proves to need one. Rejected **SwiftUI** (macOS-only, no Playwright loop —
-   you become the test runner) and **Flutter** (Dart rewrite, non-native feel).
+1. **Shell: Tauri 2** (`https://v2.tauri.app/`). Web UI + Rust backend;
+   Swift/Kotlin bridges only if a feature proves to need one (two did:
+   AVSpeech on macOS, TextToSpeech + PROCESS_TEXT on Android). Rejected
+   **SwiftUI** (macOS-only, no Playwright loop) and **Flutter** (Dart
+   rewrite, non-native feel).
 2. **Testing is the tiebreaker: Vitest + Playwright.**
-   (`https://vitest.dev/`, `https://playwright.dev/`). Swift's XCTest/XCUITest
-   (`https://developer.apple.com/documentation/xctest`) can't be driven here.
+   (`https://vitest.dev/`, `https://playwright.dev/`).
 3. **Frontend: Svelte 5 + TypeScript strict**
    (`https://svelte.dev/docs/svelte/overview`). Scoped styles + tokens.
 4. **Prompt box: CodeMirror 6 + vim** (`https://codemirror.net/docs/ref/`,
@@ -39,248 +33,104 @@ sharing, no plugins, no agentic/build features).
 5. **Rendering: marked + DOMPurify + Shiki** (`https://marked.js.org/`,
    `https://github.com/cure53/DOMPurify`, `https://shiki.style/`).
 6. **Reading aids: pinyin-pro + lindera-wasm + model-assisted aid path**
-   (`https://github.com/zh-lx/pinyin-pro`). Tashkeel was first through the
-   generic model-aid path (no maintained JS vocalizer exists — only removers);
+   (`https://github.com/zh-lx/pinyin-pro`). Tashkeel was first through
+   the generic model-aid path (no maintained JS vocalizer exists);
    see A6 for the generalized multilingual rule.
 7. **Voice: Web Speech first**
-   (`https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesis`).
-   AVSpeech bridge deferred (A4). Download stays a stretch goal (Web Speech
-   produces speech, not files).
+   (`https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesis`),
+   native bridges where a voice proves missing (macOS AVSpeech, Android
+   TextToSpeech). Download stays a stretch goal.
 8. **Providers: one `ChatProvider` interface, two adapters, no Gemini.**
-   DeepSeek = OpenAI-compatible (`https://api-docs.deepseek.com/`). Muse Spark
-   via Meta Model API
-   (`https://ai.meta.com/blog/introducing-muse-spark-meta-model-api/`),
-   endpoint confirmed at build time. Per-key base URL + model IDs in settings
-   so model bumps are config changes.
+   DeepSeek = OpenAI-compatible (`https://api-docs.deepseek.com/`).
+   Per-key base URL + model IDs in settings so model bumps are config
+   changes.
 
 ## Amendments (agreed, folded in)
 
 - **A1.** Reading aids default OFF; shortcut or hover+right-click only.
-- **A2.** Fenced-code input box: ` ```lang ` + Enter opens an inline code
-  editor (auto-closed fence, label, Collapse + Copy). Run = stretch goal.
-- **A3.** All-in on Tauri. No Kotlin. Desktop-only scaffold; mobile is Tauri
-  later at its own milestone.
-- **A4.** Voice engines: Web Speech first; AVSpeech Rust/Swift bridge deferred
-  with a reason (Web Speech covers learner readback; bridge cost unjustified
-  until a voice proves missing/unacceptable).
-- **A5.** Voice UX: off by default; toggle on → replies read aloud while text
-  still streams; mic input secondary; highlight-to-speak on demand only.
-- **A6. Multilingual aids + audio (Sep 2026).** No per-language exceptions in
-  code. Reading aids are a registry: local-compute aids (pinyin, furigana)
-  plus model-assisted aids (tashkeel first; future: Latin macrons, transliteration
-  for Greek/Sanskrit/Thai, etc.). TTS resolves a voice locale per word from
-  Unicode script (~12 major scripts) with a user-set Latin-script default
-  (French/German now; Latin can't reliably self-identify). Ancient languages
-  get best-effort modern voices (e.g. Italian for Latin, modern Greek for
-  Ancient Greek) — quality limits stated, not hidden.
-- **A7. Dependency policy (Sep 2026).** `bun outdated` shows everything
-  current; TypeScript 6.0.3 is the latest stable 6.x, only 7.0.2 (native port)
-  is newer and is deferred until svelte-check / typescript-eslint support it.
-  No upgrade needed. Legacy smells removed Sep 2026: kuroshiro/kuromoji
-  (superseded by lindera), pako + path-browserify shims and the vite
-  kuromoji aliases (fflate live), 17 MB kuromoji dict.
+- **A2.** Fenced-code input box (shelved Sep 2026 to keep focus on
+  language learning — revival spec lives in `TODO.md`).
+- **A3.** All-in on Tauri. No Kotlin — later relaxed once, for the
+  Android TextToSpeech bridge (no Kotlin-free inventory path exists).
+- **A4.** Voice engines: Web Speech first; AVSpeech Rust bridge
+  (objc2, zero ObjC/Swift) ships as a macOS-only settings toggle.
+- **A6. Multilingual aids + audio (Sep 2026).** No per-language
+  exceptions in code. Registry: local-compute aids (pinyin, furigana)
+  plus model-assisted aids (tashkeel first). TTS resolves a voice
+  locale per word from Unicode script with a user-set Latin-script
+  default. Ancient languages get best-effort modern voices — quality
+  limits stated, not hidden.
+- **A7. Dependency policy (Sep 2026).** Defer TypeScript 7 until
+  svelte-check / typescript-eslint support it. Legacy smells removed:
+  kuroshiro/kuromoji, pako + path-browserify shims, 17 MB dict.
 - **A8. Round 2 chrome rules.** Overlay native titlebar; no product-name
-  text in the UI; no emoji as interface icons (text pills + status dots +
-  ISO-code badges, except the three user-requested menu markers 🌍🌏🏛 and
-  the three classics markers). Latin-script voice locale follows the reply
-  language; ancient languages use stated modern approximations.
+  text in the UI; no emoji as interface icons (except user-requested
+  menu markers); Latin-script voice locale follows the reply language.
+- **A5.** Voice UX: off by default; toggle on → replies read aloud while
+  text still streams; mic input secondary.
 
-## Architecture Rules (learned mid-build)
+## Stages — S0–S7 done; Rounds 2–6, Batch P done
 
-- Chat state is a plain object in `$state` with function updates
-  (`src/lib/chat.ts`). Class instances in `$state` never re-render.
-- Never mutate a message in place: streaming updates replace (`map` + local
-  accumulator).
-- Never run `check`/`lint`/`build` during a browser pass: `svelte-kit sync`
-  rewrites watched files and HMR-invalidates the dev session mid-test.
-
-## Round 2 — post-install polish (Sep 2026, from running the .app in dark mode)
-
-All S0–S7 shipped. These items came from using the installed app:
-
-- **R2.1 Chrome.** Native overlay titlebar (no title text, floating traffic
-  lights, window title "Ccez"); in-app header restyled minimalist and airy
-  with traffic-light clearance in the shell; no emoji icons (taste rule) —
-  Voice/Mic are text pills with status dots; language options are ISO-code
-  badges, not emoji flags.
-- **R2.2 Reply-language menus.** Empty-state menus 🌍 Europe / 🌏 Asia /
-  🏛 Classics (Latin 🏛, Ancient Greek 🏺, Sanskrit 🪷), order as specified.
-  Choosing sets the reply language (system-prompt suffix) and the voice
-  locale; Clear restores the default brief prompt.
-- **R2.3 Thinking levels that do something.** low/medium/high append a
-  deliberation hint to the system prompt (previously display-only). Default
-  stays high; 3-way cycling on the shortcut.
-- **R2.4 Keys from `.env` in dev.** `VITE_DEEPSEEK_API_KEY`,
-  `VITE_MUSE_API_KEY` (+ `_BASE_URL` overrides) prefill blank settings at
-  dev/preview time. The installed app cannot read `.env` (baked at build) —
-  it uses Settings → Keychain, which already hides the field and shows
-  masked `••••last4` while a key is loaded.
-- **R2.5 Translate target removed.** Cmd+T lookup targets English; the
-  setting is gone (you specify other targets in the chat itself).
-- **R2.6 Shortcut maps.** Settings gains full keyboard-shortcut and vim
-  exit-mode maps (single-sourced from the audit: everything in README is
-  implemented, including option+enter pin and Ctrl+G hop-out).
-- **R2.7 Editor legibility.** Caret + vim block-cursor colors for dark mode;
-  stable prompt-box min-height kills the navigation resize flash.
-
-## Round 3 — layout (DeepSeek-web rhythm, pixel-verified)
-
-- Settings is a right-sidebar panel; the `/settings` route is deleted.
-- Chat sidebar collapses to an icon rail (persisted in settings).
-- Centered 46rem reading column on wide screens; composer send button.
-- Shortcut-map dark contrast fixed. Lesson: a11y snapshots carry no color —
-  visual work is verified with pixel screenshots (light + dark, 1600px).
-
-## Round 4 — behavior corrections (from using :5200)
-
-- Cursor root cause: `@media` inside a CodeMirror theme object is unreliable
-  AND CodeMirror injects cursor styles at runtime after ours — caret/block
-  colors now live in global CSS with `!important`. Verified in the cascade.
-- Pins removed as a separate concept: ⌥+Enter posts the draft as a user
-  message at the top of the log (no reply); history carries it everywhere.
-  Enter/⌘+Enter both send. Old saves migrate (pins stripped on load).
-- Header: New chat (Ctrl+Alt+N) right, Chats toggle (⌘B) left, voice pill
-  floats top-right inside the prompt. Sidebars animate width (no unmount),
-  collapsed takes zero space; hover titles carry shortcuts.
-- Defaults: Muse active, empty system prompt, header reads "Muse Spark 1.3".
-  `.env` prefill reads VITE_ names plus the existing META_ aliases; blank
-  saved keys backfill on load without clobbering. (Vite only exposes VITE_
-  to the browser, so two VITE_ mirror lines were appended to the
-  gitignored `.env` — originals untouched.)
-- Fira Code-first mono stack for prompt, rendered code, shortcut keys.
-- Tests are hermetic: pure `envProviderDefaults` replaces env stubbing so
-  the developer's real `.env` can never leak into assertions again.
-
-## Round 5 — AI Studio submit semantics
-
-- Enter is a newline (fence auto-close preserved); only ⌘+Enter (or ↑)
-  sends, and submit clears the prompt.
-- ⌥+Enter stages the draft as the most recent message with no reply; the
-  next submit carries staged + new text in order (foo, then bar).
-- Pins array removed; old saves migrate.
-
-## Round 6 — AI Studio composer button
-
-- ↑ fades (disabled) when the prompt is empty; holding ⌥ morphs it into
-  "Add +", which stages like ⌥+Enter. Empty submits are blocked everywhere.
-
-## Stages — S0–S7 done; Rounds 2–6 done
-
-- [x] **S0 clean slate** (+A3): git init + insurance commit, wipe,
-  desktop-only Tauri+Svelte+TS scaffold, Vitest, lint/format.
-- [x] **S1 providers + keys**: `ChatProvider`, DeepSeek adapter, Muse Spark
-  adapter (verified live: models + chat + SSE; DeepSeek pending a key),
-  settings page, OS-backed storage plan, brief system prompt, thinking-level
-  default high. Shortcuts moved to S2 with the prompt box.
-- [x] **S2 core chat**: bottom prompt (CodeMirror + vim, J/K scroll),
-  fenced-code input (A2), multi-chat without titles, streaming, rerun from any
-  message (truncate; branch keeps history), pins (opt+enter / cmd+enter),
-  waypoints, accrued-token meter, fast delete one/all, retry, key eject UI.
-- [x] **S3 messages + code**: markdown + sanitize + Shiki (dual light/dark),
-  code fold/copy/label, message fold, copy MD/text, paste-collapse markers,
-  attachments (downscale + token estimates), thoughts details + ctrl+O,
-  Sources stripped unless asked.
-- [x] **S4 annotation + translate helper**: select → Annotate menu (Add to
-  chat removed), cursor-anchored pill (Enter saves, Esc cancels, 500ms
-  anti-double-send guard), numbered badges, review panel (edit/save/delete/delete-all),
-  wrap into next query, drafts survive failed sends, Cmd+T lookup feeding
-  annotation, translate-target setting.
-- [x] **S5 reading aids** (OFF default, A1): script detection + faint corner
-  hint, Alt+R toggle, pinyin / furigana / tashkeel ruby, hover + right-click
-  single-word TTS even when aids are off.
-- [ ] **S6 voice mode** (OFF default, A4/A5/A6) — IN PROGRESS.
-- [x] **S7 desktop polish**: custom icon set (chat-bubble master +
-  `tauri icon`), keychain-backed keys (Rust commands + `secrets.ts`,
-  Keychain in shell / localStorage fallback in browsers), updater wiring
-  (`tauri-plugin-updater` + Settings check with graceful errors), 1280×860
-  window with minimums, matching favicon. Updater activation needs release
-  signing keys + a hosted feed (endpoint + pubkey are placeholders) — the
-  check button reports this instead of failing silently. Still manual on
-  real hardware: cold start on both Macs, 144 Hz scroll judgment,
-  installer run.
-
-### S6 scope
-
-- Generalize `src/lib/reading.ts`: aid registry (tashkeel = one model-aid
-  entry, not bespoke code); `ttsLangFor` covers all major scripts with a
-  Latin-script fallback from settings (French/German now, CJK later).
-- `src/lib/voice.ts`: sentence-chunked speech queue, skip-midway, word events
-  for live display, markdown-stripping for speech, guarded mic dictation
-  (secondary).
-- UI: voice-mode chrome (indicator + bevels), auto-read replies while text
-  streams, highlight-to-speak on demand only, mic button (hidden when
-  unsupported), `voiceLang` default-locale setting.
-- Stretch (not this stage): audio-file download, AVSpeech bridge.
+S0 scaffold, S1 providers + keys, S2 core chat, S3 messages + code,
+S4 annotation + translate helper, S5 reading aids (OFF default),
+S6 voice mode (web + AVSpeech bridge + Android TextToSpeech bridge),
+S7 desktop polish (icon, updater, keychain-backed keys). Then R2
+post-install chrome, R3 layout (46rem column, sidebars), R4 behavior
+(pins → top-posted messages, header rework), R5 submit semantics, R6
+composer button, and Batch P (shell detect, traffic geometry, voice
+bar, readback ranking, annotation matching, pills, menus). Detail on
+what each shipped lives in `TODO.md`.
 
 ## Validation (per stage)
 
 Strict typecheck, full Vitest run, production build, Playwright pass:
-send/rerun/branch; option-click delete; paste-collapse; annotation round-trip
-vs `imgs/`; aid toggle + hover-read; voice readback + skip; vim-in-box + J/K.
-Highest-risk check was annotation wrap-into-query (passed). Manual at end:
-144 Hz scroll, cold start on both Macs, installer run once.
+send/rerun/branch; option-click delete; paste-collapse; annotation
+round-trip vs `imgs/`; aid toggle + hover-read; voice readback + skip;
+vim-in-box + J/K. Highest-risk check was annotation wrap-into-query
+(passed). Manual at end: 144 Hz scroll, cold start on both Macs,
+installer run once.
 
 ## Risks / Rollback
 
-- Tashkeel quality depends on the models — judged against a reading bar, never
-  blocking earlier stages.
-- Furigana needs its dict on disk — ships in-app (static/lindera),
-  offline-first, no download or fallback path.
-- Ancient-language voices are best-effort; stated in A6.
+- Tashkeel quality depends on the models — judged against a reading
+  bar, never blocking earlier stages.
+- Furigana needs its dict on disk — ships in-app, offline-first.
+- Ancient-language voices are best-effort (see A6).
 - Rollback: branch before risky work; each stage is a reviewed commit.
 
-## Android milestone — S24 Galaxy (planned Sep 2026, decided solo)
+## Android milestone — Galaxy S24
 
-Tauri mobile target (`tauri android`), same Svelte codebase, no Kotlin.
-Desktop ships first; these UA-gated branches already ride along, covered
-by `src/lib/platform.test.ts` + `e2e/android.e2e.ts`:
+Same Svelte codebase via the Tauri mobile target. Shipped and
+emulator-verified Sep 2026 (Pixel_8a, debug build): `tauri android`
+init, PROCESS_TEXT Annotate alias (singleTask forward + cold-start
+parking; cold, warm, and in-app shares verified on device), Android
+TextToSpeech bridge (speak/stop/voices over JNI), touch tuning (edge
+swipes, selection, keyboard reflow). Release pipeline ships the
+signed APK from a `v*` tag (`.github/workflows/release.yml`).
 
-- Voice guard: the native engine is macOS-bridge-gated
-  (`nativeTtsSupported()` false everywhere else), so Android silently
-  stays on Web voices — no System-voices UI can appear. The Auto label
-  already names the web voice it will use.
-- Shortcuts modal: Android UA swaps key chords for the touch list
-  (edge swipes, touch-hold select, Speak-in-menu, always-visible rows).
-- Rows: `@media (hover: none)` already forces message buttons visible —
-  there is no hover to wait for on touch.
-- Sidebars: left/right edge swipes toggle chats/settings
-  (`edgeSwipeTarget`: ≥48px, mostly horizontal, 24px edge zone;
-  multi-touch cancels; passive listeners never block scroll). Toggle,
-  not open-only — with no Esc key the swipe is the only way back out.
-- Selection/annotation: touch-hold starts the native selection and the
-  existing `selectionchange` → cursor menu path takes it from there
-  (menu anchors to the selection rect, cursorX falls back to its left);
-  long-press needs a device pass before tuning. Hover peek has no touch
-  equivalent — pin (tap the aid button) is the touch path.
+Still outstanding:
 
-Still phone-only work (needs a device/emulator; not started):
-
-- `tauri android init`, signing config, Play/self-sign decision.
-- Share intent (`ACTION_SEND` text) → overlay/import into a chat draft:
-  the "grab text from other apps" ask. Needs manifest + intent plugin.
-- Keychain → Android Keystore for API keys (`secrets.ts` Tauri branch
-  assumes Keychain availability; add a mobile-store fallback).
-- System TTS voice inventory on Android (no AVSpeech bridge; enumerate
-  via a small Kotlin-free plugin or stay on Web voices).
-- On-device Gemma for offline use: MediaPipe LLM Inference inside our
-  app (a small Kotlin plugin — the one exception to the no-Kotlin rule;
-  AI Edge Gallery exposes no API to other apps, but it uses the same
-  .task model files). Provider gating contract already ships and is
-  unit-tested (`visibleProviderIds` in `platform.ts`): `local-gemma`
-  lists only on Android once its bridge probes true, and it is the sole
-  entry when Android is offline. Wiring the settings list to
-  `navigator.onLine` + online/offline events lands with the bridge.
-- Thumb-sized composer controls, viewport/`100dvh` audit, safe-area
-  insets, and a long-press-vs-scroll tuning pass on real hardware.
+- Signing config, Play/self-sign decision (CI secrets are set; the
+  first tag push exercises the pipeline).
+- Share intent (`ACTION_SEND` text) → overlay/import into a chat draft
+  (PROCESS_TEXT selection-menu shares already ship).
+- Keychain → Android Keystore for API keys: keyring v3 has no Android
+  backend and falls back to an in-memory mock (verified Sep 2026) —
+  add a mobile-store fallback.
+- System TTS ear-check on real hardware (code is done, including
+  voice inventory; `tts_identify_lang` stays macOS/iOS-only, Android
+  falls back to script detection).
+- Samsung S24 hardware pass (Annotate overflow ordering, tap-to-reveal
+  ghost in `issue.md`).
+- On-device Gemma for offline use: MediaPipe LLM Inference (the one
+  sanctioned Kotlin exception; no API exists in AI Edge Gallery, but
+  the same `.task` files work). Provider gating contract already ships
+  and is unit-tested (`visibleProviderIds` in `platform.ts`).
 
 ## Sources
 
 - `https://v2.tauri.app/`
-- `https://developer.apple.com/documentation/swiftui/`
-- `https://developer.apple.com/documentation/xctest`
-- `https://docs.flutter.dev/platform-integration/macos/building`
 - `https://api-docs.deepseek.com/`
-- `https://ai.meta.com/blog/introducing-muse-spark-meta-model-api/`
 - `https://developer.android.com/ai/gemini-nano`
 - `https://svelte.dev/docs/svelte/overview`
 - `https://codemirror.net/docs/ref/`

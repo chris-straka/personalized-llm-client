@@ -69,10 +69,12 @@ Spec: `README.md`. Full plan: `PLAN.md` (`AI.md`/`AI2.md` merged then deleted).
 
 ### Later (not this build)
 - [ ] Cloudflare-domain hosting, model-version bump, code Run button
-- [ ] Android phone build (S24): plan + UA-gated branches shipped (see
-  PLAN.md "Android milestone"); device-only work outstanding (tauri
-  android init, signing, share intent, Keystore, TTS inventory, touch
-  tuning)
+- [x] Android phone build (S24): emulator-verified Sep 2026 — `tauri
+  android` debug build, PROCESS_TEXT Annotate alias (cold/warm/in-app
+  verified on Pixel_8a), touch tuning (edge swipes, selection, keyboard
+  reflow). Outstanding on real hardware: signing config, Android
+  Keystore (keyring v3 has no Android backend — in-memory mock only,
+  nothing persists), system TTS inventory, Samsung S24 pass
 
 ## Architecture rules (learned Stage 2)
 
