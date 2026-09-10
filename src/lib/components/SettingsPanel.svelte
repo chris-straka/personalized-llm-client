@@ -88,6 +88,11 @@
 	let isMacBrowser = $state(false);
 	/** Plain browser on Windows: same, with the Windows install path. */
 	let isWindowsBrowser = $state(false);
+	/** Tauri shell on Windows: the Rust opener is macOS-only, so the
+	note carries the Windows path with no button. */
+	let isWindowsShell = $state(false);
+	/** Tauri shell on Linux: same, with the Linux note. */
+	let isLinuxShell = $state(false);
 	/** A quality voice (premium/enhanced/Siri) is installed, so System voices is worth picking. */
 	let qualityVoices = $state(false);
 	let voiceSetupError = $state("");
@@ -198,9 +203,13 @@
 			const { isMac, isWindows } = currentPlatform();
 			isMacBrowser = !inShell && isMac;
 			isWindowsBrowser = !inShell && !isMac && isWindows;
+			isWindowsShell = inShell && !isMac && isWindows;
+			isLinuxShell = inShell && !isMac && !isWindows;
 		} catch {
 			isMacBrowser = false;
 			isWindowsBrowser = false;
+			isWindowsShell = false;
+			isLinuxShell = false;
 		}
 		void nativeTtsSupported().then(async (supported) => {
 			nativeVoice = supported;
@@ -640,7 +649,15 @@
 			</div>
 			<p class="note">
 				System voices use macOS speech and sound much better.
-				{#if inShell}
+				{#if isWindowsShell}
+					To add voices on Windows: Settings → Time &amp;
+					language → Speech → Manage voices → Add voices, then
+					reload this page so the new voices appear.
+				{:else if isLinuxShell}
+					To add voices on Linux: install your desktop's
+					speech engine (eSpeak via your package manager on most
+					distros), then reload this page so the new voices appear.
+				{:else if inShell}
 					To install system voices, go to
 					<button type="button" title="Open Accessibility settings" onclick={openVoiceSetup}>a11y</button>
 					→ Read &amp; Speak → System Voice → ⓘ to install new system voices.
