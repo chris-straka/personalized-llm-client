@@ -105,6 +105,17 @@
 	import { translateSelection } from "$lib/translate";
 	import { getInspectData, shouldShowInspect } from "$lib/inspect";
 	import {
+		SIDE_VIEW_ENGINES,
+		hideSideview,
+		layoutSideviewViews,
+		navigateSideview,
+		openSideview,
+		sideviewEngine,
+		sideviewLayout,
+		toggleSideviewOpen,
+		type SideviewEngineId
+	} from "$lib/sideview";
+	import {
 	isAndroidUserAgent,
 	isIOSUserAgent,
 	isCoarsePointer,
@@ -815,6 +826,124 @@
 		}
 		editor?.focus();
 	}
+
+	/**
+	 * Research side panel (Cmd+T): a second OS webview docked right
+	 * in the same Tauri window, exactly one tab, for external lookup
+	 * pages (default Google Translate, Bing fallback in the
+	 * switcher). Shrinking the main webview changes what
+	 * window.innerWidth reports, so the full window width is tracked
+	 * across resizes instead of re-read (see below).
+	 */
+	let sideviewOpen = $state(false);
+	let sideviewEngineId = $state<SideviewEngineId>("google");
+	/** True while the native tab is docked (shell granted the webview). */
+	let sideviewHosted = $state(false);
+	/** DOM fallback strip when no shell webview is available. */
+	let sideviewFallback = $state(false);
+	let sideviewFullW: number | null = null;
+	let sideviewFullH: number | null = null;
+	let sideviewSideW = 0;
+	let sideviewOverlaid = false;
+	const sideviewUrl = $derived(sideviewEngine(sideviewEngineId).url);
+
+	/** Full window viewport, reconstructing the docked-off width. */
+	function sideviewViewport(): { width: number; height: number } {
+		const height = sideviewFullH ?? window.innerHeight;
+		if (!sideviewHosted || sideviewFullW === null) {
+			return { width: window.innerWidth, height };
+		}
+		if (sideviewOverlaid) return { width: window.innerWidth, height: window.innerHeight };
+		return { width: window.innerWidth + sideviewSideW, height: window.innerHeight };
+	}
+
+	function noteSideviewLayout(layout: ReturnType<typeof sideviewLayout>): void {
+		sideviewSideW = layout.side.width;
+		sideviewOverlaid = layout.overlay;
+	}
+
+	async function setSideviewOpen(open: boolean): Promise<void> {
+		try {
+			if (open) {
+				sideviewOpen = true;
+				const viewport = sideviewViewport();
+				sideviewFullW = viewport.width;
+				sideviewFullH = viewport.height;
+				const layout = sideviewLayout(viewport.width, viewport.height);
+				const hosted = await openSideview(sideviewUrl, layout);
+				if (hosted) noteSideviewLayout(layout);
+				sideviewHosted = hosted;
+				sideviewFallback = !hosted;
+			} else {
+				sideviewOpen = false;
+				sideviewFallback = false;
+				if (sideviewHosted) {
+					sideviewHosted = false;
+					await hideSideview(
+						sideviewFullW ?? window.innerWidth,
+						sideviewFullH ?? window.innerHeight
+					);
+				}
+				sideviewFullW = null;
+				sideviewFullH = null;
+			}
+		} catch {
+			// The panel never breaks the chat: fall back to the DOM
+			// strip on open, and drop state on close.
+			if (open) {
+				sideviewHosted = false;
+				sideviewFallback = true;
+			} else {
+				sideviewHosted = false;
+				sideviewFallback = false;
+				sideviewFullW = null;
+				sideviewFullH = null;
+			}
+		}
+	}
+
+	function toggleSideview(): void {
+		void setSideviewOpen(toggleSideviewOpen(sideviewOpen));
+	}
+
+	async function switchSideviewEngine(id: SideviewEngineId): Promise<void> {
+		sideviewEngineId = id;
+		if (!sideviewOpen || !sideviewHosted) return;
+		try {
+			const viewport = sideviewViewport();
+			sideviewFullW = viewport.width;
+			sideviewFullH = viewport.height;
+			const layout = sideviewLayout(viewport.width, viewport.height);
+			// The JS Webview API exposes no navigate: recreate the
+			// single tab at the new engine URL.
+			const hosted = await navigateSideview(sideviewEngine(id).url, layout);
+			if (hosted) {
+				noteSideviewLayout(layout);
+			} else {
+				sideviewHosted = false;
+				sideviewFallback = true;
+			}
+		} catch {
+			sideviewHosted = false;
+			sideviewFallback = true;
+		}
+	}
+
+	$effect(() => {
+		// Window resizes re-dock both webviews while the native tab
+		// is up. Browser fallback needs no geometry (plain DOM flow).
+		if (!sideviewOpen || !sideviewHosted) return;
+		const onResize = () => {
+			const viewport = sideviewViewport();
+			sideviewFullW = viewport.width;
+			sideviewFullH = viewport.height;
+			const layout = sideviewLayout(viewport.width, viewport.height);
+			noteSideviewLayout(layout);
+			void layoutSideviewViews(layout);
+		};
+		window.addEventListener("resize", onResize);
+		return () => window.removeEventListener("resize", onResize);
+	});
 
 	function runSearchQuery(): void {
 		if (searchQueryTimer) clearTimeout(searchQueryTimer);
@@ -3405,12 +3534,19 @@
 		const onKey = (event: KeyboardEvent) => {
 			const inEditor = (event.target as HTMLElement | null)?.closest(".cm-content, .ta-input");
 			if ((event.metaKey || event.ctrlKey) && (event.key === "t" || event.key === "T")) {
-				// Translate lookup only hijacks the combo over message text —
-				// the prompt and the browser keep it everywhere else.
+				// Over message text the combo feeds the translate
+				// lookup; everywhere else it toggles the research
+				// side panel (the prompt and the browser keep it).
 				if (!inEditor && currentQuote()) {
 					event.preventDefault();
 					event.stopPropagation();
 					void openTranslate();
+					return;
+				}
+				if (!inEditor) {
+					event.preventDefault();
+					event.stopPropagation();
+					toggleSideview();
 					return;
 				}
 			}
@@ -3427,6 +3563,14 @@
 				event.preventDefault();
 				event.stopPropagation();
 				closeSearch();
+				return;
+			}
+			if (event.key === "Escape" && sideviewOpen) {
+				// The docked research panel closes next, from
+				// anywhere (it has no text worth cancelling).
+				event.preventDefault();
+				event.stopPropagation();
+				void setSideviewOpen(false);
 				return;
 			}
 			if (
@@ -4404,6 +4548,37 @@
 					</span>
 				{/if}
 			</span>
+			<!-- Research side panel: Cmd+T docks a second OS webview
+			right in the same window (one tab, engine switcher). The
+			toggle button covers runtimes where the browser keeps the
+			combo (plain dev, e2e). -->
+			<span class="sideview-bar">
+				{#if sideviewOpen}
+					<select
+						aria-label="Research engine"
+						bind:value={sideviewEngineId}
+						onchange={() => void switchSideviewEngine(sideviewEngineId)}
+					>
+						{#each SIDE_VIEW_ENGINES as engine (engine.id)}
+							<option value={engine.id}>{engine.name}</option>
+						{/each}
+					</select>
+				{/if}
+				<button
+					type="button"
+					class="sideview-toggle"
+					class:active={sideviewOpen}
+					aria-label="Toggle research panel"
+					aria-expanded={sideviewOpen}
+					title={tip(
+						isMac ? "Research panel (⌘T)" : "Research panel (Ctrl+T)",
+						"Research panel"
+					)}
+					onclick={toggleSideview}
+				>
+					Research
+				</button>
+			</span>
 		</header>
 
 		{#if points.length > 3 && !settingsOpen && !previewing}
@@ -5130,6 +5305,29 @@
 		{/if}
 	</main>
 
+	{#if sideviewOpen && sideviewFallback}
+		<!-- No Tauri shell here (plain browser dev, e2e): there is no
+		second-OS-webview host, so the panel degrades to a docked
+		strip with an external link instead of crashing. -->
+		<aside class="sideview-fallback" aria-label="Research panel">
+			<div class="sideview-fallback-head">
+				<strong>Research</strong>
+				<button
+					type="button"
+					aria-label="Close research panel"
+					title="Close (Esc)"
+					onclick={() => void setSideviewOpen(false)}
+				>
+					×
+				</button>
+			</div>
+			<p>The research panel needs the desktop app for its second webview. Here it stays a link.</p>
+			<a href={sideviewUrl} target="_blank" rel="external noopener noreferrer">
+				Open {sideviewEngine(sideviewEngineId).name} in a browser tab
+			</a>
+		</aside>
+	{/if}
+
 	{#if selMenu && !previewing && !androidUI}
 		<div
 			class="sel-menu"
@@ -5324,7 +5522,8 @@
 					<div><dt>Speak hovered word</dt><dd>Right click word</dd></div>
 					<div><dt>Speak highlight</dt><dd>Select text, then right click</dd></div>
 					<div><dt>Thoughts show/hide</dt><dd>Ctrl+O</dd></div>
-					<div><dt>Translate selection</dt><dd>{isMac ? "⌘T" : "Ctrl+T"} (to English, feeds annotation)</dd></div>
+					<div><dt>Translate selection</dt><dd>{isMac ? "⌘T" : "Ctrl+T"} over message text (to English, feeds annotation)</dd></div>
+					<div><dt>Research side panel</dt><dd>{isMac ? "⌘T" : "Ctrl+T"} elsewhere, Esc closes (one tab, engine switcher)</dd></div>
 					<div><dt>Stop voice / close menus</dt><dd>Esc (outside the prompt)</dd></div>
 					<!-- ⌘D is meta-only (Ctrl+D skips in scroll mode), so Windows names Delete alone. -->
 					<div><dt>Delete a message</dt><dd>{isMac ? "Hover the message, then ⌘D or Delete" : "Hover the message, then Delete"}</dd></div>
@@ -6143,6 +6342,71 @@
 	}
 	.lang-chip :global(.action-glyph) {
 		height: 0.8rem;
+	}
+	/* Research panel chrome recedes like the language pill. The bar
+	docks right in the title strip; the toggle covers runtimes where
+	the browser keeps Cmd+T for itself. */
+	.sideview-bar {
+		margin-left: auto;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.sideview-bar select {
+		font: inherit;
+		font-size: 0.78rem;
+		color: inherit;
+		background: none;
+		border: 1px solid #1c1c1e;
+		border-color: var(--strong);
+		border-radius: 999px;
+		padding: 0.2rem 0.5rem;
+		cursor: pointer;
+		max-width: 11rem;
+	}
+	.sideview-toggle {
+		font: inherit;
+		font-size: 0.78rem;
+		color: #1c1c1e;
+		color: var(--ink);
+		border: 1px solid #1c1c1e;
+		border-color: var(--strong);
+		border-radius: 999px;
+		background: none;
+		cursor: pointer;
+		padding: 0.2rem 0.7rem;
+		white-space: nowrap;
+		opacity: 0.55;
+		transition: opacity 0.18s ease;
+	}
+	.sideview-toggle:hover,
+	.sideview-toggle:focus-visible,
+	.sideview-toggle.active {
+		opacity: 1;
+	}
+	.sideview-toggle.active {
+		font-weight: 600;
+	}
+	/* Fallback strip (browser dev, no shell webview): docks right
+	like the native tab does in the shell. Overrides the left
+	chat-list drawer above (same element, opposite edge). */
+	.sideview-fallback {
+		left: auto;
+		right: 0;
+		width: 22rem;
+		border-right: 0;
+		border-left: 1px solid #e5e5ea;
+		border-left-color: var(--line-soft);
+		box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+	}
+	.sideview-fallback-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+	}
+	.sideview-fallback p {
+		font-size: 0.85rem;
+		margin: 0;
 	}
 
 	button.link {
