@@ -197,6 +197,16 @@ import { isPromptIdle } from "$lib/chrome";
 		currentKeyboardInputSource
 	} from "$lib/nativeTts";
 	import { startNativeDictation } from "$lib/nativeDictate";
+	import {
+		acquireStudyWakeLock,
+		clearStudyBadge,
+		ensureReplyNotificationPermission,
+		notifyReplyDone,
+		releaseStudyWakeLock,
+		setStudyBadge,
+		vibrateTick,
+		type WakeLockRelease
+	} from "$lib/studyMedia";
 	import { recognizeImageText, friendlyOcrError } from "$lib/nativeOcr";
 	import { voiceLocaleForInputSource } from "$lib/keyboardLang";
 	import { joinExternalDraft } from "$lib/externalText";
@@ -590,6 +600,13 @@ import { isPromptIdle } from "$lib/chrome";
 	let speakingId: string | null = $state(null);
 	/** Message a speak-aloud selection came from (tints its selection). */
 	let speakingSelection: string | null = $state(null);
+	/** Screen wake lock held while read-aloud/TTS plays (study sessions). */
+	let studyWakeLock: WakeLockRelease | null = null;
+	/** Release the read-aloud wake lock (stop, natural end, teardown). */
+	function releaseStudyWake(): void {
+		releaseStudyWakeLock(studyWakeLock);
+		studyWakeLock = null;
+	}
 	let voiceError: string | null = $state(null);
 	let canMic = $state(false);
 	let dictating = $state(false);
@@ -1712,6 +1729,7 @@ import { isPromptIdle } from "$lib/chrome";
 		annDraft = "";
 		settleAnnPop();
 		annPop = { id: pending.id, x, y, fresh: true };
+		vibrateTick(6);
 	}
 
 	/** Submit the annotation being composed (Enter or Save). The id is
@@ -2255,6 +2273,7 @@ import { isPromptIdle } from "$lib/chrome";
 	function resetVoice(): void {
 		speakingId = null;
 		speakingSelection = null;
+		releaseStudyWake();
 	}
 
 	function stopVoice(): void {
@@ -2335,6 +2354,18 @@ import { isPromptIdle } from "$lib/chrome";
 		stopNative();
 		setVoiceError(null);
 		speakingId = id;
+		// Study sessions: keep the screen on while the utterance plays.
+		// A stale acquire resolving after stop/end releases immediately
+		// instead of holding the lock (see resetVoice).
+		void acquireStudyWakeLock().then((lock) => {
+			if (!lock) return;
+			if (speakingId === id) {
+				releaseStudyWake();
+				studyWakeLock = lock;
+			} else {
+				lock.release();
+			}
+		});
 		const useNative = settings.voiceEngine === "native";
 		const speakWeb = (cb: SpeakCallbacks): boolean =>
 			typeof lang === "function" ? speakMultilingual(text, lang, cb) : speakText(text, lang, cb);
@@ -2432,6 +2463,19 @@ import { isPromptIdle } from "$lib/chrome";
 			if (!speechAttemptable(messageSpeechLang(last))) return;
 			void speakReply(last, true);
 		}
+	}
+
+	/**
+	 * Backgrounded long-reply ping (study sessions): when a reply
+	 * finishes while the window is hidden/backgrounded, a
+	 * permission-gated notification + badge carries its head. Silent
+	 * when focused, silent for short replies and failures.
+	 */
+	function maybeNotifyReplyDone(msg: ChatMsg | undefined): void {
+		if (!msg || msg.role !== "assistant" || msg.error) return;
+		const body = msg.content.trim();
+		if (!body) return;
+		if (notifyReplyDone("Reply finished", body)) setStudyBadge(1);
 	}
 
 	function setVoiceEnabled(on: boolean): void {
@@ -2603,6 +2647,12 @@ import { isPromptIdle } from "$lib/chrome";
 
 	async function doSend() {
 		if (!canSubmit) return;
+		vibrateTick(8);
+		clearStudyBadge();
+		// Permission-gated background ping: ask from the send gesture
+		// while the window is focused, so a later backgrounded long
+		// reply may notify. No-op unless undecided.
+		void ensureReplyNotificationPermission();
 		if (editingMsgId) {
 			// Saving an edit rewrites the message in place and resends it:
 			// everything from the edited message on is answered fresh. If
@@ -2678,6 +2728,7 @@ import { isPromptIdle } from "$lib/chrome";
 		}
 		scrollToBottom();
 		maybeSpeakReply(sentFrom);
+		maybeNotifyReplyDone(chat.messages[chat.messages.length - 1]);
 		// The reply's layout churn (hero unmount, list growth, keyboard
 		// transitions on phones) can strand the emptied composer's cached
 		// line boxes at zero height: settle a re-measure after paint, like
@@ -2699,6 +2750,7 @@ import { isPromptIdle } from "$lib/chrome";
 		});
 		scrollToBottom();
 		maybeSpeakReply(resentFrom);
+		maybeNotifyReplyDone(chat.messages[chat.messages.length - 1]);
 		// Same settle as a fresh send: the reply's layout churn can
 		// strand the composer's cached line boxes at zero height.
 		requestAnimationFrame(() => requestAnimationFrame(() => editor?.remeasure()));
@@ -4547,6 +4599,8 @@ import { isPromptIdle } from "$lib/chrome";
 		// annotating), so Tab continues from there. Never yank focus out of
 		// a field that already holds it.
 		const onWinFocus = () => {
+			// Back from background: the reply was seen, drop its badge.
+			clearStudyBadge();
 			const active = document.activeElement;
 			if (
 				active &&
@@ -4685,6 +4739,7 @@ import { isPromptIdle } from "$lib/chrome";
 			window.clearTimeout(scrollIdleTimer);
 			stopSpeaking();
 			stopNative();
+			releaseStudyWake();
 			stopDictation?.();
 			editor?.destroy();
 			editor = null;
