@@ -9,7 +9,8 @@ import {
 	sentenceForQuote,
 	speakNative,
 	speakNativeMulti,
-	stopNative
+	stopNative,
+	saveNativeSpeech
 } from "./nativeTts";
 import { ttsLangFor } from "./reading";
 
@@ -81,6 +82,26 @@ describe("quoteLangFor", () => {
 		await expect(
 			quoteLangFor("this is a fairly long english sentence for testing", "en-US")
 		).resolves.toBe("en-US");
+	});
+
+	it("uses the offline scorer when the bridge answers null", async () => {
+		mockInvoke.mockResolvedValue(null);
+		await expect(
+			quoteLangFor(
+				"Les enfants jouent dans le jardin avec leurs amis pour feter la fin",
+				"en-US"
+			)
+		).resolves.toBe("fr-FR");
+	});
+
+	it("prefers the bridge answer over the offline scorer", async () => {
+		mockInvoke.mockResolvedValue("de-DE");
+		await expect(
+			quoteLangFor(
+				"Les enfants jouent dans le jardin avec leurs amis pour feter la fin",
+				"en-US"
+			)
+		).resolves.toBe("de-DE");
 	});
 });
 
@@ -249,5 +270,23 @@ describe("speakNative watchdog", () => {
 		stopNative();
 		await vi.advanceTimersByTimeAsync(60_000);
 		expect(errors).toEqual([]);
+	});
+});
+
+describe("saveNativeSpeech", () => {
+	it("invokes tts_save_speech with the voice pick", async () => {
+		mockInvoke.mockResolvedValue("/tmp/ccez-speech-7.m4a");
+		await expect(saveNativeSpeech("hello", "en-US", "voice-1")).resolves.toBe(
+			"/tmp/ccez-speech-7.m4a"
+		);
+		expect(mockInvoke).toHaveBeenCalledWith("tts_save_speech", {
+			text: "hello",
+			lang: "en-US",
+			voice: "voice-1"
+		});
+	});
+
+	it("rejects when the bridge is unavailable", async () => {
+		await expect(saveNativeSpeech("hello", "en-US")).rejects.toThrow("no bridge");
 	});
 });

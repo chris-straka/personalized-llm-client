@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { identifyLangOffline } from "./langId";
 import { ttsLangFor } from "./reading";
 import { splitSentences, splitSpeechSegments, type SpeakCallbacks } from "./voice";
 
@@ -120,8 +121,10 @@ export function friendlyNativeError(message: string): string {
 
 /**
  * Language for a highlighted quote: script detection first (reliable for
- * CJK/Arabic/…, needs no bridge), then Apple's language recognizer for
- * Latin scripts (French vs English), else the fallback. Never throws.
+ * CJK/Arabic/…, needs no bridge), then the language recognizer for
+ * Latin scripts (French vs English) — Apple's `NLLanguageRecognizer`
+ * in the shell, the offline stop-word scorer elsewhere — else the
+ * fallback. Never throws.
  */
 export async function quoteLangFor(quote: string, fallback: string): Promise<string> {
 	const scriptLang = ttsLangFor(quote, "");
@@ -130,9 +133,9 @@ export async function quoteLangFor(quote: string, fallback: string): Promise<str
 		const tag = await invoke<string | null>("tts_identify_lang", { text: quote });
 		if (tag?.trim()) return tag.trim();
 	} catch {
-		// Bridge unavailable (browser preview, tests): Latin fallback below.
+		// Bridge unavailable (browser preview, tests): offline scorer below.
 	}
-	return fallback;
+	return identifyLangOffline(quote) ?? fallback;
 }
 
 /**
@@ -176,9 +179,27 @@ export async function quoteLangForContext(
 		const tag = await invoke<string | null>("tts_identify_lang", { text: probe });
 		if (tag?.trim()) return tag.trim();
 	} catch {
-		// Bridge unavailable (browser preview, tests): Chinese below.
+		// Bridge unavailable (browser preview, tests): offline scorer below.
 	}
-	return "zh-CN";
+	return identifyLangOffline(probe) ?? "zh-CN";
+}
+
+/**
+ * Render `text` to an audio file with the same voice pick as live
+ * speech (macOS writes through `AVSpeechSynthesizer`; Android through
+ * `synthesizeToFile`). Resolves with the saved file path. Rejects
+ * outside the Tauri shell and on platforms without a file renderer.
+ *
+ * Device note: the Android path is code-only — no Android hardware
+ * was available to run it, so it is reported as unverified on device.
+ * Never throws synchronously; failures reject the promise.
+ */
+export async function saveNativeSpeech(
+	text: string,
+	lang: string,
+	voiceId: string | null = null
+): Promise<string> {
+	return invoke<string>("tts_save_speech", { text, lang, voice: voiceId });
 }
 
 /** Open System Settings at the Accessibility pane (voice downloads). */
