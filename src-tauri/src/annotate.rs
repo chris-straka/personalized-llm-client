@@ -3,10 +3,12 @@
 //! Android exposes the app in the OS text-selection menu
 //! (`ACTION_PROCESS_TEXT` via the AnnotateAction manifest alias —
 //! see `MainActivity.kt`, which forwards alias launches into the
-//! singleTask instance). Shares arrive as native calls into this
-//! module, which forwards them as the `annotate-external` window event
-//! the frontend listens for. The web annotate row stays untouched:
-//! native entries are an additional trigger, never a replacement.
+//! singleTask instance) and in the system Share sheet (`ACTION_SEND`
+//! text/plain straight to MainActivity). Both arrive as native calls
+//! into this module, which forwards them as the `annotate-external`
+//! window event the frontend listens for. The web annotate row stays
+//! untouched: native entries are an additional trigger, never a
+//! replacement.
 //!
 //! Payload shape: `{ "text": string | null }`. `Some` carries text
 //! selected OUTSIDE the app (composer prefill); `None` means "annotate
@@ -89,8 +91,8 @@ pub fn drain_pending_external(app: AppHandle) {
     }
 }
 
-/// Text shared from another app (PROCESS_TEXT). Null/empty shares emit
-/// nothing: there is no quote to prefill with.
+/// Text shared from another app (PROCESS_TEXT or ACTION_SEND).
+/// Null/empty shares emit nothing: there is no quote to prefill with.
 #[cfg(target_os = "android")]
 #[no_mangle]
 pub unsafe extern "C" fn Java_studio_ccez_app_MainActivity_nativeOnExternalText(
@@ -131,6 +133,16 @@ mod tests {
         let long = "x".repeat(5000);
         let out = clean_external(&long).expect("non-empty");
         assert_eq!(out.chars().count(), 4000);
+    }
+
+    #[test]
+    fn keeps_multiline_send_shares_verbatim() {
+        // ACTION_SEND bodies are multi-line (excerpt + URL): interior
+        // newlines survive, only the edges trim.
+        assert_eq!(
+            clean_external("  Look at this\n\nhttps://example.com/menu  "),
+            Some("Look at this\n\nhttps://example.com/menu".into())
+        );
     }
 
     #[test]
