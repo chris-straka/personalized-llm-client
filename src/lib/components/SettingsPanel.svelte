@@ -751,12 +751,13 @@
 	</label>
 	{#if !androidUI}
 		<label>
+			Chat width
 			<button
 				type="button"
 				class="reset-width"
 				title="Reset to the default width"
 				onclick={() => (settings.chatWidth = CHAT_WIDTH_DEFAULT)}
-				>Chat width ({CHAT_WIDTH_DEFAULT})</button
+				>({CHAT_WIDTH_DEFAULT})</button
 			>
 			<span class="font-row">
 				<input
@@ -1232,8 +1233,6 @@
 		font: inherit;
 		cursor: pointer;
 		color: inherit;
-		text-decoration: underline;
-		text-underline-offset: 2px;
 	}
 
 	section > button {
