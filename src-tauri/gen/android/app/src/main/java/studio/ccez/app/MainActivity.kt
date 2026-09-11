@@ -50,6 +50,7 @@ class MainActivity : TauriActivity() {
       }
     }
     handleProcessText(intent)
+    handleSend(intent)
   }
 
   /**
@@ -87,9 +88,10 @@ class MainActivity : TauriActivity() {
 
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
-    // singleTask: a PROCESS_TEXT share while running arrives here.
+    // singleTask: shares while running arrive here.
     setIntent(intent)
     handleProcessText(intent)
+    handleSend(intent)
   }
 
   private external fun nativeOnExternalText(text: String?)
@@ -104,6 +106,28 @@ class MainActivity : TauriActivity() {
     try {
       if (intent?.action != Intent.ACTION_PROCESS_TEXT) return
       val text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString()
+      nativeOnExternalText(text)
+    } catch (_: Exception) {
+    }
+  }
+
+  /**
+   * System Share sheet entry (ACTION_SEND text/plain from any app):
+   * forward to Rust, which emits `annotate-external` for the
+   * frontend's composer prefill — the same path as PROCESS_TEXT, so
+   * the same trim/cap/parking rules apply. EXTRA_TEXT carries the
+   * share (Chrome sends the URL, media apps title + URL);
+   * EXTRA_SUBJECT is only a fallback for apps that send a subject
+   * alone. Null/blank shares reach Rust as null, which emits
+   * nothing. Never throws: a foreign intent must not crash the app.
+   */
+  private fun handleSend(intent: Intent?) {
+    try {
+      if (intent?.action != Intent.ACTION_SEND) return
+      if (intent.type != "text/plain") return
+      val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+        ?.takeIf { it.isNotBlank() }
+        ?: intent.getCharSequenceExtra(Intent.EXTRA_SUBJECT)?.toString()
       nativeOnExternalText(text)
     } catch (_: Exception) {
     }

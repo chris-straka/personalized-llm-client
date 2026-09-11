@@ -24,6 +24,16 @@
                 <!-- AndroidTV support -->
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+            <!-- System Share sheet ("Share" into a chat from any app):
+            ACTION_SEND text/plain lands on singleTask MainActivity
+            (onCreate when cold, onNewIntent when warm) and flows
+            through the same annotate-external prefill as PROCESS_TEXT
+            (see MainActivity.handleSend). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
         <!-- OS text-selection menu ("Annotate" entry, ChatGPT-style):
         the system owns this item, so it survives the menu rebuilds
