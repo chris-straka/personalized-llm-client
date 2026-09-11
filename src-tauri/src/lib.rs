@@ -4,6 +4,7 @@
 mod dev_icon;
 mod annotate;
 mod dictation;
+mod ocr;
 mod dictate_linux;
 mod dictate_macos;
 mod dictate_windows;
@@ -169,6 +170,8 @@ pub fn run() {
             tts::tts_stop,
             tts::tts_voices,
             tts::tts_identify_lang,
+            ocr::ocr_supported,
+            ocr::ocr_recognize,
             dictate_start,
             dictate_stop
         ])

@@ -172,6 +172,7 @@
 		currentKeyboardInputSource
 	} from "$lib/nativeTts";
 	import { startNativeDictation } from "$lib/nativeDictate";
+	import { recognizeImageText, friendlyOcrError } from "$lib/nativeOcr";
 	import { voiceLocaleForInputSource } from "$lib/keyboardLang";
 	import { joinExternalDraft } from "$lib/externalText";
 
@@ -1226,6 +1227,35 @@
 	function removeAttachment(id: string): void {
 		attachments = attachments.filter((a) => a.id !== id);
 		if (previewId === id) previewId = null;
+	}
+
+	/**
+	 * On-device OCR for one attached image (macOS Vision bridge): the
+	 * recognized text is inserted into the composer as selectable text,
+	 * so it flows into the existing pinyin/furigana pipeline when sent.
+	 * Outside the Mac shell the bridge rejects and the friendly error
+	 * lands in `attachError` — never a throw into UI teardown.
+	 */
+	let ocrBusyId: string | null = $state(null);
+
+	async function recognizeAttachment(att: Attachment): Promise<void> {
+		if (ocrBusyId !== null || att.kind !== "image" || !att.dataUrl) return;
+		ocrBusyId = att.id;
+		attachError = null;
+		try {
+			const result = await recognizeImageText(att.dataUrl, latinFallback());
+			const text = result.text.trim();
+			if (!text) {
+				attachError = "No text found in this image.";
+			} else {
+				editor?.insertText(`${text}\n`);
+				flashToast("Recognized text inserted");
+			}
+		} catch (error) {
+			attachError = friendlyOcrError(error instanceof Error ? error.message : String(error));
+		} finally {
+			ocrBusyId = null;
+		}
 	}
 
 	function toggleFold(id: ChatMsgId): void {
@@ -4810,6 +4840,17 @@
 						{/if}
 						<span class="name" title="{att.name} · ~{att.tokens} tokens">{att.name}</span>
 						<span class="tok">~{att.tokens}</span>
+						{#if att.kind === "image" && att.dataUrl}
+							<button
+								type="button"
+								aria-label="Recognize text in image"
+								title="Recognize text in image"
+								disabled={ocrBusyId === att.id}
+								onclick={() => void recognizeAttachment(att)}
+							>
+								{ocrBusyId === att.id ? "…" : "OCR"}
+							</button>
+						{/if}
 						<button type="button" aria-label="Remove attachment" onclick={() => removeAttachment(att.id)}>
 							×
 						</button>
