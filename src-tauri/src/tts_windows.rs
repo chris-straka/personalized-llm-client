@@ -160,7 +160,6 @@ pub fn select_token(
 
 /// Does this build speak through the native engine? Always true on
 /// Windows (SAPI ships in-box) — the frontend gates the toggle on this.
-#[cfg_attr(target_os = "windows", tauri::command)]
 pub fn tts_supported() -> bool {
     #[cfg(target_os = "windows")]
     return imp::supported();
@@ -170,7 +169,6 @@ pub fn tts_supported() -> bool {
 
 /// Speak `text` (see `tts.rs` for the shared contract). Returns the
 /// utterance id; completion arrives as `tts-done`.
-#[cfg_attr(target_os = "windows", tauri::command)]
 pub fn tts_speak(
     app: AppHandle,
     text: String,
@@ -187,7 +185,6 @@ pub fn tts_speak(
 }
 
 /// Stop any in-progress native speech immediately.
-#[cfg_attr(target_os = "windows", tauri::command)]
 pub fn tts_stop(app: AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     return imp::stop(&app);
@@ -200,7 +197,6 @@ pub fn tts_stop(app: AppHandle) -> Result<(), String> {
 
 /// List installed SAPI voices (quality is always 1 — SAPI exposes no
 /// tiers; see the module docs).
-#[cfg_attr(target_os = "windows", tauri::command)]
 pub fn tts_voices(app: AppHandle) -> Result<Vec<NativeVoice>, String> {
     #[cfg(target_os = "windows")]
     return imp::voices(&app);

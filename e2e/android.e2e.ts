@@ -75,21 +75,23 @@ async function swipeFromLeftEdge(page: Page): Promise<void> {
 	});
 }
 
-test("edge swipe from the left never flips the chat sidebar", async ({ page }) => {
+test("edge swipe from the left toggles the chat sidebar", async ({ page }) => {
 	const aside = page.locator("aside:has(button.side-chat)");
 	const panel = page.locator(".settings-panel");
 	// State varies by persisted settings; read it, then prove the
-	// stroke leaves it alone — two-finger double-tap owns the sheet.
+	// stroke toggles it — closed opens (onto the search box), open
+	// dismisses — and the same stroke toggles it back.
 	const startedOpen = !(await aside.getAttribute("class"))?.includes("collapsed");
+	await swipeFromLeftEdge(page);
+	if (startedOpen) await expect(aside).toHaveClass(/collapsed/);
+	else await expect(aside).not.toHaveClass(/collapsed/);
 	await swipeFromLeftEdge(page);
 	if (startedOpen) await expect(aside).not.toHaveClass(/collapsed/);
 	else await expect(aside).toHaveClass(/collapsed/);
-	// Dismiss half still works: with the sheet closed, open settings
-	// from the right edge, then watch a rightward stroke close them.
-	if (startedOpen) {
-		await swipeMidScreen(page, 260, 150);
-		await expect(aside).toHaveClass(/collapsed/);
-	}
+	// Normalize shut: the settings half needs the sheet closed.
+	if (startedOpen) await swipeFromLeftEdge(page);
+	// Dismiss half still works: open settings from the right edge,
+	// then watch a rightward stroke close them (sheet stays shut).
 	await swipeFromRightEdge(page);
 	await expect(panel).not.toHaveClass(/closed/);
 	await swipeFromLeftEdge(page);
@@ -120,19 +122,20 @@ async function swipeMidScreen(page: Page, x0: number, x1: number): Promise<void>
 	);
 }
 
-test("mid-screen swipe right never flips the chat sidebar", async ({ page }) => {
+test("mid-screen swipe right toggles the chat sidebar", async ({ page }) => {
 	const aside = page.locator("aside:has(button.side-chat)");
 	const panel = page.locator(".settings-panel");
-	// Same ownership as the edge rule: the stroke leaves the sheet
-	// alone in either state, and still dismisses an open settings.
+	// Same ownership as the edge rule: the stroke toggles the sheet
+	// in either state, and still dismisses an open settings.
 	const startedOpen = !(await aside.getAttribute("class"))?.includes("collapsed");
+	await swipeMidScreen(page, 150, 260);
+	if (startedOpen) await expect(aside).toHaveClass(/collapsed/);
+	else await expect(aside).not.toHaveClass(/collapsed/);
 	await swipeMidScreen(page, 150, 260);
 	if (startedOpen) await expect(aside).not.toHaveClass(/collapsed/);
 	else await expect(aside).toHaveClass(/collapsed/);
-	if (startedOpen) {
-		await swipeMidScreen(page, 260, 150);
-		await expect(aside).toHaveClass(/collapsed/);
-	}
+	// Normalize shut: the settings half needs the sheet closed.
+	if (startedOpen) await swipeMidScreen(page, 150, 260);
 	await swipeFromRightEdge(page);
 	await expect(panel).not.toHaveClass(/closed/);
 	await swipeMidScreen(page, 150, 260);

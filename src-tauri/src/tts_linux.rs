@@ -237,7 +237,6 @@ pub fn parse_spd_voices(output: &str) -> Vec<FoundVoice> {
 
 /// Does this build speak through the native engine? True on Linux when
 /// a speech backend is installed (see [`pick_backend`]).
-#[cfg_attr(target_os = "linux", tauri::command)]
 pub fn tts_supported() -> bool {
     #[cfg(target_os = "linux")]
     return imp::supported();
@@ -247,7 +246,6 @@ pub fn tts_supported() -> bool {
 
 /// Speak `text` (see `tts.rs` for the shared contract). Returns the
 /// utterance id; completion arrives as `tts-done`.
-#[cfg_attr(target_os = "linux", tauri::command)]
 pub fn tts_speak(
     app: AppHandle,
     text: String,
@@ -264,7 +262,6 @@ pub fn tts_speak(
 }
 
 /// Stop any in-progress native speech immediately.
-#[cfg_attr(target_os = "linux", tauri::command)]
 pub fn tts_stop(app: AppHandle) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     return imp::stop(&app);
@@ -277,7 +274,6 @@ pub fn tts_stop(app: AppHandle) -> Result<(), String> {
 
 /// List installed voices (quality is always 1 — neither CLI reports
 /// tiers; see the module docs).
-#[cfg_attr(target_os = "linux", tauri::command)]
 pub fn tts_voices(app: AppHandle) -> Result<Vec<NativeVoice>, String> {
     #[cfg(target_os = "linux")]
     return imp::voices(&app);

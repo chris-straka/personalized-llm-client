@@ -127,12 +127,15 @@ test("swipes dismiss before they summon on a phone", async ({ page }) => {
 	await swipeX(page, 4, 144);
 	await expect(panel).toHaveClass(/closed/);
 	await expect(aside).toHaveClass(/collapsed/);
-	// Since the gesture redesign, a rightward stroke never summons
-	// chats on Android — two-finger double-tap owns the sidebar. A
+	// Since the toggle redesign, a rightward stroke with everything
+	// shut summons chats (and the same stroke dismisses them); a
 	// leftward stroke with the sheet open just closes it, and
 	// settings summon after that.
 	await swipeX(page, 4, 144);
+	await expect(aside).not.toHaveClass(/collapsed/);
+	await swipeX(page, 4, 144);
 	await expect(aside).toHaveClass(/collapsed/);
+	// Two-finger double-tap still summons the sidebar too.
 	await doubleTapTwoFinger(page);
 	await expect(aside).not.toHaveClass(/collapsed/);
 	await swipeX(page, 408, 268);

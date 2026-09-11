@@ -82,7 +82,6 @@ pub fn unsupported_message(lang: &str, found: Option<&str>) -> String {
 /// Begin one dictation utterance. Always rejects on Linux (see the
 /// module docs): the frontend falls back to Web Speech on the
 /// "not supported" text.
-#[cfg_attr(target_os = "linux", tauri::command)]
 pub fn dictate_start(app: AppHandle, lang: Option<String>) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     return imp::start(&app, lang);
@@ -95,7 +94,6 @@ pub fn dictate_start(app: AppHandle, lang: Option<String>) -> Result<(), String>
 
 /// End the active utterance early. Always a no-op success on Linux —
 /// `dictate_start` never starts anything to stop.
-#[cfg_attr(target_os = "linux", tauri::command)]
 pub fn dictate_stop(app: AppHandle) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     return imp::stop(&app);
