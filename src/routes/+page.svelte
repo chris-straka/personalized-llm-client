@@ -99,7 +99,6 @@
 		type AnnotationMark
 	} from "$lib/annotations";
 	import { createRefMemo } from "$lib/aidLoading";
-	import { openRadicalsOverlay } from "$lib/radicals";
 	import { translateSelection } from "$lib/translate";
 	import {
 	isAndroidUserAgent,
@@ -452,20 +451,6 @@
 	}
 	function annotateTouch(event: TouchEvent): void {
 		menuBtnTouch(event, annotate);
-	}
-	/**
-	 * Radicals at the cursor: the components overlay opens over the
-	 * selection anchor (reusing the .ann-pop card) and the menu stands
-	 * down, mirroring Annotate.
-	 */
-	function showRadicals(): void {
-		if (!selMenu) return;
-		openRadicalsOverlay({ x: selMenu.x, y: selMenu.y }, selMenu.quote);
-		clearSelection();
-		selMenu = null;
-	}
-	function radicalsTouch(event: TouchEvent): void {
-		menuBtnTouch(event, showRadicals);
 	}
 	let translate = $state<{
 		quote: string;
@@ -3673,6 +3658,33 @@
 		const snapSelection = (): void => {
 			downSel = window.getSelection()?.toString() ?? "";
 		};
+		/**
+		 * A press that starts outside message text must not eat a live
+		 * highlight: dragging in from the gutter would otherwise collapse
+		 * the selection at press time, before mouseup ever sees it. Only
+		 * dead chrome qualifies — the prompt, sidebars, and controls keep
+		 * their native press behavior (clicks still fire everywhere;
+		 * this only skips the selection reset).
+		 */
+		const preserveMessageHighlight = (event: MouseEvent): void => {
+			if (event.button !== 0) return;
+			const target = event.target instanceof Element ? event.target : null;
+			if (!target?.closest("main") || target.closest(".rendered, .prompt")) return;
+			const live = window.getSelection();
+			const anchor =
+				live && !live.isCollapsed
+					? live.anchorNode instanceof Element
+						? live.anchorNode
+						: live.anchorNode?.parentElement
+					: null;
+			if (!anchor?.closest(".messages .rendered")) return;
+			event.preventDefault();
+		};
+		/** Press point for the drag-vs-click read in onMouseUp below. */
+		let downClient: { x: number; y: number } | null = null;
+		const noteDownPoint = (event: MouseEvent): void => {
+			downClient = event.button === 0 ? { x: event.clientX, y: event.clientY } : null;
+		};
 		// A drag that starts in message text never highlights its
 		// neighbors: while the button is down, any selection escaping
 		// the anchor article trims back live (mouseup's lock only fixed
@@ -3715,7 +3727,13 @@
 			}
 			const live = window.getSelection();
 			const liveText = live?.toString() ?? "";
-			if (liveText === downSel && (event.detail <= 1 || event.detail >= 4)) {
+			// Clicks clear stale highlights; drags never do — a press in
+			// the gutter that travels into the chat keeps the highlight
+			// it started with (the press itself is preserved above).
+			const dragged = downClient
+				? Math.hypot(event.clientX - downClient.x, event.clientY - downClient.y) > 4
+				: false;
+			if (!dragged && liveText === downSel && (event.detail <= 1 || event.detail >= 4)) {
 				// A plain click changed nothing: blank space, a collapsed
 				// caret, or inside the old highlight (the engine collapses
 				// that only after mouseup dispatches, so the stale text
@@ -3728,7 +3746,7 @@
 				selMenu = null;
 				return;
 			}
-			if (!target?.closest(".rendered") && liveText !== "" && liveText === downSel) {
+			if (!dragged && !target?.closest(".rendered") && liveText !== "" && liveText === downSel) {
 				live?.removeAllRanges();
 				selMenu = null;
 				return;
@@ -3882,7 +3900,9 @@
 		window.addEventListener("blur", onBlur);
 		window.addEventListener("focusin", onFocusIn);
 		window.addEventListener("mousedown", onBadgePress, true);
+		window.addEventListener("mousedown", preserveMessageHighlight, true);
 		window.addEventListener("mousedown", snapSelection, true);
+		window.addEventListener("mousedown", noteDownPoint, true);
 		window.addEventListener("mousedown", armMessageDrag, true);
 		document.addEventListener("selectionchange", trimMessageDrag);
 		// Secondary scrollers share the main chat's fade: scroll events
@@ -3917,7 +3937,9 @@
 			window.removeEventListener("blur", onBlur);
 			window.removeEventListener("focusin", onFocusIn);
 			window.removeEventListener("mousedown", onBadgePress, true);
+			window.removeEventListener("mousedown", preserveMessageHighlight, true);
 			window.removeEventListener("mousedown", snapSelection, true);
+			window.removeEventListener("mousedown", noteDownPoint, true);
 			window.removeEventListener("mousedown", armMessageDrag, true);
 			document.removeEventListener("selectionchange", trimMessageDrag);
 			window.removeEventListener("scroll", onFadeScroll, true);
@@ -4747,13 +4769,6 @@
 				ontouchstart={noteMenuBtnTouch}
 				ontouchend={annotateTouch}
 			>Annotate</button>
-			<button
-				type="button"
-				aria-label="Show radicals for selection"
-				onclick={showRadicals}
-				ontouchstart={noteMenuBtnTouch}
-				ontouchend={radicalsTouch}
-			>Radicals</button>
 		</div>
 	{/if}
 
@@ -4856,6 +4871,7 @@
 		<div class="settings-inner">
 			<SettingsPanel
 			settings={settings}
+			onToast={flashToast}
 			onClose={() => {
 			settingsOpen = false;
 			pulseCursor();

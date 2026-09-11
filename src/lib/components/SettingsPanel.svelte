@@ -37,6 +37,10 @@
 		tokensTitle?: string | null;
 		/** Phone UI: hover doesn't exist, so the hover toggles read as a note. */
 		androidUI?: boolean;
+		/** Update results ride the page toast (auto-dismiss, no layout
+		shift) instead of an inline popup. Falls back to inline text
+		when the page passes none. */
+		onToast?: (message: string) => void;
 	}
 
 	let {
@@ -45,7 +49,8 @@
 		onShortcuts,
 		tokensLabel = null,
 		tokensTitle = null,
-		androidUI = false
+		androidUI = false,
+		onToast
 	}: Props = $props();
 	let updateStatus = $state("");
 	let checkingUpdate = $state(false);
@@ -159,13 +164,21 @@
 	/** Where "check for updates" goes: releases page, Tauri updater, or nowhere (web). */
 	const updateRoute = $derived(updateRouteFor(androidUI === true, inShell));
 
+	/**
+	 * Update result readout: the page toast when one is wired (it
+	 * auto-dismisses and never shifts the settings layout), else the
+	 * inline fallback below the button.
+	 */
+	function sayUpdate(message: string): void {
+		if (onToast) onToast(message);
+		else updateStatus = message;
+	}
 	async function checkUpdates() {
 		checkingUpdate = true;
-		updateStatus = "Checking…";
 		const route = updateRoute;
 		if (route.kind === "none") {
 			// Web build: a redeploy updates the site, so there is nothing to check.
-			updateStatus = "This web build updates with the site — nothing to check.";
+			sayUpdate("This web build updates with the site — nothing to check.");
 			checkingUpdate = false;
 			return;
 		}
@@ -178,9 +191,9 @@
 				} else {
 					window.open(route.url, "_blank", "noopener");
 				}
-				updateStatus = "Grab the newest APK from the latest release page to update.";
+				sayUpdate("Grab the newest APK from the latest release page to update.");
 			} catch {
-				updateStatus = `Couldn't open it automatically — get the newest APK at ${route.url}`;
+				sayUpdate(`Couldn't open it automatically — get the newest APK at ${route.url}`);
 			} finally {
 				checkingUpdate = false;
 			}
@@ -188,11 +201,15 @@
 		}
 		try {
 			const update = await check();
-			updateStatus = update
-				? `Version ${update.version} is available — download it from the release page to install.`
-				: "You're on the latest version.";
+			sayUpdate(
+				update
+					? `Version ${update.version} is available — download it from the release page to install.`
+					: "You're on the latest version."
+			);
 		} catch (error) {
-			updateStatus = `Updater unavailable: ${error instanceof Error ? error.message : String(error)}`;
+			sayUpdate(
+				`Updater unavailable: ${error instanceof Error ? error.message : String(error)}`
+			);
 		} finally {
 			checkingUpdate = false;
 		}
@@ -867,7 +884,7 @@
 			<button type="button" onclick={() => void checkUpdates()} disabled={checkingUpdate}>
 				{checkingUpdate ? "Checking…" : "Check for updates"}
 			</button>
-			{#if updateStatus}<p class={updateRoute.kind === "releases" ? "note" : "result"} role="status">{updateStatus}</p>{/if}
+			{#if updateStatus && !onToast}<p class="note" role="status">{updateStatus}</p>{/if}
 		{/if}
 	</section>
 </div>

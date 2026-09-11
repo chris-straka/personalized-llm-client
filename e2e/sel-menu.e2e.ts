@@ -23,14 +23,14 @@ async function waitForToastToFade(page: Page): Promise<void> {
 	await page.locator(".toast").waitFor({ state: "hidden", timeout: 15000 }).catch(() => {});
 }
 
-/** The menu is Annotate plus Radicals: the OS bubble owns Copy/Translate,
-and whole-message copy/speak live on the action rows. */
-test("selection menu offers Annotate and Radicals", async ({ page }) => {
+/** The menu is Annotate alone: the OS bubble owns Copy/Translate,
+and whole-message copy/speak live on the action rows. (Character
+components come back as a later TODO, after latex/code rendering.) */
+test("selection menu offers Annotate alone", async ({ page }) => {
 	await selectWord(page);
 	const menu = page.locator(".sel-menu");
-	await expect(menu.locator("button")).toHaveCount(2);
+	await expect(menu.locator("button")).toHaveCount(1);
 	await expect(menu.locator('button:has-text("Annotate")')).toBeVisible();
-	await expect(menu.locator('button:has-text("Radicals")')).toBeVisible();
 });
 
 /** Annotate opens the comment pill for the quote and stands the

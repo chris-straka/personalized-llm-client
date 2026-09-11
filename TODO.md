@@ -76,6 +76,15 @@ Spec: `README.md`. Full plan: `PLAN.md` (`AI.md`/`AI2.md` merged then deleted).
   Keystore (keyring v3 has no Android backend — in-memory mock only,
   nothing persists), system TTS inventory, Samsung S24 pass
 
+### Later: rich rendering, then character components (in this order)
+
+- [ ] LaTeX math rendering in messages (offline, no paid service)
+- [ ] Code rendering in messages (beyond the shipped fold/copy/highlight)
+- [ ] Character components overlay for Han text (offline table already in
+  `src/lib/radicals.ts` + unit tests) — returns to the selection menu
+  only after the two above; needs a better name than "Radicals". No UI
+  for it in the release until then (button removed Sep 2026).
+
 ## Architecture rules (learned Stage 2)
 
 - Chat state is a plain object in `$state` with function updates (`src/lib/chat.ts`).

@@ -565,3 +565,76 @@ test("rtl drag from the top-right selects the whole paragraph", async ({ page })
 	expect(sel.length).toBeGreaterThan(150);
 	await expect(page.locator(".sel-menu")).toBeVisible();
 });
+
+/** Saving a bullet-spanning annotation with Enter leaves no native
+highlight behind: the quote keeps its badge and wash, but the
+selection itself is gone. */
+test("annotating bullets and saving with Enter clears the highlight", async ({ page }) => {
+	await seedChat(page, [
+		{ role: "assistant", content: "Points:\n\n- 越えた (koeta) = crossed\n- 友情 (yujo) = friendship" }
+	]);
+	await page.goto("/");
+	const body = page.locator("article .rendered").first();
+	await expect(body).toBeVisible();
+	const first = body.locator("li").nth(0);
+	const second = body.locator("li").nth(1);
+	const a = await first.boundingBox();
+	const b = await second.boundingBox();
+	if (!a || !b) throw new Error("bullets have no boxes");
+	// Real press to normalize the click guard, then a real range over
+	// both bullets before the matching mouseup summons the menu.
+	await page.mouse.click(a.x + 5, a.y + 5);
+	await page.mouse.move(b.x + b.width - 5, b.y + 5);
+	await page.mouse.down();
+	await page.evaluate(() => {
+		const items = [...document.querySelectorAll("article .rendered li")];
+		if (items.length < 2) throw new Error("no bullets");
+		const range = document.createRange();
+		range.setStart(items[0].firstChild, 0);
+		const last = items[1].lastChild;
+		range.setEnd(last, last.textContent?.length ?? 0);
+		window.getSelection()?.removeAllRanges();
+		window.getSelection()?.addRange(range);
+	});
+	await page.mouse.up();
+	await expect(page.locator(".sel-menu")).toBeVisible();
+	await page.locator('.sel-menu button:has-text("Annotate")').click();
+	await expect(page.locator(".ann-pop")).toBeVisible();
+	await page.keyboard.press("Enter");
+	await expect(page.locator(".ann-pop")).toHaveCount(0);
+	expect(await page.evaluate(() => window.getSelection()?.toString() ?? "")).toBe("");
+	// The save itself worked: one badge stamped on the quote, and the
+	// steady state carries no wash — badges alone mark saved quotes.
+	expect(await page.locator("article .rendered [data-ann-badge]").count()).toBe(1);
+	// Past both fade windows (pill 160ms, wash 180ms): steady state
+	// carries no wash — badges alone mark saved quotes.
+	await page.waitForTimeout(600);
+	expect(
+		await page.evaluate(() => document.querySelectorAll("article .rendered mark.ccez-ann").length)
+	).toBe(0);
+});
+
+/** A press outside message text that drags into the chat keeps the
+live highlight: only a plain (unmoved) click clears it. */
+test("dragging from the gutter into the chat keeps the highlight", async ({ page }) => {
+	const body = page.locator("article .rendered").first();
+	await expect(body).toBeVisible();
+	const box = await body.boundingBox();
+	if (!box) throw new Error("message has no box");
+	const y = box.y + box.height / 2;
+	await page.mouse.move(box.x + 20, y);
+	await page.mouse.down();
+	await page.mouse.move(box.x + 120, y, { steps: 5 });
+	await page.mouse.up();
+	await expect(page.locator(".sel-menu")).toBeVisible();
+	const before = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+	expect(before.length).toBeGreaterThan(0);
+	// Press in the gutter (past the 24px edge-gesture zone, so no
+	// sidebar claims the stroke), drag into the chat, release over text.
+	await page.mouse.move(40, y);
+	await page.mouse.down();
+	await page.mouse.move(box.x + 60, y, { steps: 8 });
+	await page.mouse.up();
+	expect(await page.evaluate(() => window.getSelection()?.toString() ?? "")).toBe(before);
+	await expect(page.locator(".sel-menu")).toBeVisible();
+});
