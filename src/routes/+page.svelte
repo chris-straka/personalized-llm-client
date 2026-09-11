@@ -115,7 +115,8 @@
 		type AnnotationMark
 	} from "$lib/annotations";
 	import { createRefMemo } from "$lib/aidLoading";
-	import { translateSelection } from "$lib/translate";
+	import { hoverTranslateWithProvider } from "$lib/builtinAi";
+	import { switchChatWithTransition } from "$lib/viewTransitions";
 	import { getInspectData, shouldShowInspect } from "$lib/inspect";
 	import {
 		SIDE_VIEW_ENGINES,
@@ -568,6 +569,8 @@ import { isPromptIdle } from "$lib/chrome";
 		result: string | null;
 		error: string | null;
 		busy: boolean;
+		/** "builtin" = free on-device Translator served, no key spent. */
+		via: "builtin" | "fallback" | null;
 	} | null>(null);
 	let vocalized = $state<Record<string, string>>({});
 	let vocalizing = new SvelteSet<string>();
@@ -1026,12 +1029,18 @@ import { isPromptIdle } from "$lib/chrome";
 		}, 120);
 	}
 
+	/** Chat switching wrapped in a View Transition where supported
+	 * (instant cut elsewhere) — identical end state either way. */
+	function transitionToChat(id: Parameters<typeof selectChat>[1]): void {
+		void switchChatWithTransition(() => selectChat(chatState, id));
+	}
+
 	/** Jump to a palette hit: its chat, scrolled to its message. */
 	function enterSearchHit(hit: SearchHit): void {
 		const chat = chatState.chats.find((c) => c.id === hit.doc.chatId);
 		if (!chat) return;
 		previewChatId = null;
-		selectChat(chatState, chat.id);
+		transitionToChat(chat.id);
 		searchOpen = false;
 		searchQuery = "";
 		searchHits = [];
@@ -1362,7 +1371,7 @@ import { isPromptIdle } from "$lib/chrome";
 		const target = chats[next];
 		if (!target) return;
 		sideIdx = next;
-		selectChat(chatState, target.id);
+		transitionToChat(target.id);
 		// Every switch lands at the top the same way minting one does —
 		// stepping older used to jump with no motion at all.
 		scrollBox?.scrollTo({ top: 0, behavior: "smooth" });
@@ -1392,7 +1401,7 @@ import { isPromptIdle } from "$lib/chrome";
 		const item = chats[Math.min(Math.max(sideIdx, 0), chats.length - 1)];
 		if (!item) return;
 		sideIdx = chats.indexOf(item);
-		selectChat(chatState, item.id);
+		transitionToChat(item.id);
 		settings.sidebarCollapsed = true;
 		persistSettings();
 		enterEditMode();
@@ -2006,7 +2015,8 @@ import { isPromptIdle } from "$lib/chrome";
 			messageId: found.messageId,
 			result: null,
 			error: provider ? null : "Set an API key first — open Settings.",
-			busy: !!provider
+			busy: !!provider,
+			via: null
 		};
 		clearSelection();
 		selMenu = null;
@@ -2015,14 +2025,16 @@ import { isPromptIdle } from "$lib/chrome";
 		const timer = setTimeout(() => controller.abort(), 30000);
 		try {
 			// Lookup targets English; anything else goes in the chat itself.
-			const result = await translateSelection(
+			// Free on-device Translator serves where present; the keyed
+			// helper is the fallback (see builtinAi.hoverTranslate).
+			const hovered = await hoverTranslateWithProvider(
 				provider,
 				found.quote,
 				"English",
 				controller.signal
 			);
 			if (translate && translate.quote === found.quote) {
-				translate = { ...translate, result, busy: false };
+				translate = { ...translate, result: hovered.text, via: hovered.via, busy: false };
 			}
 		} catch (error) {
 			if (translate && translate.quote === found.quote) {
@@ -4244,7 +4256,7 @@ import { isPromptIdle } from "$lib/chrome";
 						sideIdx >= 0 ? sideIdx : chats.findIndex((c) => c.id === chatState.activeChatId);
 					focusSideChat(from + delta);
 					const landed = chats[Math.min(Math.max(sideIdx, 0), chats.length - 1)];
-					if (landed) selectChat(chatState, landed.id);
+					if (landed) transitionToChat(landed.id);
 					return;
 				}
 				if (
@@ -4899,7 +4911,7 @@ import { isPromptIdle } from "$lib/chrome";
 						onclick={() => {
 							previewChatId = null;
 							sideIdx = chatState.chats.findIndex((c) => c.id === item.id);
-							selectChat(chatState, item.id);
+							transitionToChat(item.id);
 						}}
 					>
 						{chatLabel(item.createdAt, visibleMessageCount(chatState, item))}

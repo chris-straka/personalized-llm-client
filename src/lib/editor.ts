@@ -36,6 +36,7 @@ import {
 	type FenceBlock
 } from "./fences";
 import { IMAGE_MARKER } from "./attachments";
+import { shouldDeferForComposition } from "./editContext";
 
 export type SubmitKind = "send" | "stage";
 
@@ -693,7 +694,13 @@ export function createPromptEditor(
 	const submitKeys = keymap.of([
 		{
 			key: "Enter",
-			run: () => {
+			run: (view) => {
+				// IME composition (notably pinyin) confirms with Enter —
+				// letting it through sends the message halfway. Defer to
+				// the composition instead (textarea path guards
+				// event.isComposing the same way).
+				const composing = (view as unknown as { composing?: boolean }).composing;
+				if (shouldDeferForComposition({ viewComposing: composing ?? false })) return false;
 				options.onSubmit("send");
 				return true;
 			}

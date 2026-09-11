@@ -3,6 +3,7 @@ import {
 	type PromptEditor,
 	type PromptEditorOptions
 } from "./editor";
+import { attachEditContext, shouldDeferForComposition } from "./editContext";
 
 /**
  * Plain-textarea PromptEditor for Android (see `createPromptEditor` in
@@ -25,6 +26,9 @@ export function createTextareaEditor(
 	const ta = document.createElement("textarea");
 	ta.className = "ta-input";
 	ta.rows = 1;
+	// Free on-device precision where supported; null elsewhere (fallback
+	// is the isComposing guard above). Never throws.
+	attachEditContext(ta);
 	if (options.initialDoc) ta.value = options.initialDoc;
 	parent.prepend(ta);
 
@@ -49,7 +53,9 @@ export function createTextareaEditor(
 	const onKeyDown = (event: KeyboardEvent): void => {
 		// IME composition (notably pinyin) confirms with Enter — never
 		// hijack that keystroke or typing CJK sends the message halfway.
-		if (event.isComposing) return;
+		// An attached EditContext (where supported) sharpens the range
+		// tracking behind this flag; the fallback is this check itself.
+		if (shouldDeferForComposition({ isComposing: event.isComposing })) return;
 		// Enter and Mod-Enter send; Shift-Enter falls through to newline.
 		if (event.key === "Enter" && !event.shiftKey && !event.altKey) {
 			event.preventDefault();
