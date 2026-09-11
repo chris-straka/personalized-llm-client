@@ -14,7 +14,7 @@ record of what was merged).
 
 ## .deb (Debian / Ubuntu / Pop!_OS)
 
-Built by CI: `.github/workflows/release-linux.yml` runs `tauri build`
+Built by CI: `release.yml` (`release-linux` job) runs `tauri build`
 on **ubuntu-22.04** with `--bundles deb,appimage` and attaches
 `src-tauri/target/release/bundle/deb/*.deb` to the draft release for each
 `v*` tag. Install with:
@@ -85,7 +85,7 @@ Notes (per the [Tauri AppImage guide](https://v2.tauri.app/distribute/appimage/)
 
 ## System dependencies
 
-Build-time packages (also installed verbatim by `release-linux.yml`).
+Build-time packages (also installed verbatim by `release.yml`).
 Sources: [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/),
 Debian/AppImage guides.
 
@@ -189,7 +189,7 @@ Rationale per key:
 
 Checked on macOS (Darwin arm64) 2026-09-10:
 
-- `release-linux.yml` parses as valid YAML (`python3 -c yaml.safe_load`)
+- `release.yml` parses as valid YAML (`python3 -c yaml.safe_load`)
   and uses only existing repo paths (`src-tauri/target/...` output globs,
   `oven-sh/setup-bun@v2`, `tauri-apps/tauri-action@v1` — same pins as the
   existing `release.yml`).
@@ -213,7 +213,7 @@ NOT verifiable on this host (no Linux tooling — re-confirmed
 - `desktop-file-validate packaging/ccez-llm.desktop`;
 - `makepkg --printsrcinfo` / `.SRCINFO` generation and `namcap` lint of
   the PKGBUILD;
-- end-to-end `release-linux.yml` run (needs a `v*` tag push + secrets).
+- end-to-end `release.yml` run (needs a `v*` tag push + secrets).
 
 ## Quirk-hunt findings (2026-09-10, static analysis on macOS, no edits to code)
 
@@ -278,10 +278,10 @@ apply. GPU/software-rendering: nothing sets
 `WEBKIT_DISABLE_DMABUF_RENDERER` / `LIBGL_ALWAYS_SOFTWARE`, so VMs
 without GL fall back (or fail) on WebKitGTK defaults — runtime,
 needs-runner (launch with `-v` on a GL-less VM to prove). glibc floor:
-`release-linux.yml:26` pins `ubuntu-22.04` (glibc 2.35) — correct,
+`release.yml` (`release-linux` job) pins `ubuntu-22.04` (glibc 2.35) — correct,
 confirmed.
 
-Q5 — `release-linux.yml` deps match this doc's Debian list verbatim
+Q5 — `release.yml` deps match this doc's Debian list verbatim
 (lines 32-44 vs "System dependencies" above) and the workflow parses
 (`yaml.safe_load`, 7 steps, `runs-on: ubuntu-22.04`). Two needs-runner
 notes: (a) `tauri-action@v1` already uploads bundles AND the

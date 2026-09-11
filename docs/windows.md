@@ -9,9 +9,9 @@ supported local Windows build — maintainers develop on macOS.
 
 ## What CI builds
 
-Workflow: [.github/workflows/release-windows.yml](../.github/workflows/release-windows.yml).
-It fires on the same `v*` tag push as `release.yml` / `release-linux.yml` and
-attaches its artifacts to the same draft GitHub Release.
+Workflow: the `release-windows-*` jobs in [.github/workflows/release.yml](../.github/workflows/release.yml).
+They run in that file's strict `needs` chain (one writer at a time) and
+attach their artifacts to the same draft GitHub Release.
 
 | Arch  | Runner          | Rust target                |
 | ----- | --------------- | -------------------------- |

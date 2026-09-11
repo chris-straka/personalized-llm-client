@@ -1,12 +1,17 @@
 name: release
 
-# Cut a release: push a tag like `v0.1.0` and CI builds the
-# signed-for-updates macOS .dmgs (per-arch: ARM64-only + Intel-only,
-# no universal binary) and the signed Android APK, attaching all to
-# a GitHub Release as a draft.
+# Cut a release: push a tag like `v0.1.0` and CI builds every artifact
+# onto one draft GitHub Release:
+#   macOS: per-arch .dmgs (ARM64-only + Intel-only, no universal binary)
+#     + updater artifacts (*.app.tar.gz + *.sig)
+#   Linux: .deb + .AppImage bundles (+ .sig updater artifacts)
+#   Windows: NSIS installers (per-arch: x64 + ARM64) + updater signatures
+#   Android: signed APK
+# plus latest.json (the in-app updater manifest, merged across platforms
+# by tauri-action as each job uploads).
 #
 # One-time setup before the first release (repo Settings -> Secrets -> Actions):
-#   updater (both jobs sign macOS updates with this):
+#   updater (macOS/Windows/Linux jobs sign updates with these):
 #     TAURI_SIGNING_PRIVATE_KEY            (contents of ~/.tauri/ccez.key)
 #     TAURI_SIGNING_PRIVATE_KEY_PASSWORD   (the password set at key generation)
 #   android (`keytool -genkey -v -keystore ~/upload-keystore.jks -keyalg RSA
@@ -17,21 +22,36 @@ name: release
 # No Apple Developer account needed: the macOS bundle is ad-hoc signed, so
 # the first launch on another Mac needs right-click -> Open. The APK
 # installs directly from the Releases page (allow unknown sources once).
+#
+# ORDERING (strict chain, do not parallelize): v0.2.2 proved that
+# concurrent jobs uploading to the same draft silently lose files (the
+# Intel .dmg, both Linux .sigs, and the x64 Windows .sig all uploaded
+# "successfully" yet never landed). Every job here runs only after its
+# predecessor, so exactly one writer touches the draft at a time. A shared
+# `concurrency` group was tried first and made it worse: GitHub cancels
+# queued runs in the group instead of queueing them, which killed whole
+# platform builds. The `needs` chain below is the mechanism that works.
 
 on:
   push:
     tags:
       - "v*"
 
-# One draft, one writer at a time: every release workflow shares this
-# group, so queued tag builds serialize instead of racing draft creation
-# and asset uploads (v0.2.2 lost 6 files to that race). Jobs inside this
-# file chain via `needs` for the same reason.
-concurrency:
-  group: release-${{ github.ref }}
-
 jobs:
+  create-draft:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create empty draft release for the tag
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "Ccez LLM ${{ github.ref_name }}"
+          draft: true
+
   release-macos-x86_64:
+    needs: [create-draft]
     runs-on: macos-latest
     permissions:
       contents: write
@@ -80,8 +100,160 @@ jobs:
           # M1+ Macs download just their slice, same signed-for-updates flow.
           args: --target aarch64-apple-darwin
 
-  release-android:
+  # Windows NSIS installers (per-arch: x64 + ARM64) and their updater
+  # signatures, signed with the SAME TAURI_SIGNING_* secrets as above.
+  # Runs only on GitHub-hosted Windows runners; there is deliberately no
+  # local Windows build path (maintainers develop on macOS).
+  # Code signing note: the .exe is NOT Authenticode-signed (no certificate
+  # is configured), so Windows SmartScreen shows an "Unknown publisher"
+  # prompt on first install. The in-app updater signature (TAURI_SIGNING_*)
+  # is unrelated to SmartScreen and IS configured here.
+  release-windows-x64:
     needs: [release-macos-aarch64]
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - run: bun install
+      # tauri-action provisions NSIS on the runner and builds only the NSIS
+      # bundle (--bundles nsis skips the WiX .msi; MSI distribution is
+      # out of scope). TAURI_SIGNING_* signs the updater artifacts.
+      - name: Build NSIS installer (x64)
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Ccez LLM ${{ github.ref_name }}"
+          releaseDraft: true
+          args: --target x86_64-pc-windows-msvc --bundles nsis
+      # tauri-action already uploads the bundles above; this step is a
+      # belt-and-braces re-attach so the artifacts land on the draft even
+      # if the action's upload step is skipped on a partial failure.
+      - name: Attach NSIS bundles to draft release
+        if: always()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: true
+          fail_on_unmatched_files: false
+          files: |
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.nsis.zip
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.nsis.zip.sig
+
+  release-windows-arm64:
+    # ARM64: native build on a native ARM64 runner (cross-linking ARM64
+    # from an x64 runner is NOT trivial, hence a separate job).
+    # windows-11-arm is GA for public repositories; it does NOT work in
+    # private repositories -- if this repo ever goes private, drop this
+    # job (x64 keeps working).
+    needs: [release-windows-x64]
+    runs-on: windows-11-arm
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-msvc
+      - run: bun install
+      - name: Build NSIS installer (arm64)
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Ccez LLM ${{ github.ref_name }}"
+          releaseDraft: true
+          args: --target aarch64-pc-windows-msvc --bundles nsis
+      - name: Attach NSIS bundles to draft release
+        if: always()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: true
+          fail_on_unmatched_files: false
+          files: |
+            src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis/*.exe
+            src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis/*.nsis.zip
+            src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis/*.nsis.zip.sig
+
+  # Linux distribution artifacts on the same draft:
+  #   - .deb bundle  (Debian / Ubuntu / Pop!_OS / Asahi-Debian-remix installs)
+  #   - .AppImage bundle (distro-agnostic fallback)
+  #   - updater artifacts (*.sig), signed when the TAURI_SIGNING_*
+  #     secrets are present (same secrets as above).
+  # The AUR -bin package (packaging/aur/PKGBUILD) downloads the .deb
+  # attached here, so a Linux release is not complete until this job
+  # is green.
+  # Baseline: ubuntu-22.04 on purpose. Tauri links against the build
+  # host's glibc/WebKitGTK, so building on the OLDEST supported base
+  # (22.04, which ships libwebkit2gtk-4.1) keeps the binaries runnable on
+  # newer systems. Building on 24.04+ raises the minimum glibc and breaks
+  # older installs.
+  release-linux:
+    needs: [release-windows-arm64]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - run: bun install
+      - name: Build .deb and .AppImage bundles
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Ccez LLM ${{ github.ref_name }}"
+          releaseDraft: true
+          args: --bundles deb,appimage
+      # tauri-action already uploads the bundles above; this step is a
+      # belt-and-braces re-attach so the artifacts land on the draft even
+      # if the action's upload step is skipped on a partial failure.
+      - name: Attach Linux bundles to draft release
+        if: always()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: true
+          fail_on_unmatched_files: false
+          files: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/appimage/*.AppImage.tar.gz
+            src-tauri/target/release/bundle/appimage/*.AppImage.tar.gz.sig
+
+  release-android:
+    needs: [release-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -122,16 +294,17 @@ jobs:
           draft: true
           files: src-tauri/gen/android/app/build/outputs/apk/**/release/*.apk
 
-  # Durable gate for the v0.2.2 asset loss: fail loudly if any macOS or
-  # Android file this pipeline builds is missing from the draft. (GitHub
-  # serves spaces in bundle names as dots; match the served names.)
-  verify-macos-assets:
+  # Durable gate for the v0.2.2 asset loss: this job runs only after every
+  # build uploaded, and fails the run if any expected file is missing from
+  # the draft or any platform is missing from the updater manifest.
+  # (GitHub serves spaces in bundle names as dots; match the served names.)
+  verify-release:
     needs: [release-android]
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
-      - name: Verify macOS + Android assets landed on the draft
+      - name: Verify all release assets and updater platforms
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -145,8 +318,20 @@ jobs:
             "Ccez.LLM_${VER}_x64.dmg" \
             "Ccez.LLM_${VER}_x64.app.tar.gz" \
             "Ccez.LLM_${VER}_x64.app.tar.gz.sig" \
+            "Ccez.LLM_${VER}_amd64.deb" \
+            "Ccez.LLM_${VER}_amd64.deb.sig" \
+            "Ccez.LLM_${VER}_amd64.AppImage" \
+            "Ccez.LLM_${VER}_amd64.AppImage.sig" \
+            "Ccez.LLM_${VER}_x64-setup.exe" \
+            "Ccez.LLM_${VER}_x64-setup.exe.sig" \
+            "Ccez.LLM_${VER}_arm64-setup.exe" \
+            "Ccez.LLM_${VER}_arm64-setup.exe.sig" \
             "app-universal-release.apk" \
             "latest.json"; do
             echo "$ASSETS" | grep -qxF "$f" || { echo "MISSING: $f"; missing=1; }
+          done
+          gh release download "$GITHUB_REF_NAME" --pattern "latest.json" --dir "$RUNNER_TEMP/manifest"
+          for platform in darwin-aarch64 darwin-x86_64 linux-x86_64 windows-x86_64 windows-aarch64; do
+            grep -q "\"$platform\"" "$RUNNER_TEMP/manifest/latest.json" || { echo "MISSING PLATFORM: $platform"; missing=1; }
           done
           exit $missing
