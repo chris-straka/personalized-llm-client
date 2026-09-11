@@ -37,14 +37,20 @@ objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-avf-audio = "0.3"
 objc2-natural-language = "0.3"
-
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = "0.3"
+# Speech-recognition authorization callback (dictate_macos only).
+block2 = "0.6"
 
 # Android-only native TTS (TextToSpeech over JNI into Tts.kt).
 # jni matches wry's version so JNI types unify (see cargo tree).
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"
+
+# Windows-only SpeechRecognizer bindings (dictate_windows only).
+# windows 0.61 pairs with the windows-sys 0.61 already in the lock.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = "0.61"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

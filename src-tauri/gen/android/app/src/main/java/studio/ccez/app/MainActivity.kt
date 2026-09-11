@@ -31,6 +31,8 @@ class MainActivity : TauriActivity() {
     Tts.init(this)
     // Secrets bridge: same pattern for the Android Keystore backend.
     Secrets.init(this)
+    // Dictation bridge: system SpeechRecognizer behind dictate_start/stop.
+    Dictation.init(this)
     if (isAliasLaunch(intent)) {
       // The AnnotateAction alias always starts a NEW activity record
       // (launchMode lives on the activity element and never applies to

@@ -3,6 +3,9 @@
 #[cfg(all(target_os = "macos", debug_assertions))]
 mod dev_icon;
 mod annotate;
+mod dictation;
+mod dictate_macos;
+mod dictate_windows;
 mod keyboard;
 #[cfg(desktop)]
 mod menu;
@@ -11,6 +14,32 @@ mod tts;
 mod tts_android;
 #[cfg(target_os = "android")]
 mod secrets_android;
+
+/// Native dictation fallback for platforms without an implementation
+/// (Linux, iOS): the frontend falls back to Web Speech on invoke failure.
+#[cfg(not(any(target_os = "android", target_os = "macos", target_os = "windows")))]
+mod dictate_unsupported {
+    #[tauri::command]
+    pub fn dictate_start(_app: tauri::AppHandle, _lang: Option<String>) -> Result<(), String> {
+        Err("native dictation is not supported on this platform".into())
+    }
+
+    #[tauri::command]
+    pub fn dictate_stop() -> Result<(), String> {
+        Ok(())
+    }
+}
+
+// Exactly one dictate_start/dictate_stop pair registers per platform:
+// real implementations on Android/macOS/Windows, Err stubs elsewhere.
+#[cfg(target_os = "android")]
+use dictation::{dictate_start, dictate_stop};
+#[cfg(target_os = "macos")]
+use dictate_macos::{dictate_start, dictate_stop};
+#[cfg(target_os = "windows")]
+use dictate_windows::{dictate_start, dictate_stop};
+#[cfg(not(any(target_os = "android", target_os = "macos", target_os = "windows")))]
+use dictate_unsupported::{dictate_start, dictate_stop};
 
 /// API-key storage: macOS Keychain via the `keyring` crate, Android
 /// Keystore via `secrets_android` (keyring has no Android backend — it
@@ -119,7 +148,9 @@ pub fn run() {
             tts::tts_speak,
             tts::tts_stop,
             tts::tts_voices,
-            tts::tts_identify_lang
+            tts::tts_identify_lang,
+            dictate_start,
+            dictate_stop
         ])
         .setup(|_app| {
             // External-text bridge (Android PROCESS_TEXT / action-mode):

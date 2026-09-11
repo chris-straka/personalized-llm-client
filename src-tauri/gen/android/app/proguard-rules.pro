@@ -7,13 +7,17 @@
 
 # JNI surface invoked from Rust by exact name (tts_android.rs calls
 # Tts.init/speak/stop, secrets_android.rs calls Secrets.init/get/set/
-# delete; MainActivity declares nativeOnExternalText). Release
-# minification must not rename or strip these, or the bridges break
-# only in release builds (debug has minification off).
+# delete, dictation.rs calls Dictation.init/start/stop; MainActivity
+# declares nativeOnExternalText). Release minification must not rename
+# or strip these, or the bridges break only in release builds (debug
+# has minification off).
 -keep class studio.ccez.app.Tts {
   public *;
 }
 -keep class studio.ccez.app.Secrets {
+  public *;
+}
+-keep class studio.ccez.app.Dictation {
   public *;
 }
 -keepclasseswithmembernames class studio.ccez.app.MainActivity {

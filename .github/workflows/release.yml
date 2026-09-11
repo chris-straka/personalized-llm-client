@@ -32,7 +32,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
       - run: bun install
       - uses: tauri-apps/tauri-action@v1
         env:
@@ -43,7 +43,9 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "Ccez LLM ${{ github.ref_name }}"
           releaseDraft: true
-          args: --target aarch64-apple-darwin
+          # Universal binary (Apple Silicon + Intel): one _universal.dmg
+          # instead of a per-arch name nobody can read.
+          args: --target universal-apple-darwin
 
   release-android:
     runs-on: ubuntu-latest
