@@ -58,16 +58,23 @@ test("dark code stays contrasted", async ({ page }) => {
 		const cs = (el: Element, p: string): string => getComputedStyle(el as HTMLElement).getPropertyValue(p);
 		const inline = document.querySelector(".rendered :not(pre) > code") as HTMLElement;
 		const pre = document.querySelector(".ccez-code pre") as HTMLElement;
-		const code = document.querySelector(".ccez-code code") as HTMLElement;
+		// Token spans carry the Shiki colors (the code element itself
+		// merely inherits body text, so measuring it passes while
+		// tokens stay dark-on-dark — the actual dark-theme bug).
+		const tokens = Array.from(document.querySelectorAll(".ccez-code .shiki span")) as HTMLElement[];
+		const preBg = cs(pre, "background-color");
+		const worst = Math.min(...tokens.map((t) => contrast(cs(t, "color"), preBg)));
 		return {
 			theme: document.documentElement.getAttribute("data-theme"),
 			inline: contrast(cs(inline, "color"), cs(inline, "background-color")),
-			code: contrast(cs(code, "color"), cs(pre, "background-color"))
+			tokens: tokens.length,
+			worstToken: worst
 		};
 	});
 	expect(ratio.theme).toBe("dark");
 	expect(ratio.inline).toBeGreaterThanOrEqual(4.5);
-	expect(ratio.code).toBeGreaterThanOrEqual(4.5);
+	expect(ratio.tokens).toBeGreaterThan(0);
+	expect(ratio.worstToken).toBeGreaterThanOrEqual(4.5);
 });
 
 /** Thoughts grow with the message font scale instead of stranding at 0.8rem. */

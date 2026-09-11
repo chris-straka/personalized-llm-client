@@ -861,12 +861,11 @@
 	:global(html[data-theme="dark"]) .folded-preview {
 		color: #98989f;
 	}
-	:global(html[data-theme="dark"]) .rendered :global(pre),
-	:global(html[data-theme="dark"]) :global(html[data-theme="dark"]) .rendered :global(:not(pre) > code) {
+	:global(html[data-theme="dark"]) .rendered :global(pre) {
 		background: #1c1c1e;
 	}
 	:global(html[data-theme="dark"]) .rendered :global(th),
-	:global(html[data-theme="dark"]) :global(html[data-theme="dark"]) .rendered :global(td) {
+	:global(html[data-theme="dark"]) .rendered :global(td) {
 		border-color: #48484a;
 	}
 	:global(html[data-theme="dark"]) .rendered :global(blockquote) {
@@ -910,7 +909,7 @@
 		color: #f2f2f7;
 	}
 	:global(html[data-theme="dark"]) .rendered :global(.shiki),
-	:global(html[data-theme="dark"]) :global(html[data-theme="dark"]) .rendered :global(.shiki span) {
+	:global(html[data-theme="dark"]) .rendered :global(.shiki span) {
 		color: var(--shiki-dark) !important;
 		background-color: var(--shiki-dark-bg) !important;
 		font-style: var(--shiki-dark-font-style) !important;
