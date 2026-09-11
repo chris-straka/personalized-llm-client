@@ -4397,7 +4397,7 @@
 		<div
 			class="prompt"
 			class:has-anns={annotations.length > 0}
-			class:has-mic={canMic}
+			class:has-mic={canMic && settings.micEnabled}
 			class:prompt-hidden={!!annPop && androidUI && !iosUI}
 			bind:this={promptEl}
 			onclick={focusPromptFloor}
@@ -4540,7 +4540,7 @@
 				>
 					<ActionIcon kind="attach" />
 				</button>
-				{#if canMic}
+				{#if canMic && settings.micEnabled}
 					<button
 						type="button"
 						class="mic-btn"
@@ -4708,7 +4708,7 @@
 				onblur={() => blurAnnPop()}
 			></textarea>
 			{#if annPop.fresh}
-				{#if canMic}
+				{#if canMic && settings.micEnabled}
 					<button
 						type="button"
 						class="ann-tool"
@@ -4743,7 +4743,7 @@
 					<ActionIcon kind="delete" />
 				</button>
 				<span class="ann-pop-spacer"></span>
-				{#if canMic}
+				{#if canMic && settings.micEnabled}
 				<button
 					type="button"
 					class="ann-tool"

@@ -64,6 +64,8 @@ export interface AppSettings {
 	thinking: Record<string, string>;
 	/** Voice readback. Off unless toggled. */
 	voice: boolean;
+	/** Microphone dictation buttons (prompt + annotation drafts). On unless toggled. */
+	micEnabled: boolean;
 	voiceEngine: VoiceEngine;
 	/**
 	 * Explicit native voice (registry identifier from the voice picker);
@@ -86,8 +88,8 @@ export interface AppSettings {
 	/** Text-size multiplier for messages and the prompt (1 = default). */
 	fontScale: number;
 	/**
-	 * Desktop-only chat-column width in rem (46 = the legacy fixed
-	 * width). Phones always fill the viewport; the slider hides there.
+	 * Desktop-only chat-column width in rem (36 = the default).
+	 * Phones always fill the viewport; the slider hides there.
 	 */
 	chatWidth: number;
 	/**
@@ -223,6 +225,7 @@ export function defaultSettings(): AppSettings {
 		systemPrompt: DEFAULT_SYSTEM_PROMPT,
 		thinking: {},
 		voice: false,
+		micEnabled: true,
 		// Native first: this is a Mac-first app, and every runtime without
 		// system voices corrects itself back to web on the support probe.
 		voiceEngine: "native",
@@ -334,6 +337,7 @@ export function loadSettings(store?: KeyValueStore): AppSettings {
 		}
 		// Touch-only toggles postdate older saves the same way.
 		if (typeof merged.hideMessages !== "boolean") merged.hideMessages = false;
+		if (typeof merged.micEnabled !== "boolean") merged.micEnabled = true;
 		if (typeof merged.hideButtons !== "boolean") merged.hideButtons = true;
 		if (typeof merged.overlayActions !== "boolean") merged.overlayActions = true;
 		if (typeof merged.autoSpeakSelection !== "boolean") merged.autoSpeakSelection = true;

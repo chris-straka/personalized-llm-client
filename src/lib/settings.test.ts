@@ -96,6 +96,18 @@ describe("settings", () => {
 		expect(loadSettings(memoryStore).chatWidth).toBe(CHAT_WIDTH_DEFAULT);
 	});
 
+	it("defaults mic dictation on and keeps an explicit off", () => {
+		expect(defaultSettings().micEnabled).toBe(true);
+		const off = blankSettings();
+		off.micEnabled = false;
+		saveSettings(off, memoryStore);
+		expect(loadSettings(memoryStore).micEnabled).toBe(false);
+		const junk = blankSettings();
+		(junk as unknown as Record<string, unknown>).micEnabled = "yes";
+		saveSettings(junk, memoryStore);
+		expect(loadSettings(memoryStore).micEnabled).toBe(true);
+	});
+
 	it("migrates the shared thinking dial to per-provider native ids", () => {
 		const raw = blankSettings();
 		(raw as unknown as Record<string, unknown>)["thinkingLevel"] = "high";

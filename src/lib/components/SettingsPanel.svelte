@@ -626,6 +626,12 @@
 			{/if}
 		{/if}
 	{/if}
+	{#if androidUI && !inShell}
+		<label class="check">
+			<input type="checkbox" bind:checked={settings.micEnabled} />
+			Enable microphone dictation
+		</label>
+	{/if}
 	{#if nativeVoice && !androidUI}
 		<fieldset class="voice-engine">
 			<legend>System voice</legend>
@@ -712,6 +718,10 @@
 						device an admin may have to allow them).
 					{/if}
 				</p>
+				<label class="check">
+					<input type="checkbox" bind:checked={settings.micEnabled} />
+					Enable microphone dictation
+				</label>
 			</fieldset>
 	{/if}
 
