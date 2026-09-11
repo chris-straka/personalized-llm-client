@@ -11,7 +11,9 @@ import {
 	foldSegments,
 	pasteFoldButton,
 	htmlToText,
-	highlightRendered
+	highlightRendered,
+	extractMath,
+	mathHtml
 } from "./render";
 
 describe("thoughts", () => {
@@ -146,6 +148,70 @@ describe("highlighting", () => {
 	it("is a no-op without code blocks", async () => {
 		const rendered = renderMarkdown("plain text");
 		await expect(highlightRendered(rendered)).resolves.toBe(rendered.html);
+	});
+});
+
+describe("latex math", () => {
+	it("renders display math with a label head plus fold and copy buttons", () => {
+		const { html, maths } = renderMarkdown("Here:\n\n$$x^2 + y^2$$\n\ndone");
+		expect(maths).toEqual([{ kind: "display", tex: "x^2 + y^2", raw: "$$x^2 + y^2$$" }]);
+		expect(html).toContain('data-math-index="0"');
+		expect(html).toContain("ccez-math-lang");
+		expect(html).toContain('data-math-action="fold"');
+		expect(html).toContain('data-math-action="copy"');
+		expect(html).toContain("katex");
+	});
+
+	it("renders inline math with fold and copy buttons", () => {
+		const { html, maths } = renderMarkdown("slope \\(m = \\frac{a}{b}\\) here");
+		expect(maths).toHaveLength(1);
+		expect(maths[0]?.kind).toBe("inline");
+		expect(html).toContain("ccez-math-inline");
+		expect(html).toContain('data-math-action="fold"');
+		expect(html).toContain('data-math-action="copy"');
+		expect(html).toContain("katex");
+	});
+
+	it("keeps invalid math as plain text, never fatal", () => {
+		const { html, maths } = renderMarkdown("$$\\notacommand{$$");
+		expect(maths).toHaveLength(1);
+		expect(html).not.toContain("katex");
+		expect(html).toContain("notacommand");
+		expect(() => mathHtml({ kind: "display", tex: "   ", raw: "$$   $$" }, 0)).not.toThrow();
+		expect(mathHtml({ kind: "display", tex: "   ", raw: "$$   $$" }, 0)).toContain("$$");
+	});
+
+	it("leaves unclosed delimiters literal (streaming-safe)", () => {
+		const { html, maths } = renderMarkdown("halfway $$x^2 and \\(y");
+		expect(maths).toEqual([]);
+		expect(html).not.toContain("ccez-math");
+		expect(html).toContain("x^2");
+	});
+
+	it("never renders math inside fenced code or inline code spans", () => {
+		const { html, codes, maths } = renderMarkdown(
+			"```tex\n$$x^2$$\n```\n\n`\\(y\\)` and `$$z$$`"
+		);
+		expect(maths).toEqual([]);
+		expect(codes).toHaveLength(1);
+		expect(html).not.toContain("ccez-math");
+		expect(html).toContain("ccez-code");
+	});
+
+	it("keeps math indices unique across thoughts and body", () => {
+		const { html, maths } = renderMessage("<think>$$a$$</think>See \\(b\\) and $$c$$", false);
+		expect(maths.map((m) => m.tex)).toEqual(["a", "b", "c"]);
+		expect(html).toContain('data-math-index="0"');
+		expect(html).toContain('data-math-index="1"');
+		expect(html).toContain('data-math-index="2"');
+	});
+
+	it("extracts display math across lines and skips escaped openers", () => {
+		const { stripped, maths } = extractMath("a\n$$\nx\n$$\n\\\\(not math\\\\) and \\(real\\)");
+		expect(maths.map((m) => m.kind)).toEqual(["display", "inline"]);
+		expect(maths[0]?.tex).toBe("\nx\n");
+		expect(maths[1]?.tex).toBe("real");
+		expect(stripped).toContain("\\\\(not math\\\\)");
 	});
 });
 

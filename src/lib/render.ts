@@ -1,5 +1,6 @@
 import { Marked, type Renderer, type Tokens } from "marked";
 import DOMPurify from "dompurify";
+import katex from "katex";
 import { createHighlighter, type Highlighter } from "shiki";
 import { RUBY_SCRIPT_RE } from "./reading";
 
@@ -69,17 +70,29 @@ export function escapeHtml(text: string): string {
 		.replace(/"/g, "&quot;");
 }
 
+export interface MathEntry {
+	/** Display (`$$…$$`) blocks get the code-style head; inline (`\(…\)`) too. */
+	kind: "display" | "inline";
+	/** Raw TeX between the delimiters (what Copy writes). */
+	tex: string;
+	/** Full source slice including delimiters (plain fallback rendering). */
+	raw: string;
+}
+
 export interface RenderedMessage {
 	html: string;
 	/** Raw code per fenced block, in document order (for copy + highlight). */
 	codes: Array<{ lang: string; code: string }>;
+	/** Raw TeX per math block, in document order (for copy). Same shared
+	 * index space as `codes` across thoughts and body. */
+	maths: MathEntry[];
 }
 
 /** Synchronous render: markdown → sanitized HTML with plain (unhighlighted)
  * code blocks. Safe to call on every streamed token. */
 export function renderMarkdown(markdownText: string): RenderedMessage {
-	const rendered: RenderedMessage = { html: "", codes: [] };
-	rendered.html = sanitize(renderInto(markdownText, rendered.codes));
+	const rendered: RenderedMessage = { html: "", codes: [], maths: [] };
+	rendered.html = sanitize(renderInto(markdownText, rendered.codes, rendered.maths));
 	return rendered;
 }
 
@@ -87,17 +100,165 @@ export function renderMarkdown(markdownText: string): RenderedMessage {
 export function renderMessage(markdownText: string, sourcesWanted: boolean): RenderedMessage {
 	const { thoughts, body } = extractThoughts(markdownText);
 	const clean = stripSourcesIfUnasked(body, sourcesWanted);
-	const rendered: RenderedMessage = { html: "", codes: [] };
+	const rendered: RenderedMessage = { html: "", codes: [], maths: [] };
 	let html = "";
 	if (thoughts) {
-		const inner = renderInto(thoughts, rendered.codes);
+		const inner = renderInto(thoughts, rendered.codes, rendered.maths);
 		html +=
 			`<details class="ccez-thoughts"><summary>thoughts</summary>` +
 			`<div class="ccez-thoughts-body">${inner}</div></details>`;
 	}
-	html += renderInto(clean, rendered.codes);
+	html += renderInto(clean, rendered.codes, rendered.maths);
 	rendered.html = sanitize(html);
 	return rendered;
+}
+
+/**
+ * LaTeX math in MAIN CHAT messages only (never the composer prompt, which
+ * stays plain CodeMirror text): display `$$…$$` and inline `\(…\)` render
+ * via KaTeX (bundled, offline). Unknown/invalid math keeps its plain
+ * source rendering, never fatal. Unclosed delimiters (mid-stream) stay
+ * literal. Fenced code blocks and inline code spans never become math.
+ */
+
+// Placeholder markers ride through marked inside private-use codepoints so
+// ordinary text can never collide with them; the math HTML is spliced back
+// after the markdown parse (marked would otherwise mangle the KaTeX tags).
+const MATH_OPEN = "\uE000";
+const MATH_CLOSE = "\uE001";
+const MATH_PLACEHOLDER_RE = /\uE000(\d+)\uE001/g;
+
+function mathPlaceholder(index: number): string {
+	return `${MATH_OPEN}${index}${MATH_CLOSE}`;
+}
+
+/**
+ * Pull math spans out of markdown source, skipping ``` fenced blocks and
+ * backtick code spans. Pure and unit-tested. Returns the source with
+ * placeholders plus the math entries in document order.
+ */
+export function extractMath(markdownText: string): { stripped: string; maths: MathEntry[] } {
+	const maths: MathEntry[] = [];
+	let out = "";
+	let i = 0;
+	const len = markdownText.length;
+	const lineStart = (pos: number): boolean => pos === 0 || markdownText[pos - 1] === "\n";
+	while (i < len) {
+		// Fenced code block: skip whole lines from opener to closer (or EOF).
+		if (lineStart(i) && markdownText.startsWith("```", i)) {
+			const openEnd = markdownText.indexOf("\n", i);
+			const bodyStart = openEnd === -1 ? len : openEnd + 1;
+			let close = bodyStart;
+			let closeEnd = -1;
+			while (close < len) {
+				const nl = markdownText.indexOf("\n", close);
+				const lineEnd = nl === -1 ? len : nl;
+				const line = markdownText.slice(close, lineEnd);
+				if (/^\s*```\s*$/.test(line)) {
+					closeEnd = nl === -1 ? len : nl + 1;
+					break;
+				}
+				close = lineEnd + 1;
+			}
+			const end = closeEnd === -1 ? len : closeEnd;
+			out += markdownText.slice(i, end);
+			i = end;
+			continue;
+		}
+		const ch = markdownText[i];
+		// Backslash escapes: `\\` stays a literal backslash, `\(` never
+		// opens math, and `\X` never reaches marked as an opener.
+		if (ch === "\\") {
+			const next = markdownText[i + 1];
+			if (next === "(") {
+				const close = markdownText.indexOf("\\)", i + 2);
+				if (close !== -1) {
+					const tex = markdownText.slice(i + 2, close);
+					const raw = markdownText.slice(i, close + 2);
+					maths.push({ kind: "inline", tex, raw });
+					out += mathPlaceholder(maths.length - 1);
+					i = close + 2;
+					continue;
+				}
+			}
+			out += markdownText.slice(i, Math.min(i + 2, len));
+			i += next === undefined ? 1 : 2;
+			continue;
+		}
+		// Inline code span: skip to the matching run on the same line.
+		if (ch === "`") {
+			let run = 1;
+			while (markdownText[i + run] === "`") run++;
+			const nl = markdownText.indexOf("\n", i);
+			const lineEnd = nl === -1 ? len : nl;
+			const ticks = "`".repeat(run);
+			const close = markdownText.indexOf(ticks, i + run);
+			if (close !== -1 && close < lineEnd) {
+				out += markdownText.slice(i, close + run);
+				i = close + run;
+				continue;
+			}
+			out += markdownText.slice(i, i + run);
+			i += run;
+			continue;
+		}
+		// Display math: `$$…$$`, possibly across lines.
+		if (ch === "$" && markdownText[i + 1] === "$") {
+			const close = markdownText.indexOf("$$", i + 2);
+			if (close !== -1) {
+				const tex = markdownText.slice(i + 2, close);
+				const raw = markdownText.slice(i, close + 2);
+				maths.push({ kind: "display", tex, raw });
+				out += mathPlaceholder(maths.length - 1);
+				i = close + 2;
+				continue;
+			}
+			out += "$$";
+			i += 2;
+			continue;
+		}
+		out += ch;
+		i++;
+	}
+	return { stripped: out, maths };
+}
+
+/** KaTeX HTML for one math entry, or its escaped plain source on failure. */
+export function mathHtml(entry: MathEntry, index: number): string {
+	let inner: string;
+	try {
+		if (!entry.tex.trim()) throw new Error("empty math");
+		inner = katex.renderToString(entry.tex, {
+			displayMode: entry.kind === "display",
+			throwOnError: true,
+			output: "html",
+			strict: false,
+			trust: false
+		});
+	} catch {
+		// Unknown/invalid math keeps plain rendering, never fatal.
+		return escapeHtml(entry.raw);
+	}
+	// Same chrome as ccez-code: language/label head with Fold and Copy
+	// buttons per math block (clicks delegate in MessageBody like code).
+	const head =
+		`<div class="ccez-math-head">` +
+		`<span class="ccez-math-lang">math</span>` +
+		`<button type="button" data-math-action="fold">Fold</button>` +
+		`<button type="button" data-math-action="copy">Copy</button>` +
+		`</div>`;
+	if (entry.kind === "display") {
+		return (
+			`<div class="ccez-math" data-math-index="${index}">` +
+			head +
+			`<div class="ccez-math-body">${inner}</div></div>`
+		);
+	}
+	return (
+		`<span class="ccez-math-inline" data-math-index="${index}">` +
+		head +
+		`<span class="ccez-math-body">${inner}</span></span>`
+	);
 }
 
 /**
@@ -113,7 +274,16 @@ export function renderMessage(markdownText: string, sourcesWanted: boolean): Ren
  */
 const DIR_AUTO_BLOCKS = /<(p|li|h[1-6]|blockquote|td|th)(?=[\s>])/g;
 
-function renderInto(markdownText: string, codes: Array<{ lang: string; code: string }>): string {
+function renderInto(
+	markdownText: string,
+	codes: Array<{ lang: string; code: string }>,
+	maths: MathEntry[]
+): string {
+	// Math leaves the source first (code fences/spans excluded there), so
+	// marked never sees the delimiters and KaTeX tags never pass through it.
+	const base = maths.length;
+	const { stripped, maths: found } = extractMath(markdownText);
+	for (const entry of found) maths.push(entry);
 	const instance = new Marked({ breaks: true });
 	instance.use({
 		renderer: {
@@ -154,8 +324,15 @@ function renderInto(markdownText: string, codes: Array<{ lang: string; code: str
 			}
 		}
 	});
-	const html = instance.parse(markdownText) as string;
-	return html.replace(DIR_AUTO_BLOCKS, "<$1 dir=\"auto\"");
+	const html = instance.parse(stripped) as string;
+	const withMath = html.replace(MATH_PLACEHOLDER_RE, (_match, num: string) => {
+		const index = base + Number(num);
+		const entry = maths[index];
+		// Placeholders are ours alone; a missing entry keeps the raw marker.
+		if (!entry) return _match;
+		return mathHtml(entry, index);
+	});
+	return withMath.replace(DIR_AUTO_BLOCKS, "<$1 dir=\"auto\"");
 }
 
 let purifier: ReturnType<typeof DOMPurify> | null = null;
@@ -168,7 +345,19 @@ export function sanitize(dirty: string): string {
 	purifier ??= DOMPurify(window);
 	return purifier.sanitize(dirty, {
 		ADD_TAGS: ["details", "summary", "button", "ruby", "rt", "rp"],
-		ADD_ATTR: ["open", "class", "style", "data-code-index", "data-code-action", "data-paste-fold", "type", "dir"]
+		ADD_ATTR: [
+			"open",
+			"class",
+			"style",
+			"aria-hidden",
+			"data-code-index",
+			"data-code-action",
+			"data-math-index",
+			"data-math-action",
+			"data-paste-fold",
+			"type",
+			"dir"
+		]
 	});
 }
 

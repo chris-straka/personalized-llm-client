@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { tick, untrack } from "svelte";
+	// KaTeX stylesheet (fonts bundle relative to it, so math renders offline).
+	import "katex/dist/katex.min.css";
 	import { createAidLoadingReporter, furiganaRequestKey } from "$lib/aidLoading";
 	import { detectScripts, localAidsFor, type LocalAid } from "$lib/reading";
 	import { pinyinBlock, plainParagraphs } from "$lib/pinyin";
@@ -308,6 +310,37 @@
 			onFoldToggle?.(Number(fold.dataset.pasteFold ?? -1));
 			return;
 		}
+		const mathButton = (event.target as HTMLElement).closest<HTMLElement>("[data-math-action]");
+		if (mathButton && rendered) {
+			const wrap = mathButton.closest<HTMLElement>("[data-math-index]");
+			const index = Number(wrap?.dataset.mathIndex ?? -1);
+			const entry = rendered.maths[index];
+			if (!entry) return;
+			if (mathButton.dataset.mathAction === "copy") {
+				// Same feedback contract as the code Copy button: the
+				// button itself reports the outcome, restoring its label.
+				const label = mathButton.textContent ?? "Copy";
+				const restore = () => {
+					mathButton.textContent = label;
+				};
+				const report = (ok: boolean) => {
+					mathButton.textContent = ok ? "Copied" : "Copy failed";
+					setTimeout(restore, 1500);
+				};
+				if (!navigator.clipboard) report(false);
+				else void navigator.clipboard.writeText(entry.tex).then(
+					() => report(true),
+					() => report(false)
+				);
+			} else {
+				const body = wrap?.querySelector(".ccez-math-body");
+				if (!body || !(body instanceof HTMLElement)) return;
+				const collapsed = body.style.display !== "none";
+				body.style.display = collapsed ? "none" : "";
+				mathButton.textContent = collapsed ? "Unfold" : "Fold";
+			}
+			return;
+		}
 		const button = (event.target as HTMLElement).closest<HTMLElement>("[data-code-action]");
 		if (!button || !rendered) return;
 		const block = button.closest<HTMLElement>(".ccez-code");
@@ -574,6 +607,77 @@
 		border-radius: 0;
 		background: #fff;
 	}
+	/* LaTeX math (main chat only): same chrome as ccez-code — a
+	label head with Fold and Copy buttons per math block. */
+	.rendered :global(.ccez-math) {
+		margin: 0.5em 0;
+		border: 1px solid #e5e5ea;
+		border-radius: 8px;
+		overflow: hidden;
+		width: fit-content;
+		max-width: 100%;
+		min-width: min(12rem, 100%);
+	}
+	.rendered :global(.ccez-math-head) {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.25rem 0.6rem;
+		background: #f1f1f4;
+		font-size: 0.75rem;
+	}
+	.rendered :global(.ccez-math-lang) {
+		font-weight: 650;
+	}
+	.rendered :global(.ccez-math-head button) {
+		border: 1px solid #c7c7cc;
+		border-radius: 6px;
+		background: #fff;
+		cursor: pointer;
+		font-size: 0.75rem;
+		padding: 0.05rem 0.5rem;
+	}
+	.rendered :global(.ccez-math-head button:first-of-type) {
+		margin-left: auto;
+	}
+	.rendered :global(.ccez-math-body) {
+		padding: 0.6rem 0.8rem;
+		background: #fff;
+		overflow-x: auto;
+	}
+	/* Inline math keeps the same buttons, sized down so the line keeps
+	its rhythm; KaTeX inherits the message color and scale. */
+	.rendered :global(.ccez-math-inline) {
+		display: inline-flex;
+		align-items: baseline;
+		gap: 0.3rem;
+		border: 1px solid #e5e5ea;
+		border-radius: 6px;
+		padding: 0 0.3rem;
+		background: #fff;
+	}
+	.rendered :global(.ccez-math-inline .ccez-math-head) {
+		display: inline-flex;
+		background: none;
+		padding: 0;
+		gap: 0.25rem;
+	}
+	.rendered :global(.ccez-math-inline .ccez-math-lang) {
+		display: none;
+	}
+	.rendered :global(.ccez-math-inline .ccez-math-head button) {
+		font-size: 0.65rem;
+		padding: 0 0.35rem;
+	}
+	.rendered :global(.ccez-math-inline .ccez-math-body) {
+		padding: 0;
+		background: none;
+		overflow: visible;
+	}
+	.rendered :global(.ccez-math .katex),
+	.rendered :global(.ccez-math-inline .katex) {
+		color: inherit;
+	}
 	.rendered :global(.ccez-thoughts) {
 		/* Thoughts track the message scale like the body (fixed rem
 		stranded them at 12.8px under a 600% reading size). */
@@ -779,6 +883,22 @@
 		background: #1c1c1e;
 		border-color: #48484a;
 		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-math),
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-math-inline) {
+		border-color: #38383a;
+	}
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-math-head) {
+		background: #2c2c2e;
+	}
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-math-head button) {
+		background: #1c1c1e;
+		border-color: #48484a;
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-math-body),
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-math-inline) {
+		background: #101013;
 	}
 	:global(html[data-theme="dark"]) .rendered :global(.ccez-code pre) {
 		background: #101013;
