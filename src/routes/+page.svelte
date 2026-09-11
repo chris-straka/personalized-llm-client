@@ -171,6 +171,21 @@
 		readClipboardImageFiles,
 		type ClipboardItemLike
 	} from "$lib/touchPaste";
+	import {
+		captureScreenToFile,
+		consumeLaunchFiles,
+		downloadMarkdownFile,
+		dropFilesFromDataTransfer,
+		exportChatMarkdown,
+		fileSaveAccessAvailable,
+		grabVideoFrame,
+		isPermissionDismissal,
+		screenshotCaptureAvailable,
+		splitLaunchFiles,
+		type LaunchQueueLike,
+		type SaveHandleLike,
+		type SavePickerOptions
+	} from "$lib/intake";
 	import { isKeyboardOpen, keyboardOverlapPx } from "$lib/viewportReflow";
 import { isPromptIdle } from "$lib/chrome";
 	import {
@@ -1056,6 +1071,56 @@ import { isPromptIdle } from "$lib/chrome";
 			attachError = error instanceof Error ? error.message : String(error);
 		} finally {
 			pasting = false;
+		}
+	}
+
+	/**
+	 * Screenshot-to-chat: one getDisplayMedia frame straight into the
+	 * existing attachments path (same marker line as pasted images, so
+	 * send strips it and the image travels as an attachment). The
+	 * button only renders where getDisplayMedia exists; a dismissed
+	 * picker stays silent, real failures land in attachError.
+	 */
+	let screenshotting = $state(false);
+
+	async function captureScreenshot(): Promise<void> {
+		if (screenshotting) return;
+		screenshotting = true;
+		try {
+			const file = await captureScreenToFile(
+				(options) => navigator.mediaDevices.getDisplayMedia(options),
+				grabVideoFrame
+			);
+			await addFiles([file]);
+			editor?.insertText(`\n${IMAGE_MARKER}\n`);
+		} catch (error) {
+			if (!isPermissionDismissal(error)) {
+				attachError = error instanceof Error ? error.message : String(error);
+			}
+		} finally {
+			screenshotting = false;
+		}
+	}
+
+	/**
+	 * Export the active chat as Markdown: File System Access picker
+	 * where available, download blob fallback otherwise. A dismissed
+	 * picker stays silent.
+	 */
+	async function exportCurrentChat(): Promise<void> {
+		try {
+			const picker = fileSaveAccessAvailable()
+				? ((window as unknown as {
+						showSaveFilePicker?: (options: SavePickerOptions) => Promise<SaveHandleLike>;
+					}).showSaveFilePicker?.bind(window) ?? null)
+				: null;
+			const how = await exportChatMarkdown(chat, {
+				picker,
+				download: downloadMarkdownFile
+			});
+			flashToast(how === "picker" ? "Chat saved" : "Chat downloaded");
+		} catch (error) {
+			if (!isPermissionDismissal(error)) flashToast("Couldn't export this chat.");
 		}
 	}
 
@@ -3332,6 +3397,34 @@ import { isPromptIdle } from "$lib/chrome";
 				);
 			}
 		}
+		// File Handling launch: a .md file opened with the app lands
+		// its text in the composer (blank-line joined like shared
+		// text); anything else rides the attachments path. Where
+		// launchQueue is missing no launch can arrive, and the
+		// consumer stays unset.
+		const launchQueue =
+			(window as unknown as { launchQueue?: LaunchQueueLike }).launchQueue ?? null;
+		consumeLaunchFiles(launchQueue, async (files) => {
+			const { markdown, rest } = splitLaunchFiles(files);
+			for (const file of markdown) {
+				try {
+					const text = await file.text();
+					if (!chatState.activeChatId) newChat(chatState);
+					editor?.setText(joinExternalDraft(editor?.getText() ?? "", text));
+				} catch (error) {
+					attachError = error instanceof Error ? error.message : String(error);
+				}
+			}
+			if (markdown.length > 0) {
+				editor?.focus();
+				flashToast(
+					markdown.length === 1
+						? "Opened file in the composer"
+						: "Opened files in the composer"
+				);
+			}
+			if (rest.length > 0) await addFiles(rest);
+		});
 		// A pill-owned voice must not leak past its chat: when the
 		// launch chat carries no reply pill and nobody pinned the
 		// field, the voice falls back to the system default — new
@@ -4902,6 +4995,15 @@ import { isPromptIdle } from "$lib/chrome";
 				>
 					Research
 				</button>
+				<button
+					type="button"
+					class="export-btn"
+					title="Export chat as Markdown"
+					aria-label="Export chat as Markdown"
+					onclick={() => void exportCurrentChat()}
+				>
+					Export
+				</button>
 			</span>
 		</header>
 
@@ -5362,7 +5464,7 @@ import { isPromptIdle } from "$lib/chrome";
 			ondragover={(e) => e.preventDefault()}
 			ondrop={(e) => {
 				e.preventDefault();
-				const files = [...(e.dataTransfer?.files ?? [])];
+				const files = dropFilesFromDataTransfer(e.dataTransfer);
 				if (files.length > 0) void addFiles(files);
 			}}
 		>
@@ -5537,6 +5639,21 @@ import { isPromptIdle } from "$lib/chrome";
 						onclick={() => void pasteImagesFromClipboard()}
 					>
 						<ActionIcon kind="paste" />
+					</button>
+				{/if}
+				{#if screenshotCaptureAvailable()}
+					<!-- Screenshot-to-chat: one screen frame into the
+					attachments path. Hidden where getDisplayMedia is
+					missing (plain contexts without capture support). -->
+					<button
+						type="button"
+						class="shot-btn"
+						title="Capture a screenshot into the chat"
+						aria-label="Capture a screenshot into the chat"
+						disabled={screenshotting}
+						onclick={() => void captureScreenshot()}
+					>
+						Shot
 					</button>
 				{/if}
 				{#if canMic && settings.micEnabled}
@@ -6724,7 +6841,8 @@ import { isPromptIdle } from "$lib/chrome";
 		cursor: pointer;
 		max-width: 11rem;
 	}
-	.sideview-toggle {
+	.sideview-toggle,
+	.export-btn {
 		font: inherit;
 		/* The open strip is a fixed drawer (z-index 55) covering the
 		top bar: without its own stacking the toggle sinks under it
@@ -6746,7 +6864,9 @@ import { isPromptIdle } from "$lib/chrome";
 	}
 	.sideview-toggle:hover,
 	.sideview-toggle:focus-visible,
-	.sideview-toggle.active {
+	.sideview-toggle.active,
+	.export-btn:hover,
+	.export-btn:focus-visible {
 		opacity: 1;
 	}
 	.sideview-toggle.active {
@@ -8809,6 +8929,27 @@ import { isPromptIdle } from "$lib/chrome";
 		transition: color 0.18s ease;
 	}
 	.paste-btn:disabled {
+		opacity: 0.4;
+		cursor: default;
+	}
+	/* Screenshot-to-chat: text treatment in the tools rhythm, muted
+	until hover like the icon buttons around it. */
+	.shot-btn {
+		border: 0;
+		background: none;
+		cursor: pointer;
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: #6e6e73;
+		color: var(--muted);
+		padding: 0.2rem 0.35rem;
+		white-space: nowrap;
+	}
+	.shot-btn:hover {
+		color: #1c1c1e;
+		color: var(--ink);
+	}
+	.shot-btn:disabled {
 		opacity: 0.4;
 		cursor: default;
 	}
