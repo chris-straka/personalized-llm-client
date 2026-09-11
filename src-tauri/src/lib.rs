@@ -3,6 +3,7 @@
 #[cfg(all(target_os = "macos", debug_assertions))]
 mod dev_icon;
 mod annotate;
+mod desktop;
 mod dictation;
 mod ocr;
 #[cfg(target_os = "windows")]
@@ -164,6 +165,10 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             annotate::drain_pending_external,
+            desktop::desktop_sleep_block,
+            desktop::desktop_sleep_unblock,
+            desktop::desktop_export_study_sheet,
+            desktop::desktop_drain_pending_link,
             keychain_get,
             keychain_set,
             keychain_delete,
@@ -191,6 +196,9 @@ pub fn run() {
             // Native menu bar (desktop only; mobile has no menu bar).
             #[cfg(desktop)]
             _app.set_menu(menu::build(_app.handle())?)?;
+            // Summon kit: tray, single instance, global hotkey, deep links.
+            #[cfg(desktop)]
+            desktop::wire(_app.handle())?;
             Ok(())
         });
     // App-menu clicks, desktop only: mobile has no menu bar, and

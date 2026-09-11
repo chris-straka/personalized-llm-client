@@ -59,6 +59,9 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         &[
             &custom(app, "new-chat", "New Chat", Some("CmdOrCtrl+N"))?,
             &sep(app)?,
+            &custom(app, "share-sheet", "Share Chat as Study Sheet…", None)?,
+            &custom(app, "print-sheet", "Print Study Sheet…", None)?,
+            &sep(app)?,
             &custom(app, "delete-chat", "Delete Current Chat", None)?,
         ],
     )?;
