@@ -67,6 +67,13 @@
 		type SubmitKind
 	} from "$lib/editor";
 	import { createTextareaEditor } from "$lib/textarea-editor";
+	import {
+		ggArmed,
+		halfPageDy,
+		isEscapeHold,
+		messageEdgeScrollTop,
+		unselectedScrollIntent
+	} from "$lib/scrollkeys";
 	import { isEjected } from "$lib/session";
 	import { hydrateSecrets, persistSecrets, tauriBackendAvailable, withBlankedKeys } from "$lib/secrets";
 	import type { ChatProvider } from "$lib/providers/types";
@@ -397,6 +404,12 @@
 	let sideSearchEl: HTMLInputElement | undefined = $state();
 	/** Last lone "g" timestamp (gg hops to the top of history). */
 	let lastGAt = 0;
+	/**
+	 * Escape keydown timestamp for the fullscreen hold: releasing
+	 * after ESCAPE_HOLD_MS exits fullscreen, a quicker tap keeps the
+	 * keydown dismiss path exactly as today. 0 when no press is held.
+	 */
+	let escDownAt = 0;
 	/**
 	 * Command palette (Ctrl+P / Cmd+P): full-text search across chats
 	 * and annotations. Null when closed.
@@ -2788,6 +2801,65 @@
 		editor?.focus();
 	}
 
+	/**
+	 * Unselected-state chat scrolling (desktop, nothing selected):
+	 * smooth line/half-page steps and top/bottom jumps. The hovered
+	 * message edge (z/Z) measures in viewport space, like the
+	 * double-tap path above.
+	 */
+	function scrollChatBy(dy: number): void {
+		scrollBox?.scrollBy({ top: dy, behavior: "smooth" });
+	}
+	function scrollChatTop(): void {
+		scrollBox?.scrollTo({ top: 0, behavior: "smooth" });
+	}
+	function scrollChatBottom(): void {
+		if (scrollBox) scrollBox.scrollTo({ top: scrollBox.scrollHeight, behavior: "smooth" });
+	}
+	function scrollHoveredEdge(edge: "start" | "end"): void {
+		const el = document.getElementById(`msg-${hoveredIdx}`);
+		const box = scrollBox;
+		if (!el || !box) return;
+		const boxRect = box.getBoundingClientRect();
+		const elRect = el.getBoundingClientRect();
+		box.scrollTo({
+			top: messageEdgeScrollTop({
+				scrollTop: box.scrollTop,
+				boxTop: boxRect.top,
+				elTop: elRect.top,
+				elHeight: elRect.height,
+				viewH: box.clientHeight,
+				edge
+			}),
+			behavior: "smooth"
+		});
+	}
+	/**
+	 * Fullscreen exit for a HELD Escape (timer threshold in
+	 * scrollkeys.ts). Device-only path: the Tauri window fullscreen
+	 * (menu/green light) and the browser Fullscreen API both need a
+	 * real window — unit tests pin only the hold threshold, and this
+	 * is unverified on device (no playwright coverage for window
+	 * chrome). Failures fall through silently: there is simply no
+	 * fullscreen to exit.
+	 */
+	async function exitFullscreenFromHold(): Promise<void> {
+		try {
+			if (tauriBackendAvailable()) {
+				const win = getCurrentWindow();
+				if (await win.isFullscreen()) await win.setFullscreen(false);
+				return;
+			}
+		} catch {
+			// Fall through to the web Fullscreen API.
+		}
+		try {
+			if (document.fullscreenElement) await document.exitFullscreen();
+		} catch {
+			// Nothing fullscreen to exit.
+		}
+	}
+
 	function cycleProvider(direction: 1 | -1) {
 		const ids = listProviders(settings.customProviders).map((p) => p.id);
 		const next = (ids.indexOf(settings.activeProviderId) + direction + ids.length) % ids.length;
@@ -3532,6 +3604,11 @@
 		requestAnimationFrame(() => requestAnimationFrame(() => editor?.remeasure()));
 
 		const onKey = (event: KeyboardEvent) => {
+			// Fullscreen-hold tracking rides above every Escape path:
+			// the keydown dismiss behavior below is untouched (a tap
+			// still dismisses exactly as today); the keyup handler
+			// exits fullscreen only past the hold threshold.
+			if (event.key === "Escape" && !event.repeat) escDownAt = Date.now();
 			const inEditor = (event.target as HTMLElement | null)?.closest(".cm-content, .ta-input");
 			if ((event.metaKey || event.ctrlKey) && (event.key === "t" || event.key === "T")) {
 				// Over message text the combo feeds the translate
@@ -3984,6 +4061,38 @@
 				else enterScrollMode();
 				return;
 			}
+			if (focusMode !== "scroll" && !inEditor && !androidUI) {
+				// Desktop scrolling with nothing selected: no message
+				// selected (edit mode), no sidebar focus, no modal
+				// owning the screen, and no typing target under the
+				// key. Every existing binding above keeps its keys —
+				// this branch only claims otherwise-unbound bare keys.
+				const target = event.target as HTMLElement | null;
+				const modalOpen = shortcutsOpen || searchOpen || inspectChar;
+				const typing =
+					inEditor || target?.closest("input, textarea, select, [contenteditable]") || inSidebar;
+				if (!modalOpen && !typing && !event.metaKey && !event.ctrlKey && !event.altKey) {
+					const intent = unselectedScrollIntent(event.key, ggArmed(lastGAt, Date.now()));
+					if (intent) {
+						if (intent.kind === "gg-prefix") {
+							lastGAt = Date.now();
+						} else {
+							lastGAt = 0;
+							if (intent.kind === "line") scrollChatBy(intent.dy);
+							else if (intent.kind === "half-page" && scrollBox) {
+								scrollChatBy(halfPageDy(scrollBox.clientHeight, intent.dir));
+							} else if (intent.kind === "top") scrollChatTop();
+							else if (intent.kind === "bottom") scrollChatBottom();
+							else if (intent.kind === "hovered-edge" && hoveredIdx >= 0) {
+								scrollHoveredEdge(intent.edge);
+							} else return;
+						}
+						event.preventDefault();
+						return;
+					}
+					lastGAt = 0;
+				}
+			}
 			if (focusMode !== "scroll" || inEditor) return;
 			if (event.key === "j" || event.key === "ArrowDown") {
 				event.preventDefault();
@@ -4276,8 +4385,23 @@
 		const onAlt = (event: KeyboardEvent) => {
 			if (event.key === "Alt") altHeld = event.type === "keydown";
 		};
+		/**
+		 * Escape keyup: a HOLD past the threshold exits fullscreen; a
+		 * tap does nothing here (the keydown path above already
+		 * dismissed menus/overlays exactly as today).
+		 */
+		const onEscapeUp = (event: KeyboardEvent) => {
+			if (event.key !== "Escape") return;
+			const held = isEscapeHold(escDownAt, Date.now());
+			escDownAt = 0;
+			if (held) {
+				event.preventDefault();
+				void exitFullscreenFromHold();
+			}
+		};
 		const onBlur = () => {
 			altHeld = false;
+			escDownAt = 0;
 		};
 		// Coming back to the window lands you in the prompt (pill box when
 		// annotating), so Tab continues from there. Never yank focus out of
@@ -4366,6 +4490,7 @@
 		window.addEventListener("keydown", onKey, true);
 		window.addEventListener("keydown", onAlt);
 		window.addEventListener("keyup", onAlt);
+		window.addEventListener("keyup", onEscapeUp);
 		window.addEventListener("blur", onBlur);
 		window.addEventListener("focusin", onFocusIn);
 		window.addEventListener("mousedown", onBadgePress, true);
@@ -4404,6 +4529,7 @@
 			window.removeEventListener("keydown", onKey, true);
 			window.removeEventListener("keydown", onAlt);
 			window.removeEventListener("keyup", onAlt);
+			window.removeEventListener("keyup", onEscapeUp);
 			window.removeEventListener("blur", onBlur);
 			window.removeEventListener("focusin", onFocusIn);
 			window.removeEventListener("mousedown", onBadgePress, true);
@@ -5515,6 +5641,8 @@
 					<div><dt>Switch model / key</dt><dd>Ctrl+{altm}+← / →</dd></div>
 					<div><dt>Thinking level</dt><dd>Ctrl+{altm}+↓ / ↑ (cycles levels)</dd></div>
 					<div><dt>Scroll messages</dt><dd>J / K · gg top · G bottom · Ctrl+U / Ctrl+D skip</dd></div>
+					<div><dt>Scroll chat (nothing selected)</dt><dd>J / K · D / U fast · gg top · G bottom · z / Z hovered top / bottom</dd></div>
+					<div><dt>Exit fullscreen</dt><dd>Hold Esc (a tap still closes menus)</dd></div>
 					<div><dt>Chat list</dt><dd>{isMac ? "⌘B" : "Ctrl+B"}, then J / K · Space or L enters its prompt</dd></div>
 					<div><dt>Search chats</dt><dd>{isMac ? "⌘P" : "Ctrl+P"}</dd></div>
 					<div><dt>Newer / older chat</dt><dd>{isMac ? "⇧⌘J / ⇧⌘K" : "Ctrl+Shift+J / Ctrl+Shift+K"} (J mints one past the newest)</dd></div>
