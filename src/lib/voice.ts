@@ -271,7 +271,7 @@ export function dictateOnce(
 			const transcript = event.results?.[0]?.[0]?.transcript ?? "";
 			if (transcript.trim()) onResult(transcript);
 		};
-		recognition.onerror = (event) => onError(String(event.error || "mic error"));
+		recognition.onerror = (event) => onError(friendlyMicError(String(event.error || "mic error")));
 		recognition.onend = null;
 		recognition.start();
 		return () => {
@@ -284,4 +284,23 @@ export function dictateOnce(
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * Browser recognition error codes are terse ("network", "not-allowed"):
+ * translate them before they reach a toast. Pure and unit-tested.
+ */
+export function friendlyMicError(message: string): string {
+	if (/service-not-allowed/i.test(message)) {
+		return "Dictation is blocked in this window — it needs Chrome or Safari.";
+	}
+	if (/not-allowed|permission/i.test(message)) {
+		return "Mic permission denied — allow the microphone and try again.";
+	}
+	if (/no-speech/i.test(message)) return "Didn't catch anything — try again.";
+	if (/audio-capture|not-found|no-microphone/i.test(message)) return "No microphone found.";
+	if (/network/i.test(message)) {
+		return "Couldn't reach the transcription service — check your connection (or VPN/ad-blocker) and try again.";
+	}
+	return message;
 }

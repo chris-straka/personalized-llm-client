@@ -1947,17 +1947,8 @@
 	}
 
 	/** Raw speech-recognition errors translated into something actionable. */
-	function friendlyMicError(message: string): string {
-		if (/service-not-allowed/i.test(message)) {
-			return "Dictation is blocked in this window — it needs Chrome or Safari.";
-		}
-		if (/not-allowed|permission/i.test(message)) {
-			return "Mic permission denied — allow the microphone and try again.";
-		}
-		if (/no-speech/i.test(message)) return "Didn't catch anything — try again.";
-		if (/audio-capture|not-found|no-microphone/i.test(message)) return "No microphone found.";
-		return message;
-	}
+	// Mic errors arrive already translated (friendlyMicError in $lib/voice,
+	// mapped inside dictateOnce) — callers toast the message directly.
 
 	/**
 	 * Highlight-to-speak: only what was selected, only when asked. The quote
@@ -2007,7 +1998,7 @@
 				stopPillMic();
 			},
 			(message) => {
-				flashToast(friendlyMicError(message));
+				flashToast(message);
 				stopPillMic();
 			}
 		);
@@ -2035,7 +2026,7 @@
 				stopDictation = null;
 			},
 			(message) => {
-				flashToast(friendlyMicError(message));
+				flashToast(message);
 				dictating = false;
 				stopDictation = null;
 			}
@@ -3883,7 +3874,7 @@
 	data-shell={tauriBackendAvailable() ? "tauri" : "browser"}
 	data-android={androidUI || null}
 	data-ios={iosUI || null}
-	style="--font-scale: {settings.fontScale}; --chat-width: {androidUI ? 46 : (settings.chatWidth ?? 46)}"
+	style="--font-scale: {settings.fontScale}; --chat-width: {androidUI ? 46 : (settings.chatWidth ?? 36)}"
 >
 	<aside class:collapsed={settings.sidebarCollapsed} inert={settings.sidebarCollapsed} data-fade-scroll>
 		<div class="side-head" data-tauri-drag-region aria-hidden="true" onmousedown={dragWindow} ondblclick={zoomWindow}>
@@ -6106,8 +6097,8 @@
 		Beats the centered-column rule's width:100% on specificity;
 		margin-right keeps the right edge on the chat-width column. */
 		width: fit-content;
-		max-width: min(85%, calc(var(--chat-width, 46) * 1rem));
-		margin-right: max(0rem, calc((100% - var(--chat-width, 46) * 1rem) / 2));
+		max-width: min(85%, calc(var(--chat-width, 36) * 1rem));
+		margin-right: max(0rem, calc((100% - var(--chat-width, 36) * 1rem) / 2));
 		/* No background or padding here: the bubble wraps the text only,
 		so the action row below sits outside it. */
 		padding: 0;
@@ -6125,7 +6116,10 @@
 		padding: 0.45rem 1rem 0.55rem;
 		text-align: left;
 		width: fit-content;
-		max-width: 85%;
+		/* 100%, not 85%: the article already caps at min(85%, chat-width),
+		and 85% here resolves against the shrink-wrapped article itself —
+		squeezing short prompts into an early wrap with dead space left. */
+		max-width: 100%;
 		margin-left: auto;
 	}
 	/* Structured content stays left-aligned inside own messages: code
@@ -7518,21 +7512,21 @@
 		color: #f2f2f7 !important;
 	}
 	/* Centered reading column on wide screens (DeepSeek-web rhythm).
-	The cap rides --chat-width off .app (desktop slider, 46 = the legacy
+	The cap rides --chat-width off .app (desktop slider, 36 = the default
 	fixed width); the fallback keeps phones and older saves identical. */
 	article,
 	.empty-state,
 	.sending {
 		align-self: center;
 		width: 100%;
-		max-width: min(85%, calc(var(--chat-width, 46) * 1rem));
+		max-width: min(85%, calc(var(--chat-width, 36) * 1rem));
 		box-sizing: border-box;
 	}
 	.prompt {
-		/* Pinned to the legacy width: the composer never grows with the
+		/* Pinned to the default width: the composer never grows with the
 		chat slider, but still shrinks on narrow columns. */
 		width: calc(100% - 2.4rem);
-		max-width: min(calc(var(--chat-width, 46) * 1rem), 46rem);
+		max-width: min(calc(var(--chat-width, 36) * 1rem), 36rem);
 		margin-left: auto;
 		margin-right: auto;
 		box-sizing: border-box;
@@ -7543,7 +7537,7 @@
 	.translate-panel,
 	.error-banner {
 		width: calc(100% - 2.4rem);
-		max-width: calc(var(--chat-width, 46) * 1rem);
+		max-width: calc(var(--chat-width, 36) * 1rem);
 		margin-left: auto;
 		margin-right: auto;
 		box-sizing: border-box;

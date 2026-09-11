@@ -12,7 +12,8 @@ import {
 	stopSpeaking,
 	isSpeaking,
 	micAvailable,
-	dictateOnce
+	dictateOnce,
+	friendlyMicError
 } from "./voice";
 import { ttsLangFor } from "./reading";
 
@@ -113,5 +114,20 @@ describe("effectiveSpeechLang", () => {
 	});
 	it("never routes on an unloaded inventory", () => {
 		expect(effectiveSpeechLang("la", [])).toBe("la");
+	});
+});
+
+describe("friendlyMicError", () => {
+	it("translates the network code instead of leaking it", () => {
+		expect(friendlyMicError("network")).toMatch(/transcription service/i);
+	});
+	it("keeps the existing mappings", () => {
+		expect(friendlyMicError("not-allowed")).toMatch(/permission/i);
+		expect(friendlyMicError("no-speech")).toMatch(/didn't catch/i);
+		expect(friendlyMicError("audio-capture")).toMatch(/no microphone/i);
+		expect(friendlyMicError("service-not-allowed")).toMatch(/Chrome/i);
+	});
+	it("passes unknown messages through", () => {
+		expect(friendlyMicError("weird-code")).toBe("weird-code");
 	});
 });

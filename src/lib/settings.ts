@@ -139,7 +139,7 @@ export const FONT_SCALE_MIN = 0.5;
 export const FONT_SCALE_MAX = 4;
 
 /** Desktop chat-column width in rem: 46 is the legacy fixed width. */
-export const CHAT_WIDTH_DEFAULT = 46;
+export const CHAT_WIDTH_DEFAULT = 36;
 export const CHAT_WIDTH_MIN = 28;
 export const CHAT_WIDTH_MAX = 80;
 

@@ -72,8 +72,8 @@ describe("settings", () => {
 	});
 
 	it("defaults chat width to the legacy column and clamps strays", () => {
-		expect(defaultSettings().chatWidth).toBe(46);
-		expect(CHAT_WIDTH_DEFAULT).toBe(46);
+		expect(defaultSettings().chatWidth).toBe(36);
+		expect(CHAT_WIDTH_DEFAULT).toBe(36);
 		const s = blankSettings();
 		delete (s as unknown as Record<string, unknown>).chatWidth;
 		saveSettings(s, memoryStore);
