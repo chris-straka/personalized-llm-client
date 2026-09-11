@@ -139,6 +139,14 @@
 		type LocalAid
 	} from "$lib/reading";
 	import { isFuriganaCached } from "$lib/furigana";
+	import { buildSearchDocs, chatMatchesQuery, type SearchHit } from "$lib/chatSearch";
+	import { ChatSearchStore, createSearchWorker } from "$lib/chatSearchStore";
+	import {
+		clipboardReadAvailable,
+		readClipboardImageFiles,
+		type ClipboardItemLike
+	} from "$lib/touchPaste";
+	import { isKeyboardOpen, keyboardOverlapPx } from "$lib/viewportReflow";
 	import {
 		speakText,
 		speakMultilingual,
@@ -243,6 +251,21 @@
 			annotations,
 			chatState.chats.map((c) => c.id)
 		);
+	});
+	/**
+	 * Search index stays fresh: any chat/message/draft change re-indexes
+	 * (debounced) into the Worker + IndexedDB snapshot. The synchronous
+	 * reads subscribe the effect; the schedule call is the debounced
+	 * side effect.
+	 */
+	$effect(() => {
+		const fingerprint = chatState.chats
+			.map((c) => `${c.id}:${c.messages.length}:${c.messages.map((m) => m.content.length).join(",")}`)
+			.join("|");
+		const draftCount = annotations.length;
+		void fingerprint;
+		void draftCount;
+		scheduleSearchIndex();
 	});
 	/**
 	 * Annotation being composed (comment pill open, not yet submitted):
@@ -356,8 +379,28 @@
 	});
 	/** Keyboard cursor over the sidebar chat list (-1 = follow mouse). */
 	let sideIdx = -1;
+	/** Sidebar chat-list filter text (mobile swipe opens the list on it). */
+	let sideSearch = $state("");
+	/** Sidebar search input (tapping it focuses with the keyboard up). */
+	let sideSearchEl: HTMLInputElement | undefined = $state();
 	/** Last lone "g" timestamp (gg hops to the top of history). */
 	let lastGAt = 0;
+	/**
+	 * Command palette (Ctrl+P / Cmd+P): full-text search across chats
+	 * and annotations. Null when closed.
+	 */
+	let searchOpen = $state(false);
+	let searchQuery = $state("");
+	let searchHits = $state<SearchHit[]>([]);
+	let searchBusy = $state(false);
+	let searchCursor = $state(0);
+	let searchInputEl: HTMLInputElement | undefined = $state();
+	/** Search documents snapshot (Worker + IndexedDB, in-memory fallback). */
+	let searchStore: ChatSearchStore | null = null;
+	let searchIndexTimer: ReturnType<typeof setTimeout> | null = null;
+	let searchQueryTimer: ReturnType<typeof setTimeout> | null = null;
+	/** Touch paste-images in flight (Async Clipboard read). */
+	let pasting = $state(false);
 	let editingId: AnnotationId | null = $state(null);
 	let editDraft = $state("");
 	/** Own message loaded into the composer for editing (null when the
@@ -615,6 +658,189 @@
 		// dismisses the settings panel (and vice versa below).
 		if (!settings.sidebarCollapsed && androidUI && settingsOpen) settingsOpen = false;
 	}
+
+	/**
+	 * Sidebar chat list filtered by the sidebar search box. Matches the
+	 * chat label plus every message body (substring per token), so a
+	 * swipe-opened list narrows as you type.
+	 */
+	function sideVisibleChats(): (typeof chatState.chats)[number][] {
+		const query = sideSearch.trim();
+		if (!query) return chatState.chats;
+		return chatState.chats.filter((item) =>
+			chatMatchesQuery(
+				chatLabel(item.createdAt, visibleMessageCount(chatState, item)),
+				item.messages.map((m) => m.content),
+				query
+			)
+		);
+	}
+
+	/** Focus the sidebar search box (tap path: keyboard comes up). */
+	function focusSideSearch(): void {
+		sideSearchEl?.focus();
+	}
+
+	/**
+	 * Full-text search palette (Ctrl+P / Cmd+P): ranks chats, messages,
+	 * and annotation drafts through the index Worker (IndexedDB
+	 * snapshot, in-memory fallback where either is unavailable).
+	 */
+	function ensureSearchStore(): ChatSearchStore {
+		if (!searchStore) {
+			let factory: (() => Worker) | undefined;
+			try {
+				factory = createSearchWorker;
+				// Probe first: constructing here throws in runtimes
+				// without Workers, and the store falls back silently.
+				const probe = factory();
+				probe.terminate();
+			} catch {
+				factory = undefined;
+			}
+			searchStore = new ChatSearchStore(factory);
+			void searchStore.restore();
+		}
+		return searchStore;
+	}
+
+	function currentSearchDocs(): Parameters<typeof buildSearchDocs>[0] {
+		return chatState.chats.map((c) => ({
+			id: c.id,
+			createdAt: c.createdAt,
+			messages: c.messages.map((m) => ({ id: m.id, content: m.content }))
+		}));
+	}
+
+	function scheduleSearchIndex(): void {
+		if (searchIndexTimer) clearTimeout(searchIndexTimer);
+		searchIndexTimer = setTimeout(() => {
+			searchIndexTimer = null;
+			try {
+				const seen: string[] = [];
+				const anns: Parameters<typeof buildSearchDocs>[1] = [];
+				for (const chat of chatState.chats) {
+					let drafts: Annotation[] = [];
+					try {
+						drafts =
+							chat.id === chatState.activeChatId
+								? annotations
+								: loadDraftAnnotations(chat.id);
+					} catch {
+						drafts = [];
+					}
+					for (const ann of drafts) {
+						const key = `${chat.id}:${ann.id}`;
+						if (seen.includes(key)) continue;
+						seen.push(key);
+						anns.push({
+							chatId: chat.id,
+							messageId: ann.messageId,
+							quote: ann.quote,
+							comment: ann.comment
+						});
+					}
+				}
+				void ensureSearchStore().index(buildSearchDocs(currentSearchDocs(), anns));
+			} catch {
+				// Search never breaks the chat: stale snapshot stays live.
+			}
+		}, 500);
+	}
+
+	function openSearch(): void {
+		searchOpen = true;
+		searchCursor = 0;
+		scheduleSearchIndex();
+		requestAnimationFrame(() => searchInputEl?.focus());
+	}
+
+	function closeSearch(): void {
+		searchOpen = false;
+		searchQuery = "";
+		searchHits = [];
+		searchBusy = false;
+		if (searchQueryTimer) {
+			clearTimeout(searchQueryTimer);
+			searchQueryTimer = null;
+		}
+		editor?.focus();
+	}
+
+	function runSearchQuery(): void {
+		if (searchQueryTimer) clearTimeout(searchQueryTimer);
+		const query = searchQuery;
+		if (!query.trim()) {
+			searchHits = [];
+			searchBusy = false;
+			return;
+		}
+		searchBusy = true;
+		searchQueryTimer = setTimeout(() => {
+			searchQueryTimer = null;
+			void ensureSearchStore()
+				.query(query, 30)
+				.then((hits) => {
+					searchHits = hits;
+					searchCursor = 0;
+					searchBusy = false;
+				})
+				.catch(() => {
+					searchHits = [];
+					searchBusy = false;
+				});
+		}, 120);
+	}
+
+	/** Jump to a palette hit: its chat, scrolled to its message. */
+	function enterSearchHit(hit: SearchHit): void {
+		const chat = chatState.chats.find((c) => c.id === hit.doc.chatId);
+		if (!chat) return;
+		previewChatId = null;
+		selectChat(chatState, chat.id);
+		searchOpen = false;
+		searchQuery = "";
+		searchHits = [];
+		if (hit.doc.msgId) {
+			const index = chat.messages.findIndex((m) => m.id === hit.doc.msgId);
+			if (index >= 0) {
+				requestAnimationFrame(() => {
+					document
+						.getElementById(`msg-${index}`)
+						?.scrollIntoView({ block: "center", behavior: "smooth" });
+				});
+			}
+		}
+		editor?.focus();
+	}
+
+	function moveSearchCursor(delta: 1 | -1): void {
+		if (searchHits.length === 0) return;
+		searchCursor =
+			((searchCursor + delta) % searchHits.length + searchHits.length) % searchHits.length;
+	}
+
+	/**
+	 * Touch paste-images button: reads images off the Async Clipboard
+	 * into the existing attachments path (`addFiles`). Text-only or
+	 * denied clipboards toast instead of failing silently.
+	 */
+	async function pasteImagesFromClipboard(): Promise<void> {
+		if (pasting) return;
+		pasting = true;
+		try {
+			const files = await readClipboardImageFiles(() =>
+				(navigator.clipboard as unknown as { read: () => Promise<ClipboardItemLike[]> }).read()
+			);
+			await addFiles(files);
+		} catch (error) {
+			attachError = error instanceof Error ? error.message : String(error);
+		} finally {
+			pasting = false;
+		}
+	}
+
+
 
 	/** Open the settings panel, dismissing the chats list on touch. */
 	function openSettingsPanel(): void {
@@ -2733,9 +2959,7 @@
 		}
 		// Edge swipes toggle the sidebars on touch screens (Android
 		// milestone): rightward from the left edge for chats, leftward
-		// from the right edge for settings — except on Android, where a
-		// two-finger double-tap owns the chats sidebar and rightward
-		// strokes only dismiss settings. Toggle, not open-only: with
+		// from the right edge for settings. Toggle, not open-only: with
 		// no keyboard or Esc key, a swipe is the touch user's only way
 		// back out. Multi-touch cancels, and the mostly-horizontal rule
 		// keeps scrolling and code-block pans to themselves. Passive:
@@ -2764,9 +2988,10 @@
 		function applyEdgeTarget(target: EdgePanel | null): void {
 			if (target === "chats") {
 				if (settingsOpen) toggleSettingsPanel();
-				// Android: two-finger double-tap owns the sidebar — a
-				// rightward stroke only ever dismisses settings.
-				else if (!androidUI) toggleSidebar();
+				// Touch: a left-to-right swipe opens the chats sidebar
+				// (with its search box); the toggle still dismisses via
+				// the same stroke when already open.
+				else toggleSidebar();
 			} else if (target === "settings") {
 				// A leftward stroke never closes settings once open —
 				// only a rightward stroke (the "chats" branch) dismisses.
@@ -3145,6 +3370,28 @@
 				event.preventDefault();
 				event.stopPropagation();
 				shortcutsOpen = false;
+				return;
+			}
+			if (event.key === "Escape" && searchOpen) {
+				// The search palette wins Esc next, even from its input.
+				event.preventDefault();
+				event.stopPropagation();
+				closeSearch();
+				return;
+			}
+			if (
+				(event.metaKey || event.ctrlKey) &&
+				!event.altKey &&
+				!event.shiftKey &&
+				event.code === "KeyP"
+			) {
+				// Full-text search palette across chats/annotations.
+				// Browsers reserve Ctrl+P for print and may keep it; the
+				// shell owns the combo and always delivers it.
+				event.preventDefault();
+				event.stopPropagation();
+				if (searchOpen) closeSearch();
+				else openSearch();
 				return;
 			}
 			if (event.key === "Escape" && editingMsgId) {
@@ -3898,21 +4145,28 @@
 				// viewport doesn't shrink, so the full-height flex
 				// column (and the latest messages) slides under the
 				// keyboard with no way to reach it. Pin .app to the
-				// visual height while the keyboard eats 100px+, and
-				// everything reflows into the visible area instead.
-				// Modern Chrome tracks via the viewport meta, so the
-				// heights agree and this stays inert — it is the
-				// pre-108 fallback. Desktop and keyboard-closed phones
-				// keep stylesheet height.
+				// visual height while the keyboard is open, and expose
+				// the overlap as --kb-height so the composer reflows
+				// just above it. Modern Chrome tracks via the viewport
+				// meta, so the heights agree and this stays inert — it
+				// is the pre-108 fallback. Desktop and keyboard-closed
+				// phones keep stylesheet height.
 				if (androidUI && appEl && window.visualViewport) {
-					const visible = window.visualViewport.height;
-					appEl.style.height =
-						visible < window.innerHeight - 100 ? `${visible}px` : "";
+					const vv = window.visualViewport;
+					const overlap = keyboardOverlapPx(window.innerHeight, vv.height, vv.offsetTop);
+					if (isKeyboardOpen(window.innerHeight, vv.height, vv.offsetTop)) {
+						appEl.style.height = `${vv.height}px`;
+						appEl.style.setProperty("--kb-height", `${overlap}px`);
+					} else {
+						appEl.style.height = "";
+						appEl.style.setProperty("--kb-height", "0px");
+					}
 				}
 				editor?.remeasure();
 			}, 250);
 		};
 		window.visualViewport?.addEventListener("resize", onViewportResize);
+		window.visualViewport?.addEventListener("scroll", onViewportResize);
 		void listenMenuActions();
 		window.addEventListener("keydown", onKey, true);
 		window.addEventListener("keydown", onAlt);
@@ -3949,6 +4203,7 @@
 		window.addEventListener("contextmenu", onContextMenu, true);
 		return () => {
 			window.visualViewport?.removeEventListener("resize", onViewportResize);
+			window.visualViewport?.removeEventListener("scroll", onViewportResize);
 			if (viewportTimer !== undefined) window.clearTimeout(viewportTimer);
 			window.removeEventListener("focus", onWinFocus);
 			window.removeEventListener("keydown", onKey, true);
@@ -3992,8 +4247,36 @@
 	<aside class:collapsed={settings.sidebarCollapsed} inert={settings.sidebarCollapsed} data-fade-scroll>
 		<div class="side-head" data-tauri-drag-region aria-hidden="true" onmousedown={dragWindow} ondblclick={zoomWindow}>
 		</div>
+		<!-- Sidebar search: a swipe left-to-right opens the list on this
+		box; tapping it focuses with the keyboard up (a real input, never
+		auto-focused on open, so the keyboard only comes on tap). -->
+		<div class="side-search-wrap">
+			<input
+				type="search"
+				class="side-search"
+				bind:this={sideSearchEl}
+				bind:value={sideSearch}
+				placeholder="Search chats"
+				aria-label="Search chats"
+				inputmode="search"
+				enterkeyhint="search"
+				autocomplete="off"
+				onclick={() => focusSideSearch()}
+			/>
+			{#if sideSearch}
+				<button
+					type="button"
+					class="side-search-clear"
+					aria-label="Clear chat search"
+					onclick={() => {
+						sideSearch = "";
+						focusSideSearch();
+					}}>×</button
+				>
+			{/if}
+		</div>
 		<ul onmouseleave={() => (previewChatId = null)}>
-			{#each chatState.chats as item (item.id)}
+			{#each sideVisibleChats() as item (item.id)}
 				<li>
 					<button
 						type="button"
@@ -4653,6 +4936,20 @@
 				>
 					<ActionIcon kind="attach" />
 				</button>
+				{#if androidUI && clipboardReadAvailable()}
+					<!-- Touch paste-images: no Ctrl+V on a phone, so the
+					Async Clipboard feeds the same attachments path. -->
+					<button
+						type="button"
+						class="paste-btn"
+						title="Paste images from the clipboard"
+						aria-label="Paste images from the clipboard"
+						disabled={pasting}
+						onclick={() => void pasteImagesFromClipboard()}
+					>
+						<ActionIcon kind="paste" />
+					</button>
+				{/if}
 				{#if canMic && settings.micEnabled}
 					<button
 						type="button"
@@ -4929,7 +5226,7 @@
 					<!-- Android milestone: key chords don't exist on a phone,
 					so the same modal teaches the touch equivalents. -->
 					<dl class="keys">
-						<div><dt>Chats list</dt><dd>Two-finger double-tap</dd></div>
+						<div><dt>Chats list</dt><dd>Swipe right from the left edge or two-finger double-tap</dd></div>
 					<div><dt>Newer / older chat</dt><dd>Two-finger swipe right / left</dd></div>
 					<div><dt>Delete current chat</dt><dd>Double three-finger tap</dd></div>
 						<div><dt>Annotate</dt><dd>Select text and tap Annotate in the prompt</dd></div>
@@ -4945,6 +5242,7 @@
 					<div><dt>Thinking level</dt><dd>Ctrl+{altm}+↓ / ↑ (cycles levels)</dd></div>
 					<div><dt>Scroll messages</dt><dd>J / K · gg top · G bottom · Ctrl+U / Ctrl+D skip</dd></div>
 					<div><dt>Chat list</dt><dd>{isMac ? "⌘B" : "Ctrl+B"}, then J / K · Space or L enters its prompt</dd></div>
+					<div><dt>Search chats</dt><dd>{isMac ? "⌘P" : "Ctrl+P"}</dd></div>
 					<div><dt>Newer / older chat</dt><dd>{isMac ? "⇧⌘J / ⇧⌘K" : "Ctrl+Shift+J / Ctrl+Shift+K"} (J mints one past the newest)</dd></div>
 					<div><dt>Voice readback on/off</dt><dd>Ctrl+{altm}+S</dd></div>
 					<div><dt>Speak hovered word</dt><dd>Right click word</dd></div>
@@ -4964,6 +5262,72 @@
 					<div><dt>Chat width + / −</dt><dd>⇧{mod}+ / ⇧{mod}−</dd></div>
 				</dl>
 				{/if}
+			</div>
+		</div>
+	{/if}
+
+	{#if searchOpen}
+		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+		<!-- Command palette: full-text search across chats/annotations. -->
+		<div
+			class="modal-veil"
+			onclick={(e) => {
+				if (e.target === e.currentTarget) closeSearch();
+			}}
+		>
+			<div class="modal search-palette" role="dialog" aria-modal="true" aria-label="Search chats">
+				<div class="modal-head">
+					<input
+						type="search"
+						class="search-input"
+						bind:this={searchInputEl}
+						bind:value={searchQuery}
+						oninput={runSearchQuery}
+						placeholder="Search chats and annotations"
+						aria-label="Search chats and annotations"
+						inputmode="search"
+						enterkeyhint="search"
+						autocomplete="off"
+						onkeydown={(e) => {
+							if (e.key === "ArrowDown") {
+								e.preventDefault();
+								moveSearchCursor(1);
+							} else if (e.key === "ArrowUp") {
+								e.preventDefault();
+								moveSearchCursor(-1);
+							} else if (e.key === "Enter") {
+								e.preventDefault();
+								const hit = searchHits[searchCursor];
+								if (hit) enterSearchHit(hit);
+							}
+						}}
+					/>
+					<button type="button" aria-label="Close search" title="Close (Esc)" onclick={closeSearch}>
+						×
+					</button>
+				</div>
+				<div class="search-results" data-fade-scroll role="listbox" aria-label="Search results">
+					{#if searchBusy}
+						<p class="search-status" role="status">Searching…</p>
+					{:else if searchQuery.trim() && searchHits.length === 0}
+						<p class="search-status">No matches.</p>
+					{:else}
+						{#each searchHits as hit, n (hit.doc.chatId + (hit.doc.msgId ?? "") + hit.doc.kind)}
+							<button
+								type="button"
+								role="option"
+								aria-selected={n === searchCursor}
+								class="search-hit"
+								class:cursor={n === searchCursor}
+								onmouseenter={() => (searchCursor = n)}
+								onclick={() => enterSearchHit(hit)}
+							>
+								<span class="search-kind">{hit.doc.kind}</span>
+								<span class="search-snippet">{hit.snippet}</span>
+							</button>
+						{/each}
+					{/if}
+				</div>
 			</div>
 		</div>
 	{/if}
@@ -5205,6 +5569,32 @@
 		a grabbable drag strip where the button row was. */
 		min-height: 1.25rem;
 	}
+	/* Sidebar search box (search-mobile): full-width field under the
+	drag strip; the clear button sits inside on the right. */
+	.side-search-wrap {
+		position: relative;
+		margin: 0.25rem 0 0.35rem;
+	}
+	.side-search {
+		width: 100%;
+		font: inherit;
+		font-size: 0.82rem;
+		padding: 0.4rem 1.6rem 0.4rem 0.6rem;
+		border: 1px solid #c7c7cc;
+		border: 1px solid var(--line);
+		border-radius: 8px;
+		background: #fff;
+		background: var(--field);
+		color: inherit;
+	}
+	.side-search-clear {
+		position: absolute;
+		right: 0.15rem;
+		top: 50%;
+		transform: translateY(-50%);
+		border: none;
+		min-width: 1.5rem;
+	}
 	aside {
 		/* One duration for slide and fade: the old 0.12s opacity
 		finished first, so closes read as a fade while the slide ran
@@ -5308,6 +5698,79 @@
 			border-color 0.15s ease,
 			background-color 0.15s ease,
 			color 0.15s ease;
+	}
+	/* Search palette (search-mobile): pinned to the top so the phone
+	keyboard never covers the input; hits read as full-width rows. */
+	.search-palette {
+		align-self: flex-start;
+		margin-top: 8vh;
+		margin-top: 8dvh;
+		padding: 0.7rem 0.9rem 0.8rem;
+	}
+	.search-palette .modal-head {
+		align-items: center;
+	}
+	.search-input {
+		flex: 1;
+		min-width: 0;
+		font: inherit;
+		font-size: 0.95rem;
+		padding: 0.5rem 0.7rem;
+		border: 1px solid #c7c7cc;
+		border: 1px solid var(--line);
+		border-radius: 8px;
+		background: #fff;
+		background: var(--field);
+		color: inherit;
+	}
+	.search-results {
+		max-height: 50vh;
+		max-height: 50dvh;
+		overflow-y: auto;
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+	}
+	.search-hit {
+		display: flex;
+		align-items: baseline;
+		gap: 0.6rem;
+		text-align: left;
+		font: inherit;
+		font-size: 0.85rem;
+		padding: 0.45rem 0.6rem;
+		border: 1px solid transparent;
+		border-radius: 8px;
+		background: transparent;
+		color: inherit;
+		cursor: pointer;
+	}
+	.search-hit.cursor {
+		background: #eef4ff;
+		background: var(--hl);
+		border-color: #e5e5ea;
+		border-color: var(--line-soft);
+	}
+	.search-kind {
+		flex: none;
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: #6e6e73;
+		color: var(--dim);
+	}
+	.search-snippet {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.search-status {
+		font-size: 0.85rem;
+		color: #6e6e73;
+		color: var(--dim);
+		padding: 0.6rem;
+		margin: 0;
 	}
 	.modal-head button:hover {
 		border-color: #1c1c1e;
@@ -7439,6 +7902,7 @@
 		gap: 0.35rem;
 	}
 	.attach-btn,
+	.paste-btn,
 	.voice-float,
 	.mic-btn {
 		display: inline-flex;
@@ -7451,6 +7915,10 @@
 		cursor: pointer;
 		padding: 0.2rem;
 		transition: color 0.18s ease;
+	}
+	.paste-btn:disabled {
+		opacity: 0.4;
+		cursor: default;
 	}
 	/* iOS selection dock: the Annotate control lives in the composer
 	tools while a highlight is up (a floating menu fights the native
@@ -7468,6 +7936,7 @@
 		white-space: nowrap;
 	}
 	.attach-btn:hover,
+	.paste-btn:hover,
 	.voice-float:hover,
 	.wp-jump:hover,
 	.mic-btn:hover {
