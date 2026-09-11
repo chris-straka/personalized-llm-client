@@ -131,12 +131,12 @@ describe("friendlyMicError", () => {
 		expect(friendlyMicError("weird-code")).toBe("weird-code");
 	});
 	it("names offline distinctly from unreachable", () => {
-		const was = Object.getOwnPropertyDescriptor(window.navigator, "onLine");
 		Object.defineProperty(window.navigator, "onLine", { value: false, configurable: true });
 		try {
 			expect(friendlyMicError("network")).toMatch(/offline/i);
 		} finally {
-			if (was) Object.defineProperty(window.navigator, "onLine", was);
+			// Remove the own override so the prototype getter shines through again.
+			delete (window.navigator as unknown as Record<string, unknown>).onLine;
 		}
 		expect(friendlyMicError("network")).toMatch(/transcription service/i);
 	});
