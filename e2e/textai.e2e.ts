@@ -32,6 +32,9 @@ test("chat switching lands on the target chat", async ({ page }) => {
 	await seedChat(page, [{ role: "user", content: "first chat marker" }]);
 	await page.goto("/");
 	await expect(page.locator(".hero")).toBeHidden({ timeout: 60_000 });
+	await page.locator(".cm-content").click();
+	await page.keyboard.press("Meta+b");
+	await expect(page.locator("aside").first()).not.toHaveClass(/collapsed/);
 	await page.locator('button[aria-label="New chat"]').click();
 	await expect(page.locator(".hero")).toBeVisible();
 	const rows = page.locator("aside ul li button.side-chat");
