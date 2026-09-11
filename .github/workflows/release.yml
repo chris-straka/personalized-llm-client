@@ -27,7 +27,10 @@ name: release
 # concurrent jobs uploading to the same draft silently lose files (the
 # Intel .dmg, both Linux .sigs, and the x64 Windows .sig all uploaded
 # "successfully" yet never landed). Every job here runs only after its
-# predecessor, so exactly one writer touches the draft at a time. A shared
+# predecessor, so exactly one writer touches the draft at a time. The tail is verify-release (fails the run on any
+# missing file or updater platform), then publish-release (auto-publishes
+# the verified draft), then prune-old-releases (deletes everything older
+# than the previous release). A shared
 # `concurrency` group was tried first and made it worse: GitHub cancels
 # queued runs in the group instead of queueing them, which killed whole
 # platform builds. The `needs` chain below is the mechanism that works.
@@ -341,7 +344,7 @@ jobs:
   # fallback). Runs last so it can never endanger the current artifacts;
   # a prune failure goes red without touching the verified release.
   prune-old-releases:
-    needs: [verify-release]
+    needs: [publish-release]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -374,3 +377,17 @@ jobs:
               )
           print("Prune done.")
           EOF
+
+  # Solo-user convenience: publish automatically once verified. This repo
+  # has one user, so no review gate is needed -- verify-release is the
+  # gate. Publishing flips Latest to this tag, which the updater reads.
+  publish-release:
+    needs: [verify-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the verified draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false
