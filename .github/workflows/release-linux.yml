@@ -21,6 +21,12 @@ on:
     tags:
       - "v*"
 
+# Shared with release.yml / release-windows.yml: tag builds serialize so
+# concurrent jobs never race draft creation and asset uploads (v0.2.2
+# lost 6 files that way). This file holds one job; nothing to chain here.
+concurrency:
+  group: release-${{ github.ref }}
+
 jobs:
   release-linux:
     runs-on: ubuntu-22.04
@@ -76,3 +82,28 @@ jobs:
             src-tauri/target/release/bundle/appimage/*.AppImage
             src-tauri/target/release/bundle/appimage/*.AppImage.tar.gz
             src-tauri/target/release/bundle/appimage/*.AppImage.tar.gz.sig
+
+  # Durable gate for the v0.2.2 asset loss: fail loudly if any Linux file
+  # this pipeline builds is missing from the draft. (GitHub serves spaces
+  # in bundle names as dots; match the served names.)
+  verify-linux-assets:
+    needs: [release-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Verify Linux assets landed on the draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          ASSETS="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')"
+          missing=0
+          for f in \
+            "Ccez.LLM_${VER}_amd64.deb" \
+            "Ccez.LLM_${VER}_amd64.deb.sig" \
+            "Ccez.LLM_${VER}_amd64.AppImage" \
+            "Ccez.LLM_${VER}_amd64.AppImage.sig"; do
+            echo "$ASSETS" | grep -qxF "$f" || { echo "MISSING: $f"; missing=1; }
+          done
+          exit $missing

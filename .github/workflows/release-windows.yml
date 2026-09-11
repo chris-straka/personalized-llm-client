@@ -19,9 +19,18 @@ on:
     tags:
       - "v*"
 
+# Shared with release.yml / release-linux.yml: tag builds serialize so
+# concurrent jobs never race draft creation and asset uploads (v0.2.2
+# lost 6 files that way).
+concurrency:
+  group: release-${{ github.ref }}
+
 jobs:
   release-windows:
     strategy:
+      # One arch at a time: the x64 and ARM64 jobs share this draft, and
+      # parallel uploads to it lost the x64 signature in v0.2.2.
+      max-parallel: 1
       matrix:
         include:
           # x64: the mainstream Windows install base.
@@ -80,3 +89,28 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.nsis.zip
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.nsis.zip.sig
+
+  # Durable gate for the v0.2.2 asset loss: fail loudly if any Windows
+  # file this pipeline builds is missing from the draft. (GitHub serves
+  # spaces in bundle names as dots; match the served names.)
+  verify-windows-assets:
+    needs: [release-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Verify Windows assets landed on the draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          ASSETS="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')"
+          missing=0
+          for f in \
+            "Ccez.LLM_${VER}_x64-setup.exe" \
+            "Ccez.LLM_${VER}_x64-setup.exe.sig" \
+            "Ccez.LLM_${VER}_arm64-setup.exe" \
+            "Ccez.LLM_${VER}_arm64-setup.exe.sig"; do
+            echo "$ASSETS" | grep -qxF "$f" || { echo "MISSING: $f"; missing=1; }
+          done
+          exit $missing
