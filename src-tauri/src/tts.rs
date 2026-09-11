@@ -662,7 +662,17 @@ pub fn tts_supported() -> bool {
     return imp::supported();
     #[cfg(target_os = "android")]
     return super::tts_android::supported();
-    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
+    #[cfg(target_os = "windows")]
+    return super::tts_windows::tts_supported();
+    #[cfg(target_os = "linux")]
+    return super::tts_linux::tts_supported();
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "android",
+        target_os = "windows",
+        target_os = "linux"
+    )))]
     return false;
 }
 
@@ -684,7 +694,17 @@ pub fn tts_speak(
     return imp::speak(&app, text, lang, voice);
     #[cfg(target_os = "android")]
     return super::tts_android::speak(&app, text, lang, voice);
-    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
+    #[cfg(target_os = "windows")]
+    return super::tts_windows::tts_speak(app, text, lang, voice);
+    #[cfg(target_os = "linux")]
+    return super::tts_linux::tts_speak(app, text, lang, voice);
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "android",
+        target_os = "windows",
+        target_os = "linux"
+    )))]
     {
         let _ = (app, text, lang, voice);
         return Err("native TTS requires macOS or iOS".into());
@@ -698,7 +718,17 @@ pub fn tts_stop(app: AppHandle) -> Result<(), String> {
     return imp::stop(&app);
     #[cfg(target_os = "android")]
     return super::tts_android::stop(&app);
-    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
+    #[cfg(target_os = "windows")]
+    return super::tts_windows::tts_stop(app);
+    #[cfg(target_os = "linux")]
+    return super::tts_linux::tts_stop(app);
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "android",
+        target_os = "windows",
+        target_os = "linux"
+    )))]
     {
         let _ = app;
         return Err("native TTS requires macOS or iOS".into());
@@ -728,7 +758,17 @@ pub fn tts_voices(app: AppHandle) -> Result<Vec<imp::NativeVoice>, String> {
     return imp::voices(&app);
     #[cfg(target_os = "android")]
     return super::tts_android::voices(&app);
-    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
+    #[cfg(target_os = "windows")]
+    return super::tts_windows::tts_voices(app);
+    #[cfg(target_os = "linux")]
+    return super::tts_linux::tts_voices(app);
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "android",
+        target_os = "windows",
+        target_os = "linux"
+    )))]
     {
         let _ = app;
         return Err("native TTS requires macOS or iOS".into());
@@ -736,8 +776,8 @@ pub fn tts_voices(app: AppHandle) -> Result<Vec<imp::NativeVoice>, String> {
 }
 
 // The stub build has no `imp` module; the error type must still name a
-// concrete serializable type. (Android reuses the stub shape and fills it
-// from the engine; hence pub(crate).)
+// concrete serializable type. (Android/Windows/Linux reuse the stub
+// shape and fill it from their engines; hence pub(crate).)
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
 pub(crate) mod imp {
     #[derive(Clone, serde::Serialize)]
