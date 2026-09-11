@@ -6,6 +6,9 @@ import {
 	saveSettings,
 	memoryStore,
 	DEFAULT_SYSTEM_PROMPT,
+	CHAT_WIDTH_DEFAULT,
+	CHAT_WIDTH_MAX,
+	CHAT_WIDTH_MIN,
 	activeThinkingId,
 	effectiveSystemPrompt,
 	systemLocale,
@@ -55,6 +58,42 @@ describe("settings", () => {
 		kept.fontScale = 1.2;
 		saveSettings(kept, memoryStore);
 		expect(loadSettings(memoryStore).fontScale).toBe(1.2);
+	});
+
+	it("persists desktop text size up to 400% and resets strays", () => {
+		const max = blankSettings();
+		max.fontScale = 4;
+		saveSettings(max, memoryStore);
+		expect(loadSettings(memoryStore).fontScale).toBe(4);
+		const over = blankSettings();
+		over.fontScale = 4.5;
+		saveSettings(over, memoryStore);
+		expect(loadSettings(memoryStore).fontScale).toBe(1);
+	});
+
+	it("defaults chat width to the legacy column and clamps strays", () => {
+		expect(defaultSettings().chatWidth).toBe(46);
+		expect(CHAT_WIDTH_DEFAULT).toBe(46);
+		const s = blankSettings();
+		delete (s as unknown as Record<string, unknown>).chatWidth;
+		saveSettings(s, memoryStore);
+		expect(loadSettings(memoryStore).chatWidth).toBe(CHAT_WIDTH_DEFAULT);
+		const kept = blankSettings();
+		kept.chatWidth = 32;
+		saveSettings(kept, memoryStore);
+		expect(loadSettings(memoryStore).chatWidth).toBe(32);
+		const low = blankSettings();
+		low.chatWidth = CHAT_WIDTH_MIN - 10;
+		saveSettings(low, memoryStore);
+		expect(loadSettings(memoryStore).chatWidth).toBe(CHAT_WIDTH_MIN);
+		const high = blankSettings();
+		high.chatWidth = CHAT_WIDTH_MAX + 10;
+		saveSettings(high, memoryStore);
+		expect(loadSettings(memoryStore).chatWidth).toBe(CHAT_WIDTH_MAX);
+		const junk = blankSettings();
+		(junk as unknown as Record<string, unknown>).chatWidth = "wide";
+		saveSettings(junk, memoryStore);
+		expect(loadSettings(memoryStore).chatWidth).toBe(CHAT_WIDTH_DEFAULT);
 	});
 
 	it("migrates the shared thinking dial to per-provider native ids", () => {

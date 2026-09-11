@@ -23,13 +23,14 @@ async function waitForToastToFade(page: Page): Promise<void> {
 	await page.locator(".toast").waitFor({ state: "hidden", timeout: 15000 }).catch(() => {});
 }
 
-/** The menu is Annotate alone: the OS bubble owns Copy/Translate,
+/** The menu is Annotate plus Radicals: the OS bubble owns Copy/Translate,
 and whole-message copy/speak live on the action rows. */
-test("selection menu offers only Annotate", async ({ page }) => {
+test("selection menu offers Annotate and Radicals", async ({ page }) => {
 	await selectWord(page);
 	const menu = page.locator(".sel-menu");
-	await expect(menu.locator("button")).toHaveCount(1);
+	await expect(menu.locator("button")).toHaveCount(2);
 	await expect(menu.locator('button:has-text("Annotate")')).toBeVisible();
+	await expect(menu.locator('button:has-text("Radicals")')).toBeVisible();
 });
 
 /** Annotate opens the comment pill for the quote and stands the
@@ -39,4 +40,33 @@ test("Annotate opens the pill for the quote", async ({ page }) => {
 	await selectWord(page);
 	await page.locator('.sel-menu button:has-text("Annotate")').click();
 	await expect(page.locator(".ann-pop")).toBeVisible();
+});
+
+/** The menu floats down and left of the cursor that finished the
+gesture (never under it), still above the highlight and clamped to
+the viewport. */
+test("menu sits down and left of the cursor", async ({ page }) => {
+	const body = page.locator("article .rendered").first();
+	const box = await body.boundingBox();
+	if (!box) throw new Error("message has no box");
+	const cx = box.x + 20;
+	await page.mouse.dblclick(cx, box.y + box.height / 2);
+	const menu = page.locator(".sel-menu");
+	await expect(menu).toBeVisible();
+	const menuBox = await menu.boundingBox();
+	if (!menuBox) throw new Error("menu has no box");
+	const geom = await page.evaluate(() => {
+		const r = window.getSelection()?.getRangeAt(0).getBoundingClientRect();
+		if (!r) return null;
+		return { top: r.top, viewport: window.innerWidth };
+	});
+	if (!geom) throw new Error("no selection rect");
+	// Left edge sits left of the cursor (was clamped exactly to it).
+	expect(menuBox.x).toBeLessThan(cx);
+	// Below the old above-slot, still hovering clear of the highlight.
+	expect(menuBox.y).toBeGreaterThan(geom.top - 47);
+	expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(geom.top + 1);
+	// Viewport clamping holds on both edges.
+	expect(menuBox.x).toBeGreaterThanOrEqual(0);
+	expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(geom.viewport);
 });

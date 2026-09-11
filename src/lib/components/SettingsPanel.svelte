@@ -1,6 +1,13 @@
 <script lang="ts">
 	import { getProviderDef, listProviders, createProvider } from "$lib/providers/registry";
-	import { maskKey, activeProviderSettings, type AppSettings } from "$lib/settings";
+	import {
+		maskKey,
+		activeProviderSettings,
+		CHAT_WIDTH_DEFAULT,
+		CHAT_WIDTH_MAX,
+		CHAT_WIDTH_MIN,
+		type AppSettings
+	} from "$lib/settings";
 	import { thinkingFor, resolveThinkingId } from "$lib/providers/thinking";
 	import { ejectProvider, restoreProvider } from "$lib/session";
 	import { hydrateSecrets, tauriBackendAvailable } from "$lib/secrets";
@@ -14,7 +21,7 @@
 		nativeVoices,
 		openVoiceSettings
 	} from "$lib/nativeTts";
-	import { hasQualityVoices, voicesForLang, allVoicesForLang, autoVoiceForLang } from "$lib/voiceTiers";
+	import { voicesForLang, allVoicesForLang, autoVoiceForLang } from "$lib/voiceTiers";
 	import { currentPlatform } from "$lib/platform";
 	import type { NativeVoice } from "$lib/nativeTts";
 	import { onMount } from "svelte";
@@ -93,8 +100,6 @@
 	let isWindowsShell = $state(false);
 	/** Tauri shell on Linux: same, with the Linux note. */
 	let isLinuxShell = $state(false);
-	/** A quality voice (premium/enhanced/Siri) is installed, so System voices is worth picking. */
-	let qualityVoices = $state(false);
 	let voiceSetupError = $state("");
 	/** Inventory probe failed (bridge error, not "no voices"): keep the toggle usable. */
 	let voiceLoadError = $state("");
@@ -228,11 +233,10 @@
 				voicesLoaded = true;
 				return;
 			}
-			qualityVoices = hasQualityVoices(installed);
-			// Premium/enhanced/Siri tiers are macOS-only: Android voices
-			// never pass the quality gate, so it must not force web there.
-			if (!androidUI && !qualityVoices && settings.voiceEngine === "native")
-				settings.voiceEngine = "web";
+			// macOS always reads with system voices (the engine picker is
+			// gone): a persisted "web" choice from an older build flips
+			// back silently. Android's pin lives in the page probe.
+			if (!androidUI && settings.voiceEngine !== "native") settings.voiceEngine = "native";
 			installedVoices = installed;
 			// A picked voice that is no longer installed falls back to auto.
 			if (settings.nativeVoiceId && !installed.some((v) => v.id === settings.nativeVoiceId)) {
@@ -565,15 +569,9 @@
 			</label>
 		</fieldset>
 	{:else}
-		<label class="check">
-			<input type="checkbox" bind:checked={settings.ownBubble} />
-			Enable background on my messages
-		</label>
-	{/if}
-	<!-- One row for both hover toggles: the label names the behavior once,
-	each box names whose buttons it covers. Touch has no hover, so the
-	phone hides the whole row. -->
-	{#if !androidUI}
+		<!-- One row for both hover toggles: the label names the behavior once,
+		each box names whose buttons it covers. Desktop-only (this branch),
+		with the bubble toggle below the row. -->
 		<fieldset class="hover-row">
 			<legend>Message buttons only on hover for…</legend>
 			<label class="check">
@@ -585,6 +583,10 @@
 				AI messages
 			</label>
 		</fieldset>
+		<label class="check">
+			<input type="checkbox" bind:checked={settings.ownBubble} />
+			Enable background on my messages
+		</label>
 	{/if}
 	{#if nativeVoice && androidUI}
 		<!-- Android has exactly one engine (forced native on boot), so
@@ -626,29 +628,10 @@
 	{/if}
 	{#if nativeVoice && !androidUI}
 		<fieldset class="voice-engine">
-			<legend>Voice engine</legend>
-			<div class="segmented" role="radiogroup" aria-label="Voice engine">
-				<button
-					type="button"
-					role="radio"
-					aria-checked={settings.voiceEngine === "native"}
-					class:selected={settings.voiceEngine === "native"}
-					disabled={!qualityVoices && !voiceLoadError}
-					title={qualityVoices || voiceLoadError
-						? "Read replies with macOS system voices"
-						: "No premium, enhanced, or Siri voices installed yet — install some first"}
-					onclick={() => (settings.voiceEngine = "native")}>System voices</button
-				>
-				<button
-					type="button"
-					role="radio"
-					aria-checked={settings.voiceEngine === "web"}
-					class:selected={settings.voiceEngine === "web"}
-					onclick={() => (settings.voiceEngine = "web")}>Web voices</button
-				>
-			</div>
+			<legend>System voice</legend>
 			<p class="note">
-				System voices use macOS speech and sound much better.
+				Replies always read with macOS system voices (web voices
+				only ever step in when the native bridge is unavailable).
 				{#if isWindowsShell}
 					To add voices on Windows: Settings → Time &amp;
 					language → Speech → Manage voices → Add voices, then
@@ -755,7 +738,7 @@
 			<input
 				type="range"
 				min="80"
-				max="200"
+				max={androidUI ? 200 : 400}
 				step="5"
 				value={Math.round(settings.fontScale * 100)}
 				aria-label="Text size percent"
@@ -766,6 +749,25 @@
 			<output>{Math.round(settings.fontScale * 100)}%</output>
 		</span>
 	</label>
+	{#if !androidUI}
+		<label>
+			Chat width
+			<span class="font-row">
+				<input
+					type="range"
+					min={CHAT_WIDTH_MIN}
+					max={CHAT_WIDTH_MAX}
+					step="1"
+					value={settings.chatWidth ?? CHAT_WIDTH_DEFAULT}
+					aria-label="Chat width in rem"
+					oninput={(e) => {
+						settings.chatWidth = Number(e.currentTarget.value);
+					}}
+				/>
+				<output style="min-width: 3.6rem;">{settings.chatWidth ?? CHAT_WIDTH_DEFAULT} rem</output>
+			</span>
+		</label>
+	{/if}
 </section>
 
 <section aria-labelledby="color-scheme-heading">
@@ -804,8 +806,7 @@
 	<section aria-labelledby="keys-heading">
 		<h2 id="keys-heading">{androidUI ? "Touch gestures" : "Keyboard shortcuts"}</h2>
 		<button type="button" onclick={onShortcuts}>
-			Show all {androidUI ? "gestures" : "shortcuts"}
-			{#if !androidUI}<span class="key-hint" aria-hidden="true">⇧⌘/</span>{/if}
+			{androidUI ? "Show all gestures" : "Shortcuts"}
 		</button>
 	</section>
 
@@ -925,6 +926,8 @@
 	.keys-updates > section:first-of-type > button {
 		grid-area: 2 / 1;
 		justify-self: center;
+		/* Short label now: never wrap onto a second line. */
+		white-space: nowrap;
 	}
 	.keys-updates > section:last-of-type > h2 {
 		grid-area: 1 / 2;
@@ -946,16 +949,6 @@
 		font-size: 1rem;
 		font-weight: 650;
 		margin: 0 0 0.9rem;
-	}
-	.key-hint {
-		font-size: 0.68rem;
-		opacity: 0.75;
-		border: 1px solid currentColor;
-		border-radius: 4px;
-		padding: 0 0.3rem;
-		margin-left: 0.35rem;
-		transform: translateY(-0.1em);
-		white-space: nowrap;
 	}
 	label,
 	.field,

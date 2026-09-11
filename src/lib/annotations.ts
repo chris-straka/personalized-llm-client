@@ -101,18 +101,119 @@ function foldChar(ch: string): string {
 	return TYPO_FOLD[ch] ?? ch;
 }
 
+/**
+ * Arabic vocalization marks (tashkeel/harakat): FATHATAN..SUKUN, superscript
+ * ALEF, and the extended Arabic diacritic blocks. A quote taken while the
+ * aid is pinned carries them; the bare body (or vice versa) does not.
+ */
+const TASHKEEL_RE =
+	/[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06DC\u06DF-\u06E4\u06E7-\u06E8\u06EA-\u06ED]/;
+
 /** Strip ALL whitespace for matching: selections and DOM text nodes routinely
- * disagree on newlines/indentation (full-paragraph and multi-line quotes). */
+ * disagree on newlines/indentation (full-paragraph and multi-line quotes).
+ * Tashkeel strips too, so markers anchor to the base text and survive the
+ * aid toggle either way (annotated vocalized, viewed bare, or the reverse).
+ * Same-length typo folds keep node offsets aligned; stripped marks simply
+ * map both sides onto the same base offsets. */
 function stripForMatch(text: string): { stripped: string; offsets: number[] } {
 	let stripped = "";
 	const offsets: number[] = [];
 	for (let i = 0; i < text.length; i++) {
 		const ch = foldChar(text[i] ?? "");
-		if (/\s/.test(ch)) continue;
+		if (/\s/.test(ch) || TASHKEEL_RE.test(ch)) continue;
 		offsets.push(i);
 		stripped += ch;
 	}
 	return { stripped, offsets };
+}
+
+/** Minimal grapheme-segment view (Intl.Segmenter when present). */
+interface GraphemeSegment {
+	index: number;
+	segment: string;
+}
+interface GraphemeSegmenter {
+	segment(text: string): Iterable<GraphemeSegment>;
+}
+
+function loadGraphemeSegmenter(): GraphemeSegmenter | null {
+	try {
+		const Ctor = (
+			Intl as unknown as {
+				Segmenter?: new (
+					locales?: string | string[],
+					options?: { granularity?: string }
+				) => GraphemeSegmenter;
+			}
+		).Segmenter;
+		if (!Ctor) return null;
+		return new Ctor(undefined, { granularity: "grapheme" });
+	} catch {
+		return null;
+	}
+}
+
+const graphemeSegmenter: GraphemeSegmenter | null = loadGraphemeSegmenter();
+
+/** Combining marks the fallback treats as part of the base's cluster. */
+const CLUSTER_MARK_RE = /[\p{Mn}\p{Me}\u200D]/u;
+const LOW_SURROGATE_RE = /[\uDC00-\uDFFF]/;
+const HIGH_SURROGATE_RE = /[\uD800-\uDBFF]/;
+
+/**
+ * Bounds of the grapheme cluster holding `offset` (a UTF-16 index into
+ * `text`; the end position pins to the last cluster). Stamping must never
+ * split a cluster: wrapping a base letter apart from its tashkeel breaks
+ * Arabic joining/shaping, and the split survives the rebuild as shifted
+ * words across lines.
+ */
+function clusterBounds(text: string, offset: number): { start: number; end: number } {
+	const at = Math.max(0, Math.min(offset, text.length));
+	if (graphemeSegmenter) {
+		let prev = { start: 0, end: 0 };
+		for (const part of graphemeSegmenter.segment(text)) {
+			const start = part.index;
+			const end = start + part.segment.length;
+			if (at >= start && at < end) return { start, end };
+			prev = { start, end };
+		}
+		if (text.length > 0 && at >= text.length && prev.end > 0) return prev;
+		return { start: at, end: Math.min(at + 1, text.length) };
+	}
+	let start = at;
+	while (start > 0) {
+		const ch = text[start - 1] ?? "";
+		if (CLUSTER_MARK_RE.test(ch)) {
+			start -= 1;
+			continue;
+		}
+		if (LOW_SURROGATE_RE.test(ch) && HIGH_SURROGATE_RE.test(text[start - 2] ?? "")) {
+			start -= 2;
+			continue;
+		}
+		break;
+	}
+	let end = Math.min(Math.max(at + 1, start + 1), text.length);
+	while (end < text.length) {
+		const ch = text[end] ?? "";
+		if (!CLUSTER_MARK_RE.test(ch)) break;
+		end += 1;
+	}
+	return { start, end: Math.max(end, start + 1) };
+}
+
+/** Move an inclusive wrap start back to its cluster's start. */
+function expandWrapStart(text: string, from: number): number {
+	if (from <= 0 || from >= text.length) return from;
+	const bounds = clusterBounds(text, from);
+	return bounds.start < from ? bounds.start : from;
+}
+
+/** Move an exclusive wrap end forward past its cluster's trailing marks. */
+function expandWrapEnd(text: string, to: number): number {
+	if (to <= 0 || to >= text.length) return to;
+	const bounds = clusterBounds(text, to);
+	return bounds.start < to ? bounds.end : to;
 }
 
 export interface QuoteLocation {
@@ -607,9 +708,18 @@ function anchorSpan(nodes: Text[], loc: QuoteLocation): HTMLElement | null {
 		return parent;
 	}
 	try {
+		// The whole grapheme cluster, never one unit: wrapping a base
+		// letter apart from its tashkeel (or a surrogate pair apart)
+		// breaks joining/shaping while mounted, and the split survives
+		// the rebuild as words shifted across lines.
+		const nodeText = pick.node.textContent ?? "";
+		const bounds = clusterBounds(nodeText, Math.min(pick.at, Math.max(0, nodeText.length - 1)));
+		const from = Math.min(bounds.start, pick.at);
+		const to = Math.max(bounds.end, pick.at + 1);
+		if (to <= from) return null;
 		const range = document.createRange();
-		range.setStart(pick.node, pick.at);
-		range.setEnd(pick.node, pick.at + 1);
+		range.setStart(pick.node, from);
+		range.setEnd(pick.node, to);
 		const anchor = document.createElement("span");
 		anchor.className = "ccez-ann-anchor";
 		range.surroundContents(anchor);
@@ -634,11 +744,17 @@ function wrapRange(nodes: Text[], loc: QuoteLocation, extraClass?: string): HTML
 	for (let i = loc.startNode; i <= loc.endNode; i++) {
 		const node = nodes[i];
 		if (!node) continue;
-		const length = node.textContent?.length ?? 0;
-		const from = i === loc.startNode ? loc.startOffset : 0;
-		const to = i === loc.endNode ? loc.endOffset : length;
+		const text = node.textContent ?? "";
+		const length = text.length;
+		// Stale indices (a superseded stamp's range) skip, as before.
+		if (i === loc.endNode && loc.endOffset > length) continue;
+		// Cluster edges, never through a cluster: a quote ending on a
+		// bare base letter must still wrap its tashkeel, or the wash
+		// cuts the cluster and shaping breaks until the rebuild.
+		const from = i === loc.startNode ? expandWrapStart(text, loc.startOffset) : 0;
+		const to = i === loc.endNode ? expandWrapEnd(text, loc.endOffset) : length;
 		if (from >= to) continue;
-		if (!/\S/.test(node.textContent?.slice(from, to) ?? "")) continue;
+		if (!/\S/.test(text.slice(from, to))) continue;
 		try {
 			const range = document.createRange();
 			range.setStart(node, from);

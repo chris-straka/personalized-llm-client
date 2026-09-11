@@ -31,6 +31,18 @@ describe("createRefMemo", () => {
 		expect(memo("a", [{ n: 2 }])).not.toBe(first);
 		expect(memo("b", [{ n: 1 }])).not.toBe(first);
 	});
+
+	it("keeps empty aid-kind arrays stable so hovers never rebuild bodies", () => {
+		// The render effect subscribes to the array identity: a fresh
+		// [] per parent render (hovering near an aid button) re-ran
+		// every body and re-stamped its badges, flickering the text.
+		const memo = createRefMemo<string>((kind) => kind);
+		const first = memo("m1", []);
+		expect(memo("m1", [])).toBe(first);
+		expect(memo("m1", ["pinyin"])).not.toBe(first);
+		const pinned = memo("m1", ["pinyin"]);
+		expect(memo("m1", ["pinyin"])).toBe(pinned);
+	});
 });
 
 describe("furiganaRequestKey", () => {

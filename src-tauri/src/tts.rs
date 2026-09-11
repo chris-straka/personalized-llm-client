@@ -484,6 +484,22 @@ mod imp {
         }
     }
 
+    /// Speech rate for a BCP-47 lang: Mandarin at the default rate
+    /// rushes past learners, so Chinese reads slightly slower. Every
+    /// other language keeps the shared default. Pure and unit-tested.
+    fn speech_rate_for(lang: &str) -> f32 {
+        let primary = lang
+            .split(['-', '_'])
+            .next()
+            .unwrap_or(lang)
+            .to_lowercase();
+        if primary == "zh" || primary == "cmn" {
+            0.45
+        } else {
+            0.5
+        }
+    }
+
     /// Utterance with the shared voice pick and the shared rate, for
     /// speech and render alike. `ctx` tags the `tauri dev` log lines
     /// (`speak id=7`, `render`). One line per utterance in the terminal:
@@ -513,7 +529,7 @@ mod imp {
                     );
                 }
             }
-            utterance.setRate(0.5);
+            utterance.setRate(speech_rate_for(lang));
             utterance
         }
     }
@@ -600,7 +616,17 @@ mod imp {
 
     #[cfg(test)]
     mod system_id_tests {
-        use super::split_system_id;
+        use super::{speech_rate_for, split_system_id};
+
+        #[test]
+        fn chinese_rate_slower_than_default() {
+            assert!(speech_rate_for("zh-CN") < speech_rate_for("en-US"));
+            assert_eq!(speech_rate_for("zh-CN"), 0.45);
+            assert_eq!(speech_rate_for("zh-TW"), 0.45);
+            assert_eq!(speech_rate_for("cmn"), 0.45);
+            assert_eq!(speech_rate_for("en-US"), 0.5);
+            assert_eq!(speech_rate_for("ja"), 0.5);
+        }
 
         #[test]
         fn splits_premium_system_id() {

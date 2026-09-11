@@ -265,13 +265,30 @@
 	 * Hovering a badge previews its yellow wash. Keyboard focus stays
 	 * wash-free on purpose: Tab reaches the markers, never the highlights.
 	 */
+	/**
+	 * Null washes already reported: mouseovers fire for every child
+	 * under the cursor, so re-reporting null while pointed at plain
+	 * text bounced the parent (and every body) for nothing — hovering
+	 * near the pinyin button flickered mounted marks. Non-null ids
+	 * always report: suppressing a repeat could strand a wash the
+	 * parent cleared another way. Starts sent: the parent opens null.
+	 */
+	let hoverNullSent = true;
 	function onBadgeOver(event: MouseEvent): void {
-		onBadgeHover?.(badgeIdOf(event.target));
+		const id = badgeIdOf(event.target);
+		if (id === null) {
+			if (hoverNullSent) return;
+			hoverNullSent = true;
+		} else hoverNullSent = false;
+		onBadgeHover?.(id);
 	}
 
 	function onBadgeOut(event: MouseEvent): void {
 		const to = (event.relatedTarget as HTMLElement | null)?.closest?.("[data-ann-badge]");
-		if (!to) onBadgeHover?.(null);
+		if (to) return;
+		if (hoverNullSent) return;
+		hoverNullSent = true;
+		onBadgeHover?.(null);
 	}
 
 	function onBodyClick(event: MouseEvent): void {
@@ -439,9 +456,9 @@
 		bottom: 100%;
 		left: 50%;
 		transform: translateX(-50%);
-		/* Optical: readings sit a hair right of their kanji, so pull
-		back one pixel (absolute, never layout). */
-		margin-left: -1px;
+		/* Optical: readings sit right of their kanji, so pull back
+		two pixels (absolute, never layout). */
+		margin-left: -2px;
 		white-space: nowrap;
 		font-size: 0.62em;
 		line-height: 1.2;

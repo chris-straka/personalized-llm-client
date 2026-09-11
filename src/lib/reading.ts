@@ -190,7 +190,7 @@ export const MODEL_AIDS: Record<string, ModelAid> = {
 		id: "tashkeel",
 		label: "tashkeel",
 		button: "تشكيل",
-		title: "Add tashkeel (uses the active model)",
+		title: "Add tashkeel",
 		revert: "إبداعي",
 		revertTip: "Back to the original text",
 		instruction:
@@ -272,6 +272,28 @@ export function localAidsFor(scripts: AidScript[]): LocalAid[] {
 	if (scripts.includes("ja")) aids.push("furigana");
 	if (scripts.includes("zh")) aids.push("pinyin");
 	return aids;
+}
+
+/**
+ * Which local-aid kinds a message body renders: pinned kinds it still
+ * offers (edited text may offer fewer), plus a hover-peeked kind
+ * previewed alongside them. Pure — the caller memoizes the reference
+ * (see createRefMemo): the render effect subscribes to the array
+ * identity, so a fresh array per parent render (every hover near an
+ * aid button) rebuilt every body and re-stamped its badges, flickering
+ * the text whenever several marks were mounted.
+ */
+export function resolveAidKinds(
+	offered: LocalAid[],
+	pinned: LocalAid[],
+	peek: LocalAid | null
+): LocalAid[] {
+	if (offered.length === 0) return [];
+	const kept = pinned.filter((kind) => offered.includes(kind));
+	if (peek !== null && offered.includes(peek) && !kept.includes(peek)) {
+		return [...kept, peek];
+	}
+	return kept;
 }
 
 const aidCache = new Map<string, string>();

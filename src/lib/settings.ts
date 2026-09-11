@@ -86,6 +86,11 @@ export interface AppSettings {
 	/** Text-size multiplier for messages and the prompt (1 = default). */
 	fontScale: number;
 	/**
+	 * Desktop-only chat-column width in rem (46 = the legacy fixed
+	 * width). Phones always fill the viewport; the slider hides there.
+	 */
+	chatWidth: number;
+	/**
 	 * The user explicitly picked the voice locale (voice-language field),
 	 * so restarts must keep it. Unset when a reply pill overrides the
 	 * voice: the next launch returns to the system default instead.
@@ -124,6 +129,19 @@ export interface AppSettings {
 const STORAGE_KEY = "ccez-studio-settings-v1";
 
 export const DEFAULT_SYSTEM_PROMPT = "";
+
+/**
+ * Text-size multiplier bounds (persisted): desktop caps at 400%.
+ * The phone cap stays at 200% — enforced by the panel slider and
+ * adjustFontScale, not here, since profiles roam across devices.
+ */
+export const FONT_SCALE_MIN = 0.5;
+export const FONT_SCALE_MAX = 4;
+
+/** Desktop chat-column width in rem: 46 is the legacy fixed width. */
+export const CHAT_WIDTH_DEFAULT = 46;
+export const CHAT_WIDTH_MIN = 28;
+export const CHAT_WIDTH_MAX = 80;
 
 /**
  * Dev-time `.env` prefill (Vite bakes these into dev/preview builds only —
@@ -214,6 +232,7 @@ export function defaultSettings(): AppSettings {
 		vim: true,
 		sidebarCollapsed: true,
 		fontScale: 1,
+		chatWidth: CHAT_WIDTH_DEFAULT,
 		ownBubble: true,
 		hoverUserActions: false,
 		hoverAssistantActions: false,
@@ -290,8 +309,23 @@ export function loadSettings(store?: KeyValueStore): AppSettings {
 			if (!Array.isArray(entry.models)) entry.models = [];
 		}
 		// Clamp the text-size multiplier (range inputs persist strings).
-		if (typeof merged.fontScale !== "number" || !(merged.fontScale >= 0.5 && merged.fontScale <= 2)) {
+		// Desktop allows up to 400%; the phone cap (200%) is enforced
+		// by the panel slider and adjustFontScale instead.
+		if (
+			typeof merged.fontScale !== "number" ||
+			!(merged.fontScale >= FONT_SCALE_MIN && merged.fontScale <= FONT_SCALE_MAX)
+		) {
 			merged.fontScale = 1;
+		}
+		// Backfill the desktop chat width on older saves; clamp strays
+		// into range (rounded to whole rem, the slider's step).
+		if (typeof merged.chatWidth !== "number" || Number.isNaN(merged.chatWidth)) {
+			merged.chatWidth = CHAT_WIDTH_DEFAULT;
+		} else {
+			merged.chatWidth = Math.min(
+				CHAT_WIDTH_MAX,
+				Math.max(CHAT_WIDTH_MIN, Math.round(merged.chatWidth))
+			);
 		}
 		// Theme pins from older saves predate the switch: anything that
 		// isn't a known mode follows the OS.

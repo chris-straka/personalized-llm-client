@@ -21,7 +21,8 @@ import {
 	LOCAL_AID_SHOW_ORIGINAL,
 	LOCAL_AID_ADD_TITLE,
 	aidTargetLines,
-	spliceAidResult
+	spliceAidResult,
+	resolveAidKinds
 } from "./reading";
 import { pinyinBlock, pinyinRuby } from "./pinyin";
 import { isFuriganaCached } from "./furigana";
@@ -109,6 +110,36 @@ describe("word extraction", () => {
 	});
 });
 
+describe("aid kind overrides", () => {
+	it("renders nothing without offered kinds", () => {
+		expect(resolveAidKinds([], [], null)).toEqual([]);
+		expect(resolveAidKinds([], ["pinyin"], "pinyin")).toEqual([]);
+	});
+
+	it("renders pinned kinds the message still offers", () => {
+		expect(resolveAidKinds(["pinyin", "furigana"], ["pinyin"], null)).toEqual(["pinyin"]);
+		expect(resolveAidKinds(["pinyin", "furigana"], ["pinyin", "furigana"], null)).toEqual([
+			"pinyin",
+			"furigana"
+		]);
+	});
+
+	it("filters pinned kinds the edited text no longer offers", () => {
+		expect(resolveAidKinds(["pinyin"], ["pinyin", "furigana"], null)).toEqual(["pinyin"]);
+	});
+
+	it("previews a hovered kind alongside pins, never twice", () => {
+		expect(resolveAidKinds(["pinyin", "furigana"], ["pinyin"], "furigana")).toEqual([
+			"pinyin",
+			"furigana"
+		]);
+		expect(resolveAidKinds(["pinyin"], [], "pinyin")).toEqual(["pinyin"]);
+		expect(resolveAidKinds(["pinyin"], ["pinyin"], "pinyin")).toEqual(["pinyin"]);
+		expect(resolveAidKinds(["pinyin"], [], "furigana")).toEqual([]);
+		expect(resolveAidKinds(["pinyin"], ["pinyin"], null)).toEqual(["pinyin"]);
+	});
+});
+
 describe("speech locales", () => {
 	it("maps scripts to voice locales", () => {
 		expect(ttsLangFor("你好")).toBe("zh-CN");
@@ -184,6 +215,10 @@ describe("model-assisted reading aids", () => {
 	it("titles the unpinned buttons in English", () => {
 		expect(LOCAL_AID_ADD_TITLE.pinyin).toBe("Add pinyin");
 		expect(LOCAL_AID_ADD_TITLE.furigana).toBe("Add furigana");
+	});
+
+	it("titles the tashkeel button with no model parenthetical", () => {
+		expect(MODEL_AIDS.tashkeel!.title).toBe("Add tashkeel");
 	});
 
 	it("caches by aid + exact input", async () => {

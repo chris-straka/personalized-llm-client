@@ -99,6 +99,7 @@
 		type AnnotationMark
 	} from "$lib/annotations";
 	import { createRefMemo } from "$lib/aidLoading";
+	import { openRadicalsOverlay } from "$lib/radicals";
 	import { translateSelection } from "$lib/translate";
 	import {
 	isAndroidUserAgent,
@@ -132,6 +133,7 @@
 		runModelAid,
 		aidTargetLines,
 		spliceAidResult,
+		resolveAidKinds,
 		type LocalAid
 	} from "$lib/reading";
 	import { isFuriganaCached } from "$lib/furigana";
@@ -450,6 +452,20 @@
 	function annotateTouch(event: TouchEvent): void {
 		menuBtnTouch(event, annotate);
 	}
+	/**
+	 * Radicals at the cursor: the components overlay opens over the
+	 * selection anchor (reusing the .ann-pop card) and the menu stands
+	 * down, mirroring Annotate.
+	 */
+	function showRadicals(): void {
+		if (!selMenu) return;
+		openRadicalsOverlay({ x: selMenu.x, y: selMenu.y }, selMenu.quote);
+		clearSelection();
+		selMenu = null;
+	}
+	function radicalsTouch(event: TouchEvent): void {
+		menuBtnTouch(event, showRadicals);
+	}
 	let translate = $state<{
 		quote: string;
 		messageId: ChatMsgId;
@@ -541,9 +557,17 @@
 	function pulseCursor(): void {
 		const root = document.documentElement;
 		root.style.pointerEvents = "none";
-		requestAnimationFrame(() => {
+		let restored = false;
+		const restore = (): void => {
+			if (restored) return;
+			restored = true;
 			root.style.pointerEvents = "";
-		});
+		};
+		// rAF owns the restore (one painted frame); the timeout is a
+		// backstop for surfaces that never produce one (headless test
+		// shells), where a stuck none would eat every later click.
+		requestAnimationFrame(() => restore());
+		setTimeout(restore, 100);
 	}
 	let shortcutsOpen = $state(false);
 	/**
@@ -618,9 +642,10 @@
 		else openSettingsPanel();
 	}
 
-	/** UI text scale in 10% steps (settings bounds are 50–200%). */
+	/** UI text scale in 10% steps (desktop 50–400%, phone 50–200%). */
 	function adjustFontScale(delta: number): void {
-		const next = Math.min(2, Math.max(0.5, Math.round((settings.fontScale + delta) * 10) / 10));
+		const cap = androidUI ? 2 : 4;
+		const next = Math.min(cap, Math.max(0.5, Math.round((settings.fontScale + delta) * 10) / 10));
 		if (next === settings.fontScale) return;
 		settings.fontScale = next;
 		persistSettings();
@@ -1051,7 +1076,9 @@
 		// the selection's start — a full-sentence pick shouldn't strand
 		// it lines above where the pointer is.
 		const at = cursorX ?? rect.left;
-		const x = Math.min(Math.max(8, at), window.innerWidth - width - 8);
+		// The popup sits down and left of the cursor that finished the
+		// gesture (never under it), still clamped to the viewport.
+		const x = Math.min(Math.max(8, at - 16), window.innerWidth - width - 8);
 		// Android: the OS text toolbar (Copy / Translate / Read Aloud)
 		// docks above the selection, so ours goes below it instead of
 		// underneath it — except near the screen bottom, where above
@@ -1071,8 +1098,8 @@
 			if (y < 8) y = rect.bottom + 30;
 			if (y + 44 > window.innerHeight) y = Math.max(8, window.innerHeight - 52);
 		} else {
-			y = rect.top - 47;
-			if (y < 8) y = rect.bottom + 8;
+			y = rect.top - 41;
+			if (y < 8) y = rect.bottom + 14;
 		}
 		selMenu = { x, y, quote: found.quote, messageId: found.messageId };
 	}
@@ -1507,14 +1534,18 @@
 		return kinds;
 	}
 
+	/**
+	 * Aid-kind arrays by message, memoized like the badge arrays: the
+	 * body effect subscribes to the array identity, so a fresh array
+	 * per parent render (any hover near an aid button) rebuilt every
+	 * body and re-stamped its badges — flickering text with several
+	 * marks mounted. Same content returns the same reference.
+	 */
+	const memoAids = createRefMemo<LocalAid>((kind) => kind);
 	function localAidsOverrideFor(msg: ChatMsg): LocalAid[] {
 		const kinds = offeredLocalAids(aidDisplayText(msg));
-		if (kinds.length === 0) return [];
-		const pinned = pinnedKinds(msg.id).filter((kind) => kinds.includes(kind));
-		if (aidPeek?.id === msg.id && aidPeek.kind && kinds.includes(aidPeek.kind) && !pinned.includes(aidPeek.kind)) {
-			return [...pinned, aidPeek.kind];
-		}
-		return pinned;
+		const peek = aidPeek?.id === msg.id ? (aidPeek.kind ?? null) : null;
+		return memoAids(msg.id, resolveAidKinds(kinds, pinnedKinds(msg.id), peek));
 	}
 
 	/**
@@ -1538,6 +1569,11 @@
 				return;
 			}
 		}
+		// Same preview already showing: re-assigning a fresh object
+		// re-renders every body for nothing (hovering near the button
+		// re-fires enter without leaving).
+		const nextKind = kind ?? null;
+		if (aidPeek?.id === msg.id && (aidPeek.kind ?? null) === nextKind) return;
 		aidPeek = kind === undefined ? { id: msg.id } : { id: msg.id, kind };
 	}
 
@@ -2615,19 +2651,17 @@
 		// Client Hints winning (see currentPlatform). Unknown platforms
 		// read as non-Mac, so the Ctrl/Alt labels show.
 		isMac = currentPlatform().isMac;
-		// The web engine does not exist in this shell, so phones pin
-		// to native when the bridge is up (and fall back when it is
-		// not). The settings panel repeats the probe for its picker;
-		// this is the silent path.
-		if (androidUI) {
-			void nativeTtsSupported().then((supported) => {
-				const want = supported ? "native" : "web";
-				if (settings.voiceEngine !== want) {
-					settings.voiceEngine = want;
-					persistSettings();
-				}
-			});
-		}
+		// One engine everywhere, pinned silently (the desktop engine
+		// picker is gone): system voices when the bridge is up, web
+		// voices when it is not. The settings panel repeats the probe
+		// for its picker; this is the silent path.
+		void nativeTtsSupported().then((supported) => {
+			const want = supported ? "native" : "web";
+			if (settings.voiceEngine !== want) {
+				settings.voiceEngine = want;
+				persistSettings();
+			}
+		});
 		// External-text bridge (Android OS selection menu): the entry
 		// comes from the AnnotateAction manifest alias, so the text it
 		// carries is either a share from another app or the selection
@@ -3849,7 +3883,7 @@
 	data-shell={tauriBackendAvailable() ? "tauri" : "browser"}
 	data-android={androidUI || null}
 	data-ios={iosUI || null}
-	style="--font-scale: {settings.fontScale}"
+	style="--font-scale: {settings.fontScale}; --chat-width: {androidUI ? 46 : (settings.chatWidth ?? 46)}"
 >
 	<aside class:collapsed={settings.sidebarCollapsed} inert={settings.sidebarCollapsed} data-fade-scroll>
 		<div class="side-head" data-tauri-drag-region aria-hidden="true" onmousedown={dragWindow} ondblclick={zoomWindow}>
@@ -4651,6 +4685,13 @@
 				ontouchstart={noteMenuBtnTouch}
 				ontouchend={annotateTouch}
 			>Annotate</button>
+			<button
+				type="button"
+				aria-label="Show radicals for selection"
+				onclick={showRadicals}
+				ontouchstart={noteMenuBtnTouch}
+				ontouchend={radicalsTouch}
+			>Radicals</button>
 		</div>
 	{/if}
 
@@ -6063,10 +6104,10 @@
 		align-self: flex-end;
 		/* Shrink-wrap so short prompts don't stretch into empty space.
 		Beats the centered-column rule's width:100% on specificity;
-		margin-right keeps the right edge on the 46rem column. */
+		margin-right keeps the right edge on the chat-width column. */
 		width: fit-content;
-		max-width: min(85%, 46rem);
-		margin-right: max(0rem, calc((100% - 46rem) / 2));
+		max-width: min(85%, calc(var(--chat-width, 46) * 1rem));
+		margin-right: max(0rem, calc((100% - var(--chat-width, 46) * 1rem) / 2));
 		/* No background or padding here: the bubble wraps the text only,
 		so the action row below sits outside it. */
 		padding: 0;
@@ -6826,6 +6867,13 @@
 		margin-top: 0.35rem;
 		transition: opacity 0.18s ease;
 	}
+	/* Desktop rows may outgrow the column at very large text sizes
+	(400%): wrap instead of clipping. Phones keep their own sideways
+	scroll treatment below, so this stays off the touch rules. */
+	.app:not([data-android]) .actions {
+		flex-wrap: wrap;
+		row-gap: 0.35rem;
+	}
 	@media (hover: none) {
 		/* Aid labels (show original) can outgrow the message: the row
 		scrolls sideways inside itself instead of spilling out and
@@ -7469,13 +7517,15 @@
 		border-color: #48484a !important;
 		color: #f2f2f7 !important;
 	}
-	/* Centered reading column on wide screens (DeepSeek-web rhythm). */
+	/* Centered reading column on wide screens (DeepSeek-web rhythm).
+	The cap rides --chat-width off .app (desktop slider, 46 = the legacy
+	fixed width); the fallback keeps phones and older saves identical. */
 	article,
 	.empty-state,
 	.sending {
 		align-self: center;
 		width: 100%;
-		max-width: 46rem;
+		max-width: calc(var(--chat-width, 46) * 1rem);
 		box-sizing: border-box;
 	}
 	.prompt,
@@ -7485,7 +7535,7 @@
 	.translate-panel,
 	.error-banner {
 		width: calc(100% - 2.4rem);
-		max-width: 46rem;
+		max-width: calc(var(--chat-width, 46) * 1rem);
 		margin-left: auto;
 		margin-right: auto;
 		box-sizing: border-box;

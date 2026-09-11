@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { seedChat, rowBoxes, expectBoxesStable } from "./helpers";
 
 const ARTICLE = "article.assistant";
-const AID_TITLE = "Add tashkeel (uses the active model)";
+const AID_TITLE = "Add tashkeel";
 
 test.beforeEach(async ({ page }) => {
 	await seedChat(page, [{ role: "assistant", content: "مرحبا بالعالم" }]);

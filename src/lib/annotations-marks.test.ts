@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
 	applyMarks,
 	annotationCountLabel,
+	locateQuote,
 	lockSelectionToMessage,
 	saveSelection,
 	restoreSelection,
@@ -448,5 +449,97 @@ describe("annotationCountLabel", () => {
 		expect(annotationCountLabel(99)).toBe("99");
 		expect(annotationCountLabel(100)).toBe("99+");
 		expect(annotationCountLabel(1234)).toBe("99+");
+	});
+});
+
+describe("tashkeel-anchored marks", () => {
+	// Same words, bare vs vocalized: markers anchor to the base text
+	// and must survive the aid toggle either way.
+	const BASE = "مرحبا بك";
+	const VOCALIZED = "مَرحَبًا بِكَ";
+
+	it("locates a vocalized quote in bare base text", () => {
+		expect(locateQuote([BASE], VOCALIZED)).not.toBeNull();
+	});
+
+	it("locates a bare quote in vocalized text", () => {
+		expect(locateQuote([VOCALIZED], BASE)).not.toBeNull();
+	});
+
+	it("keeps the badge when tashkeel is removed (aid unpinned)", () => {
+		const marks: AnnotationMark[] = [{ id: "a1" as AnnotationId, number: 1, quote: VOCALIZED }];
+		const root = rootWith(VOCALIZED);
+		applyMarks(root, marks, false, null);
+		expect(root.querySelector("[data-ann-badge]")).not.toBeNull();
+		// Unpinning the aid swaps the body back to the bare base text;
+		// the re-stamp must re-anchor instead of dropping the badge.
+		root.textContent = BASE;
+		applyMarks(root, marks, false, null);
+		expect(root.querySelector("[data-ann-badge]")).not.toBeNull();
+		expect(baseText(root)).toBe(BASE);
+	});
+
+	it("keeps the badge when tashkeel is applied (aid pinned)", () => {
+		const marks: AnnotationMark[] = [{ id: "a1" as AnnotationId, number: 1, quote: BASE }];
+		const root = rootWith(BASE);
+		applyMarks(root, marks, false, null);
+		expect(root.querySelector("[data-ann-badge]")).not.toBeNull();
+		root.textContent = VOCALIZED;
+		applyMarks(root, marks, false, null);
+		expect(root.querySelector("[data-ann-badge]")).not.toBeNull();
+		expect(baseText(root)).toBe(VOCALIZED);
+	});
+
+	it("stamps a vocalized quote onto aid-rendered base paragraphs", () => {
+		// The pinyin path renders plain paragraphs (markdown set aside);
+		// an Arabic annotation must persist across that toggle too.
+		const root = document.createElement("div");
+		root.innerHTML = "<p dir=\"auto\">مرحبا بك</p>";
+		applyMarks(root, [{ id: "a1" as AnnotationId, number: 1, quote: VOCALIZED }], false, null);
+		expect(root.querySelector("[data-ann-badge]")).not.toBeNull();
+		expect(baseText(root)).toBe(BASE);
+	});
+});
+
+describe("grapheme-cluster-safe stamping", () => {
+	const VOCALIZED = "مَرحَبًا بِكَ";
+
+	/** Text nodes starting with a combining mark: a split cluster. */
+	function strandedMarks(root: Element): string[] {
+		const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+		const bad: string[] = [];
+		while (walker.nextNode()) {
+			const node = walker.currentNode;
+			const parent = node.parentNode;
+			if (parent instanceof Element && parent.closest("[data-ann-badge], rt, rp, .frt")) continue;
+			const text = node.textContent ?? "";
+			if (/^[\p{Mn}\p{Me}]/u.test(text)) bad.push(text);
+		}
+		return bad;
+	}
+
+	it("never splits a base letter from its tashkeel (wash on)", () => {
+		const root = rootWith(`قال ${VOCALIZED} اليوم`);
+		applyMarks(root, [{ id: "a1" as AnnotationId, number: 1, quote: VOCALIZED }], false, "a1");
+		expect(strandedMarks(root)).toEqual([]);
+	});
+
+	it("wraps a partial bare quote over vocalized text without splitting", () => {
+		const root = rootWith(VOCALIZED);
+		// Bare "مرحب" ends on a base letter carrying a mark in the
+		// node: the wash must expand to the cluster end, not cut it.
+		applyMarks(root, [{ id: "a1" as AnnotationId, number: 1, quote: "مرحب" }], false, "a1");
+		expect(root.querySelector("mark.ccez-ann")).not.toBeNull();
+		expect(strandedMarks(root)).toEqual([]);
+	});
+
+	it("rebuild preserves shaping: wash off restores the exact base text", () => {
+		const original = `قال ${VOCALIZED} اليوم`;
+		const root = rootWith(original);
+		const marks: AnnotationMark[] = [{ id: "a1" as AnnotationId, number: 1, quote: VOCALIZED }];
+		applyMarks(root, marks, false, "a1");
+		applyMarks(root, marks, false, null);
+		expect(baseText(root)).toBe(original);
+		expect(strandedMarks(root)).toEqual([]);
 	});
 });
