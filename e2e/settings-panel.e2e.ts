@@ -69,7 +69,7 @@ test("chat width slider narrows the column and persists", async ({ page }) => {
 	const slider = page.locator('.settings-panel input[aria-label="Chat width in rem"]');
 	await expect(slider).toBeVisible();
 	await expect(slider).toHaveAttribute("min", "28");
-	await expect(slider).toHaveAttribute("max", "80");
+	await expect(slider).toHaveAttribute("max", "120");
 	const rootPx = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
 	// The composer shares the column cap (own articles shrink-wrap, so
 	// their computed max stays a min() expression — the prompt resolves).

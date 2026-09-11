@@ -104,6 +104,13 @@ export interface AppSettings {
 	hoverUserActions: boolean;
 	/** AI message action buttons appear only on hover/focus. Off = always shown. */
 	hoverAssistantActions: boolean;
+	/** Message action buttons grow with the text-size setting. Off = fixed size. */
+	scaleActionsWithFont: boolean;
+	/**
+	 * Seconds of no mouse/keyboard/touch input before the main prompt
+	 * slides down out of view (any input restores it instantly).
+	 */
+	promptIdleSec: number;
 	/** Color-scheme override (system follows the OS). */
 	theme: ThemeMode;
 	/**
@@ -150,7 +157,12 @@ export const FONT_SCALE_MAX = 6;
 /** Desktop chat-column width in rem: 46 is the legacy fixed width. */
 export const CHAT_WIDTH_DEFAULT = 36;
 export const CHAT_WIDTH_MIN = 28;
-export const CHAT_WIDTH_MAX = 80;
+export const CHAT_WIDTH_MAX = 120;
+
+/** Prompt idle-hide timeout in seconds: 6s default, 2–60s configurable. */
+export const PROMPT_IDLE_DEFAULT = 6;
+export const PROMPT_IDLE_MIN = 2;
+export const PROMPT_IDLE_MAX = 60;
 
 /**
  * Dev-time `.env` prefill (Vite bakes these into dev/preview builds only —
@@ -243,9 +255,11 @@ export function defaultSettings(): AppSettings {
 		sidebarCollapsed: true,
 		fontScale: 1,
 		chatWidth: CHAT_WIDTH_DEFAULT,
-		ownBubble: true,
-		hoverUserActions: false,
-		hoverAssistantActions: false,
+		ownBubble: false,
+		hoverUserActions: true,
+		hoverAssistantActions: true,
+		scaleActionsWithFont: false,
+		promptIdleSec: PROMPT_IDLE_DEFAULT,
 		voiceLangPinned: false,
 		theme: "system",
 		hideMessages: false,
@@ -344,6 +358,16 @@ export function loadSettings(store?: KeyValueStore): AppSettings {
 		if (merged.theme !== "light" && merged.theme !== "dark" && merged.theme !== "system") {
 			merged.theme = "system";
 		}
+		// Clamp the prompt idle-hide timeout (older saves predate it).
+		if (
+			typeof merged.promptIdleSec !== "number" ||
+			Number.isNaN(merged.promptIdleSec) ||
+			merged.promptIdleSec < PROMPT_IDLE_MIN ||
+			merged.promptIdleSec > PROMPT_IDLE_MAX
+		) {
+			merged.promptIdleSec = PROMPT_IDLE_DEFAULT;
+		}
+		if (typeof merged.scaleActionsWithFont !== "boolean") merged.scaleActionsWithFont = false;
 		// Touch-only toggles postdate older saves the same way.
 		if (typeof merged.inspectEnabled !== "boolean") merged.inspectEnabled = false;
 		if (typeof merged.hideMessages !== "boolean") merged.hideMessages = false;
