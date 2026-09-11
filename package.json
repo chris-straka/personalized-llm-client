@@ -33,6 +33,7 @@
     "@tauri-apps/plugin-updater": "^2",
     "dompurify": "^3.4.15",
     "fflate": "^0.8.3",
+    "katex": "^0.18.7",
     "lindera-wasm": "^6.0.0",
     "marked": "^18.0.12",
     "pinyin-pro": "^3.29.3",
