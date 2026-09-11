@@ -7525,7 +7525,7 @@
 	.sending {
 		align-self: center;
 		width: 100%;
-		max-width: calc(var(--chat-width, 46) * 1rem);
+		max-width: min(85%, calc(var(--chat-width, 46) * 1rem));
 		box-sizing: border-box;
 	}
 	.prompt {
