@@ -103,6 +103,7 @@
 	} from "$lib/annotations";
 	import { createRefMemo } from "$lib/aidLoading";
 	import { translateSelection } from "$lib/translate";
+	import { getInspectData, shouldShowInspect } from "$lib/inspect";
 	import {
 	isAndroidUserAgent,
 	isIOSUserAgent,
@@ -455,6 +456,9 @@
 	function annotateTouch(event: TouchEvent): void {
 		menuBtnTouch(event, annotate);
 	}
+	function inspectTouch(event: TouchEvent): void {
+		menuBtnTouch(event, openInspect);
+	}
 	let translate = $state<{
 		quote: string;
 		messageId: ChatMsgId;
@@ -559,6 +563,44 @@
 		setTimeout(restore, 100);
 	}
 	let shortcutsOpen = $state(false);
+	/**
+	 * Inspect overlay: the single Han character under review, or null
+	 * when closed. Same modal-veil/modal pattern as the shortcuts
+	 * overlay. Set from openInspect (selection menu), cleared by Esc,
+	 * backdrop click, or the × button.
+	 */
+	let inspectChar = $state<string | null>(null);
+	/** Current step of the schematic stroke preview (1-based). */
+	let inspectStroke = $state(1);
+	const inspectData = $derived(inspectChar ? getInspectData(inspectChar) : null);
+	$effect(() => {
+		// Schematic stroke-step preview: advances through the stroke
+		// count on a timer until the KanjiVG path-data follow-up lands.
+		// Reduced-motion users get a static first step instead.
+		const total = inspectData?.strokeCount;
+		if (!inspectChar || !total) return;
+		inspectStroke = 1;
+		let reduced = false;
+		try {
+			reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+		} catch {
+			reduced = false;
+		}
+		if (reduced) return;
+		const timer = setInterval(() => {
+			inspectStroke = inspectStroke >= total ? 1 : inspectStroke + 1;
+		}, 600);
+		return () => clearInterval(timer);
+	});
+	/** Open the Inspect overlay for the live selection (single Han char only). */
+	function openInspect(): void {
+		if (!selMenu) return;
+		const quote = selMenu.quote.trim();
+		if (!shouldShowInspect(quote, settings.inspectEnabled)) return;
+		inspectChar = quote;
+		clearSelection();
+		selMenu = null;
+	}
 	/**
 	 * Android (phone) UI: the shortcuts modal shows touch gestures
 	 * instead of key chords, and edge swipes open the sidebars. Set
@@ -2751,7 +2793,7 @@
 			start: { x: number; y: number; clean: boolean },
 			ended: { clientX: number; clientY: number }
 		): EdgePanel | null {
-			if (!androidUI || !start.clean || shortcutsOpen) return null;
+			if (!androidUI || !start.clean || shortcutsOpen || inspectChar) return null;
 			if (window.getSelection()?.isCollapsed === false) return null;
 			return contentSwipeTarget(start.x, start.y, ended.clientX, ended.clientY);
 		}
@@ -2933,7 +2975,7 @@
 				} else if (multiTouchSeen) {
 					return;
 				}
-				if (!androidUI || shortcutsOpen || !start) return;
+				if (!androidUI || shortcutsOpen || inspectChar || !start) return;
 				const touch = event.changedTouches[0];
 				if (!touch) return;
 				// No travel limit: dragging the selection handles across
@@ -3140,11 +3182,12 @@
 					return;
 				}
 			}
-			if (event.key === "Escape" && shortcutsOpen) {
-				// The modal always wins Esc, even from inside the prompt.
+			if (event.key === "Escape" && (shortcutsOpen || inspectChar)) {
+				// A modal always wins Esc, even from inside the prompt.
 				event.preventDefault();
 				event.stopPropagation();
 				shortcutsOpen = false;
+				inspectChar = null;
 				return;
 			}
 			if (event.key === "Escape" && editingMsgId) {
@@ -3158,6 +3201,7 @@
 			}
 			if (event.key === "Escape" && !inEditor) {
 				selMenu = null;
+				inspectChar = null;
 				translate = null;
 				openLangMenu = null;
 				settingsOpen = false;
@@ -4545,7 +4589,9 @@
 					callout owns that space on both phones). Same handlers
 					as the desktop floating menu it replaces — and the same
 					click-away exemption in onMouseUp, or the tap collapses
-					the highlight and clears the menu before onclick fires. -->
+					the highlight and clears the menu before onclick fires.
+					Inspect docks beside Annotate for single Han characters
+					with the setting on. -->
 					<button
 						type="button"
 						class="ann-dock"
@@ -4556,6 +4602,18 @@
 						ontouchend={annotateTouch}
 						onclick={annotate}
 					>Annotate</button>
+					{#if shouldShowInspect(selMenu.quote, settings.inspectEnabled)}
+						<button
+							type="button"
+							class="ann-dock"
+							aria-label="Inspect character"
+							transition:fade={{ duration: 150 }}
+							onmousedown={noteMenuPress}
+							ontouchstart={noteMenuBtnTouch}
+							ontouchend={inspectTouch}
+							onclick={openInspect}
+						>Inspect</button>
+					{/if}
 				{/if}
 				{#if annotations.length > 0}
 					<div class="ann-wrap" class:pinned={reviewOpen}>
@@ -4782,13 +4840,24 @@
 			the OS bubble keeps its own slot. Phones dock it in the
 			composer instead (the native callout owns the text space).
 			Copy and Read Aloud live on the message action rows
-			instead of doubling here. -->
+			instead of doubling here. Inspect joins Annotate only for
+			a single kanji/hanzi highlight with the setting on. -->
 			<button
 				type="button"
 				onclick={annotate}
 				ontouchstart={noteMenuBtnTouch}
 				ontouchend={annotateTouch}
 			>Annotate</button>
+			{#if shouldShowInspect(selMenu.quote, settings.inspectEnabled)}
+				<button
+					type="button"
+					aria-label="Inspect character"
+					onmousedown={noteMenuPress}
+					ontouchstart={noteMenuBtnTouch}
+					ontouchend={inspectTouch}
+					onclick={openInspect}
+				>Inspect</button>
+			{/if}
 		</div>
 	{/if}
 
@@ -4963,6 +5032,70 @@
 					<div><dt>Text size up / down</dt><dd>{mod}+ / {mod}−</dd></div>
 					<div><dt>Chat width + / −</dt><dd>⇧{mod}+ / ⇧{mod}−</dd></div>
 				</dl>
+				{/if}
+			</div>
+		</div>
+	{/if}
+
+	{#if inspectChar && inspectData}
+		<!-- Character Inspect overlay: same modal-veil/modal pattern as
+		the shortcuts overlay. Radicals come from the offline curated
+		table (radicals.ts); count + definition from the compact offline
+		table (inspect.ts). The stroke preview is schematic (stepped by
+		stroke count) until per-character vector data lands. -->
+		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+		<!-- Backdrop click only; keyboard users get Esc and the × button. -->
+		<div
+			class="modal-veil"
+			onclick={(e) => {
+				if (e.target === e.currentTarget) inspectChar = null;
+			}}
+		>
+			<div class="modal inspect-modal" role="dialog" aria-modal="true" aria-labelledby="inspect-heading" data-fade-scroll>
+				<div class="modal-head">
+					<h2 id="inspect-heading">Inspect <span lang="ja">{inspectData.char}</span></h2>
+					<button
+						type="button"
+						aria-label="Close character inspect"
+						title="Close (Esc)"
+						onclick={() => (inspectChar = null)}
+					>
+						×
+					</button>
+				</div>
+				<div class="inspect-body">
+					<div class="inspect-char" lang="ja" aria-hidden="true">{inspectData.char}</div>
+					<div class="inspect-facts">
+						{#if inspectData.components.length > 0}
+							<p><strong>Radicals:</strong> {inspectData.components.join(" + ")}</p>
+						{:else}
+							<p class="note">Radical breakdown unavailable offline for this character.</p>
+						{/if}
+						{#if inspectData.strokeCount !== null}
+							<p><strong>Strokes:</strong> {inspectData.strokeCount}</p>
+						{:else}
+							<p class="note">Stroke count unavailable offline for this character.</p>
+						{/if}
+						{#if inspectData.definition !== null}
+							<p><strong>Definition:</strong> {inspectData.definition}</p>
+						{:else}
+							<p class="note">Unihan definition unavailable offline for this character.</p>
+						{/if}
+					</div>
+				</div>
+				{#if inspectData.strokeCount !== null}
+					<div class="inspect-stroke" aria-label="Schematic stroke preview">
+						<div class="inspect-step" aria-live="polite">
+							Stroke {Math.min(inspectStroke, inspectData.strokeCount)} of {inspectData.strokeCount}
+						</div>
+						<div class="inspect-bar" aria-hidden="true">
+							<div
+								class="inspect-fill"
+								style="width: {(Math.min(inspectStroke, inspectData.strokeCount) / inspectData.strokeCount) * 100}%"
+							></div>
+						</div>
+						<p class="note">Schematic preview — full stroke-order animation needs vector path data (follow-up).</p>
+					</div>
 				{/if}
 			</div>
 		</div>
@@ -5312,6 +5445,55 @@
 	.modal-head button:hover {
 		border-color: #1c1c1e;
 		border-color: var(--strong);
+	}
+	/* Character Inspect overlay: narrow modal, big glyph beside the
+	facts, schematic stroke progress below. */
+	.inspect-modal {
+		width: min(28rem, calc(100vw - 3rem));
+	}
+	.inspect-body {
+		display: flex;
+		gap: 1.1rem;
+		align-items: flex-start;
+		margin: 0.4rem 0 0.6rem;
+	}
+	.inspect-char {
+		font-size: 3.4rem;
+		line-height: 1.1;
+	}
+	.inspect-facts {
+		flex: 1;
+		min-width: 0;
+	}
+	.inspect-facts p {
+		margin: 0.3rem 0;
+	}
+	.inspect-modal .note {
+		color: #6e6e73;
+		color: var(--muted);
+		font-size: 0.85rem;
+	}
+	.inspect-step {
+		font-variant-numeric: tabular-nums;
+		margin-bottom: 0.3rem;
+	}
+	.inspect-bar {
+		height: 0.45rem;
+		border-radius: 999px;
+		background: #e5e5ea;
+		background: var(--line-soft);
+		overflow: hidden;
+	}
+	.inspect-fill {
+		height: 100%;
+		background: #1c1c1e;
+		background: var(--strong);
+		transition: width 0.5s ease;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.inspect-fill {
+			transition: none;
+		}
 	}
 	.keys {
 		margin: 0;
@@ -6535,7 +6717,12 @@
 		padding: 0.55rem 0.95rem;
 		white-space: nowrap;
 	}
-	/* Single-button menu now (Annotate alone): no dividers. */
+	/* Single-button menu (Annotate alone): no dividers; Inspect adds
+	a hairline between the two when a single Han character qualifies. */
+	.sel-menu button + button {
+		border-left: 1px solid #e5e5ea;
+		border-left-color: var(--line-soft);
+	}
 	.sel-menu button:hover {
 		background: #f1f1f4;
 		background: var(--bg-wash);

@@ -602,6 +602,10 @@
 				<input type="checkbox" bind:checked={settings.ownBubble} />
 				Enable background on my messages
 			</label>
+			<label class="check">
+				<input type="checkbox" bind:checked={settings.inspectEnabled} />
+				Show Inspect for single kanji/hanzi highlights
+			</label>
 		</fieldset>
 	{:else}
 		<!-- One row for both hover toggles: the label names the behavior once,
@@ -621,6 +625,10 @@
 		<label class="check">
 			<input type="checkbox" bind:checked={settings.ownBubble} />
 			Enable background on my messages
+		</label>
+		<label class="check">
+			<input type="checkbox" bind:checked={settings.inspectEnabled} />
+			Show Inspect for single kanji/hanzi highlights
 		</label>
 	{/if}
 	{#if nativeVoice && androidUI}

@@ -126,6 +126,13 @@ export interface AppSettings {
 	overlayActions: boolean;
 	/** Touch only: read a fresh text selection aloud on release. */
 	autoSpeakSelection: boolean;
+	/**
+	 * Character Inspect: a single kanji/hanzi highlight gains an
+	 * Inspect button (next to Annotate, desktop and mobile) opening
+	 * the radicals/stroke/definition overlay. Off = no Inspect UI
+	 * anywhere. Opt-in: older saves backfill false.
+	 */
+	inspectEnabled: boolean;
 }
 
 const STORAGE_KEY = "ccez-studio-settings-v1";
@@ -244,7 +251,8 @@ export function defaultSettings(): AppSettings {
 		hideMessages: false,
 		hideButtons: true,
 		overlayActions: true,
-		autoSpeakSelection: true
+		autoSpeakSelection: true,
+		inspectEnabled: false
 	};
 }
 
@@ -337,6 +345,7 @@ export function loadSettings(store?: KeyValueStore): AppSettings {
 			merged.theme = "system";
 		}
 		// Touch-only toggles postdate older saves the same way.
+		if (typeof merged.inspectEnabled !== "boolean") merged.inspectEnabled = false;
 		if (typeof merged.hideMessages !== "boolean") merged.hideMessages = false;
 		if (typeof merged.micEnabled !== "boolean") merged.micEnabled = true;
 		if (typeof merged.hideButtons !== "boolean") merged.hideButtons = true;
