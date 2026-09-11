@@ -10,7 +10,14 @@ import {
 	withAnnotations,
 	splitAnnotationBlock,
 	locateQuote,
-	occurrenceAtPosition
+	occurrenceAtPosition,
+	snapOffsetsToWordEdges,
+	placeAnnPopX,
+	lineStartOffset,
+	clampDragAnchorToFocusLine,
+	reviewEditKey,
+	REFS_ONLY_BODY,
+	isRefsOnly
 } from "./annotations";
 import { buildTranslateMessages, translateSelection } from "./translate";
 import type { ChatProvider } from "./providers/types";
@@ -47,7 +54,7 @@ describe("annotations", () => {
 			"alphabet"
 		);
 		expect(formatAnnotations(list)).toBe(
-			'1. "langue" — What does this mean?\n2. "alphabet"'
+			'1. "langue" — What does this mean?\n2. "alphabet" — ?'
 		);
 	});
 
@@ -75,7 +82,7 @@ describe("annotations", () => {
 		expect(split?.text).toBe("explain");
 		expect(split?.refs).toEqual([
 			{ n: 1, quote: "langue", comment: "meaning?" },
-			{ n: 2, quote: "alphabet", comment: "" }
+			{ n: 2, quote: "alphabet", comment: "?" }
 		]);
 	});
 
@@ -204,6 +211,101 @@ describe("occurrenceAtPosition", () => {
 		expect(occurrenceAtPosition(["abc"], "", 0, 1)).toBe(0);
 		expect(occurrenceAtPosition(["abc"], "z", 0, 1)).toBe(0);
 		expect(occurrenceAtPosition(["abc"], "b", 4, 0)).toBe(0);
+	});
+});
+
+describe("snapOffsetsToWordEdges", () => {
+	it("expands mid-word cuts out to the word's edges", () => {
+		// "hell|o wo|rld": start cut inside "hello", end cut inside "world".
+		expect(snapOffsetsToWordEdges("hello world", 2, 9)).toEqual({ start: 0, end: 11 });
+	});
+
+	it("leaves boundaries already on word edges alone", () => {
+		expect(snapOffsetsToWordEdges("hello world", 0, 5)).toEqual({ start: 0, end: 5 });
+		expect(snapOffsetsToWordEdges("hello world", 6, 11)).toEqual({ start: 6, end: 11 });
+		// Leading space is not a word char: no snap into the neighbor.
+		expect(snapOffsetsToWordEdges("hello world", 5, 6)).toEqual({ start: 5, end: 6 });
+	});
+
+	it("leaves spaceless scripts untouched", () => {
+		expect(snapOffsetsToWordEdges("テストを確認", 2, 4)).toEqual({ start: 2, end: 4 });
+	});
+
+	it("snaps spaced non-Latin words too", () => {
+		expect(snapOffsetsToWordEdges("مرحبا بالعالم", 2, 8)).toEqual({ start: 0, end: 13 });
+	});
+
+	it("clamps out-of-range input and normalizes reversed ranges", () => {
+		expect(snapOffsetsToWordEdges("hello", -4, 99)).toEqual({ start: 0, end: 5 });
+		expect(snapOffsetsToWordEdges("hello world", 8, 2)).toEqual({ start: 0, end: 11 });
+	});
+
+	it("treats digits and underscores as word characters", () => {
+		expect(snapOffsetsToWordEdges("foo_bar2 baz", 2, 10)).toEqual({ start: 0, end: 12 });
+	});
+});
+
+describe("placeAnnPopX", () => {
+	const viewportWidth = 1280;
+	const popWidth = 384;
+
+	it("centers the box over a highlight narrower than the box", () => {
+		// Highlight [500, 600): center 550, box 384 wide -> x = 358.
+		expect(
+			placeAnnPopX({ cursorX: 600, highlightLeft: 500, highlightWidth: 100, popWidth, viewportWidth })
+		).toBe(358);
+	});
+
+	it("keeps the cursor placement for wide highlights", () => {
+		expect(
+			placeAnnPopX({ cursorX: 600, highlightLeft: 100, highlightWidth: 900, popWidth, viewportWidth })
+		).toBe(600);
+	});
+
+	it("clamps centered and cursor placements on screen", () => {
+		expect(
+			placeAnnPopX({ cursorX: 10, highlightLeft: 0, highlightWidth: 40, popWidth, viewportWidth })
+		).toBe(8);
+		expect(
+			placeAnnPopX({ cursorX: 2000, highlightLeft: 100, highlightWidth: 900, popWidth, viewportWidth })
+		).toBe(viewportWidth - popWidth - 8);
+	});
+});
+
+describe("off-chat drag clamp", () => {
+	it("finds the current line's start", () => {
+		expect(lineStartOffset("a\nbc\ndef", 6)).toBe(5);
+		expect(lineStartOffset("a\nbc\ndef", 5)).toBe(5);
+		expect(lineStartOffset("single", 3)).toBe(0);
+		expect(lineStartOffset("single", 0)).toBe(0);
+	});
+
+	it("pins anchors above the cursor line, passes the rest through", () => {
+		// Focus on line 2 ("bc"), anchor up on line 1: pin to line 2's start.
+		expect(clampDragAnchorToFocusLine("a\nbc\ndef", 0, 4)).toBe(2);
+		// Anchor on the same line or below: untouched.
+		expect(clampDragAnchorToFocusLine("a\nbc\ndef", 2, 4)).toBe(2);
+		expect(clampDragAnchorToFocusLine("a\nbc\ndef", 6, 4)).toBe(6);
+	});
+});
+
+describe("reviewEditKey", () => {
+	it("maps Enter to save, Shift+Enter to nothing, Escape to cancel", () => {
+		expect(reviewEditKey("Enter", false)).toBe("save");
+		expect(reviewEditKey("Enter", true)).toBeNull();
+		expect(reviewEditKey("Escape", false)).toBe("cancel");
+		expect(reviewEditKey("a", false)).toBeNull();
+	});
+});
+
+describe("refs-only display", () => {
+	it("renders an annotations-only message as an em-dash", () => {
+		expect(REFS_ONLY_BODY).toBe("—");
+		const list = addAnnotation([], "m1" as ChatMsgId, "langue", "meaning?");
+		const content = withAnnotations("", list);
+		expect(isRefsOnly(content)).toBe(true);
+		expect(isRefsOnly(withAnnotations("explain", list))).toBe(false);
+		expect(isRefsOnly("just a prompt")).toBe(false);
 	});
 });
 

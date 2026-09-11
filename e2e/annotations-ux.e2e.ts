@@ -1,0 +1,229 @@
+import { expect, test } from "@playwright/test";
+import { seedChat } from "./helpers";
+
+/**
+ * Annotation UX bucket (e2e; NOT run in the agent loop — the shared
+ * dev-server port belongs to the human's session).
+ *
+ * Covers, with real layout:
+ * 1. create marker snaps to word edges (never splits a word in half);
+ * 2. create textbox centers over narrow highlights, keeps cursor
+ *    placement for wide ones; the Annotate button never moves;
+ * 3. numbered badges scale with the message font size;
+ * 4. empty annotations bake a "?" so the model sees the confusion;
+ * 5. annotations-only messages render as an em-dash with the count UI above;
+ * 6. review edit box: Enter saves, Save animates symmetrically, and the
+ *    textarea stays readable in dark mode;
+ * 7. off-chat drags never highlight above the cursor's current line.
+ */
+
+test("mid-word drags snap out to whole words", async ({ page }) => {
+	await seedChat(page, [{ role: "assistant", content: "hello world from Kyoto" }]);
+	await page.goto("/");
+	const body = page.locator("article.assistant .rendered").first();
+	await expect(body).toBeVisible({ timeout: 60_000 });
+	const box = await body.boundingBox();
+	if (!box) throw new Error("message has no box");
+	const y = box.y + box.height / 2;
+	// Real press to normalize the click guard, then a range cut
+	// mid-word on both ends ("ell|o worl|d") before mouseup.
+	await page.mouse.click(box.x + 10, y);
+	await page.mouse.move(box.x + box.width - 2, y);
+	await page.mouse.down();
+	await page.evaluate(() => {
+		const text = document.querySelector("article.assistant .rendered p")?.firstChild;
+		if (!(text instanceof Text)) throw new Error("no message text");
+		window.getSelection()?.setBaseAndExtent(text, 1, text, 10);
+	});
+	await page.mouse.up();
+	await expect(page.locator(".sel-menu")).toBeVisible();
+	await page.locator('.sel-menu button:has-text("Annotate")').click();
+	await expect(page.locator(".ann-pop")).toBeVisible();
+	await page.keyboard.press("Enter");
+	// The filed quote is the whole words, never the cut fragment.
+	await page.locator(".prompt-tools .ann-wrap").hover();
+	await expect(page.locator(".prompt-tools .review-quote").first()).toHaveText(/hello world/);
+});
+
+test("create box centers over narrow highlights, cursor-places wide ones", async ({ page }) => {
+	await seedChat(page, [
+		{ role: "assistant", content: "Kyoto is an old capital with many temples and quiet gardens" }
+	]);
+	await page.goto("/");
+	const para = page.locator("article.assistant .rendered p").first();
+	await expect(para).toBeVisible({ timeout: 60_000 });
+	const box = await para.boundingBox();
+	if (!box) throw new Error("message has no box");
+	const y = box.y + box.height / 2;
+
+	// Narrow: double-click picks one word; the box centers over it
+	// while the Annotate button stays at the cursor end.
+	const paraBox = await para.boundingBox();
+	if (!paraBox) throw new Error("paragraph has no box");
+	await para.dblclick({ position: { x: 10, y: 10 } });
+	await expect(page.locator(".sel-menu")).toBeVisible();
+	const menuBox = await page.locator(".sel-menu").boundingBox();
+	await page.locator('.sel-menu button:has-text("Annotate")').click();
+	const pop = page.locator(".ann-pop");
+	await expect(pop).toBeVisible();
+	const popBox = await pop.boundingBox();
+	const highlight = await page.evaluate(() => {
+		// Annotate consumed the live highlight, so read the pending
+		// wash mark it stamped instead.
+		const mark = document.querySelector("article.assistant mark.ccez-ann");
+		const r = mark?.getBoundingClientRect();
+		if (!r) return null;
+		return { left: r.left, width: r.width };
+	});
+	if (!popBox) throw new Error("missing pop box");
+	if (highlight && highlight.width < 300) {
+		const popCX = popBox.x + popBox.width / 2;
+		const hlCX = highlight.left + highlight.width / 2;
+		expect(Math.abs(popCX - hlCX)).toBeLessThanOrEqual(8);
+	}
+	// The menu itself sits at the cursor end, not centered.
+	if (!menuBox) throw new Error("missing menu box");
+	expect(Math.abs(menuBox.x - (paraBox.x + 10 - 16))).toBeLessThanOrEqual(8);
+	await page.keyboard.press("Escape");
+
+	// Wide: dragging the whole paragraph keeps the cursor placement —
+	// the box opens at the selection end, not the paragraph center.
+	await page.mouse.move(box.x + 10, y);
+	await page.mouse.down();
+	await page.mouse.move(box.x + box.width - 10, y, { steps: 8 });
+	await page.mouse.up();
+	await expect(page.locator(".sel-menu")).toBeVisible();
+	const endX = box.x + box.width - 10;
+	await page.locator('.sel-menu button:has-text("Annotate")').click();
+	await expect(pop).toBeVisible();
+	const wideBox = await pop.boundingBox();
+	if (!wideBox) throw new Error("missing wide box");
+	expect(Math.abs(wideBox.x - (endX - 16))).toBeLessThanOrEqual(24);
+	await page.keyboard.press("Escape");
+});
+
+test("numbered badges grow with the message font size", async ({ page }) => {
+	await seedChat(page, [{ role: "assistant", content: "alpha beta gamma delta" }]);
+	await page.goto("/");
+	const para = page.locator("article.assistant .rendered p").first();
+	await expect(para).toBeVisible({ timeout: 60_000 });
+	await para.dblclick({ position: { x: 10, y: 10 } });
+	await expect(page.locator(".sel-menu")).toBeVisible();
+	await page.locator('.sel-menu button:has-text("Annotate")').click();
+	await page.keyboard.type("note");
+	await page.keyboard.press("Enter");
+	const badge = page.locator("article.assistant [data-ann-badge]").first();
+	await expect(badge).toBeVisible();
+	const small = await badge.evaluate((el) => getComputedStyle(el).fontSize);
+	await page.evaluate(() => {
+		document.querySelector(".app")?.setAttribute("style", "--font-scale: 2");
+	});
+	const big = await badge.evaluate((el) => getComputedStyle(el).fontSize);
+	expect(parseFloat(big)).toBeGreaterThan(parseFloat(small));
+});
+
+test("empty annotations bake a question mark for the model", async ({ page }) => {
+	await seedChat(page, [{ role: "assistant", content: "alpha beta gamma delta" }]);
+	await page.goto("/");
+	const para = page.locator("article.assistant .rendered p").first();
+	await expect(para).toBeVisible({ timeout: 60_000 });
+	await para.dblclick({ position: { x: 10, y: 10 } });
+	await expect(page.locator(".sel-menu")).toBeVisible();
+	await page.locator('.sel-menu button:has-text("Annotate")').click();
+	// Enter with no text files the empty annotation (click-away would cancel it).
+	await page.keyboard.press("Enter");
+	await expect(page.locator(".prompt-tools .ann-wrap")).toBeVisible();
+	// Send the empty prompt with the annotation attached (mock provider).
+	await page.locator(".cm-content").click();
+	await page.keyboard.press("Enter");
+	const user = page.locator("article.user").first();
+	await expect(user).toBeVisible();
+	await user.locator(".ann-refs-pill").hover();
+	await expect(user.locator(".ann-refs-comment").first()).toHaveText("?");
+});
+
+test("annotations-only messages render as an em-dash with the count above", async ({ page }) => {
+	await seedChat(page, [
+		{ role: "user", content: 'Annotated selections:\n1. "Kyoto" — ?' }
+	]);
+	await page.goto("/");
+	const user = page.locator("article.user").first();
+	await expect(user).toBeVisible({ timeout: 60_000 });
+	// Body collapses to one em-dash at the normal message text size.
+	const bodyText = await user.locator(".rendered").innerText();
+	expect(bodyText.trim()).toBe("—");
+	const sizes = await page.evaluate(() => {
+		const em = document.querySelector("article.user .rendered")?.getBoundingClientRect();
+		const pill = document.querySelector("article.user .ann-refs-pill")?.getBoundingClientRect();
+		const base = getComputedStyle(document.querySelector("article.user .rendered")!);
+		if (!em || !pill) return null;
+		return { emTop: em.y, pillBottom: pill.y + pill.height, fontSize: base.fontSize };
+	});
+	if (!sizes) throw new Error("missing refs-only boxes");
+	// The count UI rides above the dash, never inline with it.
+	expect(sizes.pillBottom).toBeLessThanOrEqual(sizes.emTop + 2);
+	// Normal text size: the message scale, not a shrunken preview.
+	expect(parseFloat(sizes.fontSize)).toBeGreaterThanOrEqual(13);
+});
+
+test("review edit box saves on Enter and stays readable", async ({ page }) => {
+	await seedChat(page, [{ role: "assistant", content: "alpha beta gamma delta" }]);
+	await page.goto("/");
+	const para = page.locator("article.assistant .rendered p").first();
+	await expect(para).toBeVisible({ timeout: 60_000 });
+	await para.dblclick({ position: { x: 10, y: 10 } });
+	await expect(page.locator(".sel-menu")).toBeVisible();
+	await page.locator('.sel-menu button:has-text("Annotate")').click();
+	await page.keyboard.type("first");
+	await page.keyboard.press("Enter");
+	await page.locator(".prompt-tools .ann-wrap").hover();
+	await page.locator('.review-pencil').first().click();
+	const box = page.locator(".review textarea");
+	await expect(box).toBeVisible();
+	await box.fill("");
+	await box.press("Enter");
+	// Enter saved instead of inserting a newline: the edit closed.
+	await expect(box).toHaveCount(0);
+	// Save animates symmetrically (transition on the base rule) and
+	// the dark edit box is a raised surface, never near-black.
+	const style = await page.evaluate(() => {
+		document.documentElement.dataset.theme = "dark";
+		const save = document.querySelector(".ann-save");
+		const reviewSave = document.querySelector(".review-edit-actions button");
+		const ta = document.querySelector(".review textarea") as HTMLElement | null;
+		return {
+			saveTransition: save ? getComputedStyle(save).transition : null,
+			reviewTransition: reviewSave ? getComputedStyle(reviewSave).transition : null,
+			darkField: ta ? getComputedStyle(ta).backgroundColor : null
+		};
+	});
+	expect(style.saveTransition).toContain("0.15s");
+	expect(style.reviewTransition).toContain("0.15s");
+	// #3a3a3c, not the near-black field #101013.
+	expect(style.darkField).not.toBe("rgb(16, 16, 19)");
+});
+
+test("gutter drags never highlight above the cursor line", async ({ page }) => {
+	await seedChat(page, [
+		{ role: "assistant", content: "aaa one\n\nbbb two\n\nccc three" }
+	]);
+	await page.goto("/");
+	const body = page.locator("article.assistant .rendered").first();
+	await expect(body).toBeVisible({ timeout: 60_000 });
+	const target = body.locator("p").nth(2);
+	const tbox = await target.boundingBox();
+	if (!tbox) throw new Error("third paragraph has no box");
+	// Press in the left gutter beside the third paragraph (off-chat),
+	// drag into its middle, then run to the top edge (off-screen path
+	// shares the same selectionchange trim).
+	await page.mouse.move(6, tbox.y + tbox.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(tbox.x + tbox.width / 2, tbox.y + tbox.height / 2, { steps: 8 });
+	await page.mouse.move(tbox.x + tbox.width / 2, 4, { steps: 4 });
+	await page.mouse.move(tbox.x + tbox.width / 2, tbox.y + tbox.height / 2, { steps: 4 });
+	await page.mouse.up();
+	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+	// Nothing above the cursor's line ("aaa", "bbb") may highlight.
+	expect(selected).not.toContain("aaa");
+	expect(selected).not.toContain("bbb");
+});

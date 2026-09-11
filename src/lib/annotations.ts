@@ -778,7 +778,9 @@ export function formatAnnotations(list: Annotation[]): string {
 	return list
 		.map((a, i) => {
 			const head = `${i + 1}. "${a.quote}"`;
-			return a.comment.trim() ? `${head} — ${a.comment.trim()}` : head;
+			// Empty comments file as "?" so the model sees the confusion
+			// instead of a bare quote that reads as settled context.
+			return a.comment.trim() ? `${head} — ${a.comment.trim()}` : `${head} — ?`;
 		})
 		.join("\n");
 }
@@ -911,4 +913,154 @@ export function annRefsFor(content: string): { text: string; refs: AnnotationRef
 	if (refsCache.size > 200) refsCache.clear();
 	refsCache.set(content, split);
 	return split;
+}
+
+/**
+ * Body shown for a message holding ONLY a baked annotation block: an
+ * em-dash at normal text size, with the annotation count UI above it.
+ * The stored content stays the full block (provider context is
+ * unaffected) — only the display collapses to this.
+ */
+export const REFS_ONLY_BODY = "—";
+
+/** True when a baked block is the message's whole content (redact to REFS_ONLY_BODY). */
+export function isRefsOnly(content: string): boolean {
+	const split = annRefsFor(content);
+	return split !== null && split.text.trim() === "";
+}
+
+const WORD_CHAR_RE = /[\p{L}\p{N}_]/u;
+/**
+ * Spaceless scripts have no words to pick: every character is a
+ * letter (Lo), so snapping would glue whole sentences together.
+ * The native pick already stands for these (see the Japanese
+ * double-click specs) and stays untouched.
+ */
+const SPACELESS_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+
+function isWordChar(ch: string): boolean {
+	return WORD_CHAR_RE.test(ch) && !SPACELESS_RE.test(ch);
+}
+
+/**
+ * Snap a [start, end) range to word edges so the create-annotation
+ * marker never splits a word in half: a boundary cut inside a word
+ * expands outward to that word's edge, while a boundary already on
+ * an edge (or beside non-word text) stays put. Spaceless scripts
+ * (CJK) have no word characters, so they never snap. Out-of-range
+ * inputs clamp; reversed inputs normalize.
+ */
+export function snapOffsetsToWordEdges(
+	text: string,
+	start: number,
+	end: number
+): { start: number; end: number } {
+	const len = text.length;
+	let s = Math.max(0, Math.min(start, len));
+	let e = Math.max(0, Math.min(end, len));
+	if (s > e) [s, e] = [e, s];
+	if (s < e) {
+		while (s > 0 && isWordChar(text[s - 1] ?? "") && isWordChar(text[s] ?? "")) s -= 1;
+		while (e < len && isWordChar(text[e - 1] ?? "") && isWordChar(text[e] ?? "")) e += 1;
+	}
+	return { start: s, end: e };
+}
+
+/**
+ * Expand a live selection to word edges (same rule as
+ * snapOffsetsToWordEdges, applied per boundary text node so
+ * multi-node selections snap too). Preserves the drag direction.
+ * Returns true when the range moved. Never throws (selection APIs
+ * disagree across engines; paint must survive).
+ */
+export function snapSelectionToWordEdges(selection: Selection): boolean {
+	try {
+		if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false;
+		const range = selection.getRangeAt(0);
+		const sc = range.startContainer;
+		const ec = range.endContainer;
+		const so0 = range.startOffset;
+		const eo0 = range.endOffset;
+		let so = so0;
+		let eo = eo0;
+		if (sc instanceof Text) {
+			const text = sc.textContent ?? "";
+			let s = Math.max(0, Math.min(so, text.length));
+			while (s > 0 && isWordChar(text[s - 1] ?? "") && isWordChar(text[s] ?? "")) s -= 1;
+			so = s;
+		}
+		if (ec instanceof Text) {
+			const text = ec.textContent ?? "";
+			let e = Math.max(0, Math.min(eo, text.length));
+			while (e < text.length && isWordChar(text[e - 1] ?? "") && isWordChar(text[e] ?? "")) e += 1;
+			eo = e;
+		}
+		if (so === so0 && eo === eo0) return false;
+		const anchorFirst = selection.anchorNode === sc && selection.anchorOffset === so0;
+		if (anchorFirst) selection.setBaseAndExtent(sc, so, ec, eo);
+		else selection.setBaseAndExtent(ec, eo, sc, so);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Horizontal placement for the create-annotation textbox: centered
+ * over the highlight when the highlight is narrower than the box,
+ * otherwise the current end-of-selection (cursor) placement. Either
+ * way clamped on screen. The Annotate button itself is unaffected —
+ * it stays at the cursor end.
+ */
+export function placeAnnPopX(opts: {
+	cursorX: number;
+	highlightLeft: number;
+	highlightWidth: number;
+	popWidth: number;
+	viewportWidth: number;
+}): number {
+	const { cursorX, highlightLeft, highlightWidth, popWidth, viewportWidth } = opts;
+	const lo = 8;
+	const hi = Math.max(lo, viewportWidth - popWidth - 8);
+	if (highlightWidth < popWidth) {
+		return Math.min(Math.max(lo, highlightLeft + (highlightWidth - popWidth) / 2), hi);
+	}
+	return Math.min(Math.max(lo, cursorX), hi);
+}
+
+/**
+ * Start offset of the visual line holding `offset`: the index just
+ * past the nearest preceding newline (0 when none). Lines come from
+ * text alone so the rule unit-tests without layout.
+ */
+export function lineStartOffset(text: string, offset: number): number {
+	const at = Math.max(0, Math.min(offset, text.length));
+	return text.lastIndexOf("\n", at - 1) + 1;
+}
+
+/**
+ * Clamp an off-chat drag's anchor end to the focus (cursor) line:
+ * a selection whose anchor sits above the cursor's current line
+ * pins back to that line's start, so drags starting off-chat (or
+ * running off-screen) never highlight above it. Anchors at or below
+ * the line pass through untouched.
+ */
+export function clampDragAnchorToFocusLine(
+	text: string,
+	anchorOffset: number,
+	focusOffset: number
+): number {
+	const lineStart = lineStartOffset(text, focusOffset);
+	return anchorOffset < lineStart ? lineStart : anchorOffset;
+}
+
+/**
+ * Key handling for the annotation review edit box: Enter saves
+ * (Shift+Enter still newlines), Escape cancels. Anything else is
+ * the textarea's own business.
+ */
+export function reviewEditKey(key: string, shiftKey: boolean): "save" | "cancel" | null {
+	if (key === "Enter" && !shiftKey) return "save";
+	if (key === "Escape") return "cancel";
+	return null;
 }

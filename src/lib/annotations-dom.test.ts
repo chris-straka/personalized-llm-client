@@ -4,6 +4,7 @@ import {
 	quoteFragmentText,
 	loadDraftAnnotations,
 	saveDraftAnnotations,
+	snapSelectionToWordEdges,
 	type Annotation
 } from "./annotations";
 
@@ -32,6 +33,54 @@ describe("quoteFragmentText", () => {
 
 	it("trims plain selections untouched", () => {
 		expect(quoteFragmentText(fragment("<p>  hello world  </p>"))).toBe("hello world");
+	});
+});
+
+describe("snapSelectionToWordEdges", () => {
+	function selectIn(node: Text, start: number, end: number): Selection {
+		const sel = window.getSelection();
+		if (!sel) throw new Error("no selection");
+		sel.setBaseAndExtent(node, start, node, end);
+		return sel;
+	}
+
+	it("expands a mid-word drag to whole words, preserving direction", () => {
+		document.body.innerHTML = "<p>hello world</p>";
+		const node = document.querySelector("p")?.firstChild;
+		if (!(node instanceof Text)) throw new Error("no text");
+		const sel = selectIn(node, 2, 9);
+		expect(snapSelectionToWordEdges(sel)).toBe(true);
+		expect(sel.toString()).toBe("hello world");
+		// Backwards drags keep their direction (anchor stays last).
+		sel.setBaseAndExtent(node, 9, node, 2);
+		expect(snapSelectionToWordEdges(sel)).toBe(true);
+		expect(sel.toString()).toBe("hello world");
+		expect(sel.anchorOffset).toBe(11);
+		expect(sel.focusOffset).toBe(0);
+	});
+
+	it("reports false (and moves nothing) on clean edges and carets", () => {
+		document.body.innerHTML = "<p>hello world</p>";
+		const node = document.querySelector("p")?.firstChild;
+		if (!(node instanceof Text)) throw new Error("no text");
+		const sel = selectIn(node, 0, 5);
+		expect(snapSelectionToWordEdges(sel)).toBe(false);
+		expect(sel.toString()).toBe("hello");
+		sel.collapse(node, 3);
+		expect(snapSelectionToWordEdges(sel)).toBe(false);
+	});
+
+	it("snaps both ends of a multi-node selection", () => {
+		document.body.innerHTML = "<p>alpha <b>beta gamma</b></p>";
+		const first = document.querySelector("p")?.firstChild;
+		const bold = document.querySelector("b")?.firstChild;
+		if (!(first instanceof Text) || !(bold instanceof Text)) throw new Error("no text");
+		const sel = window.getSelection();
+		if (!sel) throw new Error("no selection");
+		// "pha beta gam": start cut inside "alpha", end cut inside "gamma".
+		sel.setBaseAndExtent(first, 2, bold, 8);
+		expect(snapSelectionToWordEdges(sel)).toBe(true);
+		expect(sel.toString()).toBe("alpha beta gamma");
 	});
 });
 
