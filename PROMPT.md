@@ -52,6 +52,7 @@ None of that exists in src/ yet — I checked. Want me to implement one of the t
   Next after that: SQLite FTS5 for the search index if IndexedDB proves slow, and powerSaveBlocker-style sleep prevention during long TTS/stream.
 
   I would not add: cloud sync, plugins, agents — your TODO explicitly marks those non-goals, and they would break the BYOK/local trust story that makes this good.
+  (Clarified by owner: "agents" here means in-app autonomous-agent features only. Build agents doing implementation work are wanted at maximum parallelism.)
 
   On agents: do not spawn a ton at once. Parallel writers corrupt the checkout even on different files, and check/lint/build invalidate HMR. Keep 2-3 max with isolated
   worktrees, one workstream each (storage/search, Android gaps, Windows TTS or OCR), each landing with colocated Vitest + the three-runtime fallback. Tell me which
