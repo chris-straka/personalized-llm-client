@@ -10,6 +10,21 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(() => ({
   plugins: [sveltekit()],
+  resolve: {
+    // Bun's pnpm-style layout leaves several physical copies of the
+    // lezer/codemirror singletons (top-level real dirs plus .pnpm
+    // symlinks). Without dedupe, esbuild/rollup can bundle two copies,
+    // and cross-copy `instanceof TreeBuffer` checks fail — nested fence
+    // highlighting then crashes in hasChild ("reading 'some'").
+    dedupe: [
+      "@lezer/common",
+      "@lezer/lr",
+      "@lezer/highlight",
+      "@codemirror/state",
+      "@codemirror/view",
+      "@codemirror/language"
+    ]
+  },
   // Staleness marker (settings footer): installed builds show when
   // they were compiled, so "am I behind?" is one glance. Dev shows
   // "live" instead (HMR is always fresh; a server-start stamp would lie).

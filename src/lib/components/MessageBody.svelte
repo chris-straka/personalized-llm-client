@@ -541,6 +541,11 @@
 		border: 1px solid #e5e5ea;
 		border-radius: 8px;
 		overflow: hidden;
+		/* Hug the code instead of filling the column: short snippets
+		read as blocks, long lines still scroll inside the pre. */
+		width: fit-content;
+		max-width: 100%;
+		min-width: min(12rem, 100%);
 	}
 	.rendered :global(.ccez-code-head) {
 		display: flex;
@@ -775,6 +780,12 @@
 	}
 	:global(html[data-theme="dark"]) .rendered :global(.ccez-code pre) {
 		background: #101013;
+	}
+	/* Inline code pills: the light background has no dark twin, so
+	filenames read white-on-white without this. */
+	:global(html[data-theme="dark"]) .rendered :global(:not(pre) > code) {
+		background: #2c2c2e;
+		color: #f2f2f7;
 	}
 	:global(html[data-theme="dark"]) .rendered :global(.shiki),
 	:global(html[data-theme="dark"]) :global(html[data-theme="dark"]) .rendered :global(.shiki span) {

@@ -45,6 +45,17 @@ test("command plus and minus scale text", async ({ page }) => {
 	await expect(page.locator(".toast")).toContainText("Text size 100%");
 });
 
+/** ⇧⌘+ / ⇧⌘− widens and narrows the chat column with a rem toast. */
+test("shift command plus and minus scale chat width", async ({ page }) => {
+	await seedChat(page, []);
+	await page.goto("/");
+	await expect(page.locator(".cm-content").first()).toBeVisible();
+	await page.keyboard.press("Meta+Shift+=");
+	await expect(page.locator(".toast")).toContainText("Chat width 38 rem");
+	await page.keyboard.press("Meta+Shift+-");
+	await expect(page.locator(".toast")).toContainText("Chat width 36 rem");
+});
+
 /** Text size scales messages, never the composer input; annotation
 badges track it at a dampened rate (30%: 600% reads ≈2.5× badges). */
 test("text size scales messages and badges, not the composer", async ({ page }) => {

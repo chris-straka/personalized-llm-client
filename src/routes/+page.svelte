@@ -37,6 +37,9 @@
 		activeThinkingId,
 		resolveTheme,
 		systemLocale,
+		CHAT_WIDTH_DEFAULT,
+		CHAT_WIDTH_MIN,
+		CHAT_WIDTH_MAX,
 		type AppSettings
 	} from "$lib/settings";
 	import { cycleThinkingId } from "$lib/providers/thinking";
@@ -636,6 +639,20 @@
 		settings.fontScale = next;
 		persistSettings();
 		flashToast(`Text size ${Math.round(next * 100)}%`);
+	}
+	/** Chat-column width in 2rem steps (desktop only — phones fix it
+	at 46rem). Shift siblings of the text-size chords, above. */
+	function adjustChatWidth(delta: number): void {
+		if (androidUI) return;
+		const current = settings.chatWidth ?? CHAT_WIDTH_DEFAULT;
+		const next = Math.min(CHAT_WIDTH_MAX, Math.max(CHAT_WIDTH_MIN, current + delta));
+		if (next === current) {
+			flashToast(`Chat width ${current} rem (limit)`);
+			return;
+		}
+		settings.chatWidth = next;
+		persistSettings();
+		flashToast(`Chat width ${next} rem`);
 	}
 
 	/** Pointer-down spot for click-off-to-close (select-drags must not count). */
@@ -3305,10 +3322,13 @@
 				event.key === "_")
 		) {
 			// ⌘+ / ⌘- scales the whole UI (the app's own zoom — the
-			// shell has no browser-chrome zoom to fall back on).
+			// shell has no browser-chrome zoom to fall back on). With Shift
+			// held the same chords widen/narrow the chat column instead.
 			event.preventDefault();
 			event.stopPropagation();
-			adjustFontScale(event.key === "-" || event.key === "_" ? -0.1 : 0.1);
+			const narrow = event.key === "-" || event.key === "_";
+			if (event.shiftKey) adjustChatWidth(narrow ? -2 : 2);
+			else adjustFontScale(narrow ? -0.1 : 0.1);
 			return;
 		}
 		if (
@@ -4941,6 +4961,7 @@
 					<div><dt>Delete every chat</dt><dd>{isMac ? "⌥⇧⌘Delete" : "Ctrl+Shift+Alt+Delete"}</dd></div>
 					<div><dt>Cut / delete hovered message</dt><dd>X cuts (copies first) · Delete deletes</dd></div>
 					<div><dt>Text size up / down</dt><dd>{mod}+ / {mod}−</dd></div>
+					<div><dt>Chat width + / −</dt><dd>⇧{mod}+ / ⇧{mod}−</dd></div>
 				</dl>
 				{/if}
 			</div>
@@ -7300,7 +7321,8 @@
 	}
 	.sending {
 		color: #6e6e73;
-		font-size: 0.85rem;
+		/* Status reading text: tracks the text-size setting like messages. */
+		font-size: calc(0.85rem * var(--font-scale, 1));
 	}
 	/* Loading dots exist only while busy, so an idle aid button is
 	exactly its visible label — hover and spacing never cover text
@@ -7601,6 +7623,23 @@
 		background: #2c2c2e !important;
 		border-color: #48484a !important;
 		color: #f2f2f7 !important;
+	}
+	:global(html[data-theme="dark"]) :global(.cm-fence-bar) {
+		background: #2c2c2e !important;
+		border-color: #48484a !important;
+		color: #f2f2f7 !important;
+	}
+	:global(html[data-theme="dark"]) :global(.cm-fence-lang) {
+		color: #98989f !important;
+	}
+	:global(html[data-theme="dark"]) :global(.cm-fence-end) {
+		border-bottom-color: #48484a !important;
+	}
+	:global(html[data-theme="dark"]) :global(.cm-fence-collapsed) {
+		color: #98989f !important;
+	}
+	:global(html[data-theme="dark"]) :global(.cm-fence-btn.copied) {
+		color: #7bd3a6 !important;
 	}
 	/* Centered reading column on wide screens (DeepSeek-web rhythm).
 	The cap rides --chat-width off .app (desktop slider, 36 = the default
