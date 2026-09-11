@@ -23,9 +23,17 @@
 		nativeTtsLastError,
 		friendlyNativeError,
 		nativeVoices,
-		openVoiceSettings
+		openVoiceSettings,
+		saveNativeSpeech
 	} from "$lib/nativeTts";
 	import { voicesForLang, allVoicesForLang, autoVoiceForLang } from "$lib/voiceTiers";
+	import {
+		probeFontCoverage,
+		fontNudgeFor as fontNudgeText,
+		CJK_LABEL,
+		type CjkScript,
+		type FontStatus
+	} from "$lib/fontCoverage";
 	import { currentPlatform } from "$lib/platform";
 	import type { NativeVoice } from "$lib/nativeTts";
 	import { onMount } from "svelte";
@@ -149,6 +157,40 @@
 	/* No appended category: Apple's registry names already carry it
 	("Ava (Premium)"), and Siri's have none to repeat. */
 	const autoLabel = $derived(autoVoice ? `Auto - ${autoVoice.name}` : "Auto");
+	/**
+	 * CJK font-coverage inventory (same pattern as the voice-tier
+	 * inventory above): probe once at open, re-probe from the button.
+	 * `document.fonts` exists in the browser preview too, so this
+	 * section is always visible.
+	 */
+	const fontScripts: CjkScript[] = ["zh", "ja", "ko"];
+	let fontStatus = $state<Record<CjkScript, FontStatus>>(
+		probeFontCoverage(fontScripts)
+	);
+	const fontNudge = $derived(fontNudgeText(fontStatus));
+	function checkFonts(): void {
+		fontStatus = probeFontCoverage(fontScripts);
+	}
+	/** Lesson-audio export (macOS file render, Android synthesizeToFile). */
+	let savingAudio = $state(false);
+	let audioSaveMessage = $state("");
+	async function saveSampleAudio(): Promise<void> {
+		audioSaveMessage = "";
+		savingAudio = true;
+		try {
+			const path = await saveNativeSpeech(
+				"Lesson audio test. This is how your study voice sounds.",
+				voiceLangTag,
+				settings.nativeVoiceId
+			);
+			audioSaveMessage = `Saved to ${path}`;
+		} catch (error) {
+			audioSaveMessage =
+				error instanceof Error ? error.message : String(error);
+		} finally {
+			savingAudio = false;
+		}
+	}
 	// A picked voice never reads another language: when the tag moves on
 	// from the saved pick, fall back to Auto instead of a blank field.
 	$effect(() => {
@@ -811,6 +853,41 @@
 
 	<!-- Plain div + aria, not a <label>: label clicks yank focus into the
 		field, which fights selecting this text. -->
+	<fieldset>
+		<legend>Study fonts</legend>
+		<p class="note">
+			{#each fontScripts as script (script)}
+				<span>{CJK_LABEL[script]}: {fontStatus[script]} </span>
+			{/each}
+		</p>
+		{#if fontNudge}
+			<p class="note" role="alert">{fontNudge}</p>
+		{/if}
+		<button type="button" class="linklike" onclick={checkFonts}>
+			Check fonts again
+		</button>
+	</fieldset>
+	{#if nativeVoice && inShell}
+		<fieldset>
+			<legend>Lesson audio</legend>
+			<p class="note">
+				Render a sample of the {voiceLangTag} study voice to an audio
+				file for spaced-repetition decks. Uses the same voice pick as
+				read-aloud.
+			</p>
+			<button
+				type="button"
+				class="linklike"
+				onclick={() => void saveSampleAudio()}
+				disabled={savingAudio}
+			>
+				{savingAudio ? "Rendering…" : "Save sample audio"}
+			</button>
+			{#if audioSaveMessage}
+				<p class="note">{audioSaveMessage}</p>
+			{/if}
+		</fieldset>
+	{/if}
 	<div class="field">
 		<span id="voice-lang-label">Voice language</span>
 		<input

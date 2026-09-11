@@ -191,6 +191,54 @@ pub fn voices(app: &AppHandle) -> Result<Vec<NativeVoice>, String> {
     })
 }
 
+/// Render `text` to a wav file in the app cache via
+/// `synthesizeToFile` (same locale/voice tuning as live speech).
+/// Returns the saved path. Code-only: unverified on device.
+pub fn save_to_file(
+    app: &AppHandle,
+    text: String,
+    lang: String,
+    voice: Option<String>,
+) -> Result<String, String> {
+    remember(app);
+    if text.trim().is_empty() {
+        return Err("nothing to save".into());
+    }
+    with_env("save_to_file", |env, cls| {
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let text = jstr(env, &text)?;
+        let lang = jstr(env, &lang)?;
+        let voice = match voice {
+            Some(name) => jstr(env, &name)?,
+            None => JObject::null(),
+        };
+        let out = env
+            .call_static_method(
+                cls,
+                "saveToFile",
+                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;J)Ljava/lang/String;",
+                &[
+                    JValue::from(&text),
+                    JValue::from(&lang),
+                    JValue::from(&voice),
+                    JValue::from(id as jlong),
+                ],
+            )
+            .map_err(|e| format!("saveToFile() failed: {e:?}"))?;
+        let path: String = env
+            .get_string(&JString::from(out.l().map_err(|e| {
+                format!("bad saveToFile() return: {e:?}")
+            })?))
+            .map_err(|e| format!("speech path failed: {e:?}"))?
+            .to_string_lossy()
+            .into_owned();
+        if path.is_empty() {
+            return Err("speech file was not written".into());
+        }
+        Ok(path)
+    })
+}
+
 /// Completion callback from `Tts` (UI thread): forward as `tts-done`.
 /// A null error means the utterance played to its natural end.
 #[no_mangle]

@@ -579,6 +579,164 @@ mod imp {
         }
     }
 
+    /// Render `text` to an audio file with the shared voice pick, so a
+    /// downloaded lesson file sounds like the readback it came from.
+    /// macOS-only (uses `block2`, a macOS-only dependency): iOS gets
+    /// the stub below. Blocks the invoke handler — not the main
+    /// thread — until the trailing zero-length buffer arrives or the
+    /// deadline passes. The file lands in the system temp dir and the
+    /// command returns its path.
+    #[cfg(target_os = "macos")]
+    pub fn save_speech(
+        app: &AppHandle,
+        text: String,
+        lang: String,
+        voice: Option<String>,
+    ) -> Result<String, String> {
+        use block2::RcBlock;
+        use objc2::rc::Allocated;
+        use objc2::runtime::AnyObject;
+        use objc2_avf_audio::{AVAudioBuffer, AVAudioFile, AVAudioPCMBuffer};
+        use objc2_foundation::NSURL;
+        use std::ptr::NonNull;
+
+        if text.trim().is_empty() {
+            return Err("nothing to save".into());
+        }
+        let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+        let ctx = format!("render id={id}");
+        let out_path =
+            std::env::temp_dir().join(format!("ccez-speech-{id}.m4a"));
+        /// One-way ownership transfer across threads: the pointer
+        /// carries an extra retain, and exactly one thread ever
+        /// touches the object (raw pointers are neither Send nor
+        /// Sync, so this states the handoff explicitly).
+        struct SendPtr<T>(*mut T);
+        // SAFETY: constructed only with an owned extra retain, and
+        // received exactly once by the single writing thread.
+        unsafe impl<T> Send for SendPtr<T> {}
+        // Buffers cross from the synthesizer's callback queue to the
+        // invoke thread below as retained pointers. Each pointer
+        // carries one extra retain, released by `from_raw` after
+        // writing.
+        let (tx, rx) = channel::<SendPtr<AVAudioBuffer>>();
+        // Handoff for the created audio file (same deal — only the
+        // invoke thread ever touches it) or the setup error.
+        let (setup_tx, setup_rx) = channel::<Result<SendPtr<AVAudioFile>, String>>();
+        let deadline_chars = text.len();
+        let main_ctx = ctx.clone();
+        let main_path = out_path.clone();
+        app.run_on_main_thread(move || {
+            with_main_synth(|synth| unsafe {
+                synth.stopSpeakingAtBoundary(AVSpeechBoundary::Immediate);
+                let Some((picked, origin)) =
+                    choose_voice(&main_ctx, &lang, voice.as_deref())
+                        .or_else(|| pick_voice(&lang).map(|v| (v, "auto")))
+                else {
+                    let _ =
+                        setup_tx.send(Err(format!("no installed voice for {lang}")));
+                    return;
+                };
+                eprintln!(
+                    "[tts] {main_ctx} file voice={} ({}, {origin})",
+                    picked.identifier().to_string(),
+                    picked.name().to_string(),
+                );
+                let utterance = build_utterance(
+                    &text,
+                    &lang,
+                    Some(&picked.identifier().to_string()),
+                    &main_ctx,
+                );
+                // The voice's own settings describe the buffer format
+                // below (the documented pairing for this method).
+                let settings = picked.audioFileSettings();
+                let url = NSURL::fileURLWithPath(&NSString::from_str(
+                    &main_path.to_string_lossy(),
+                ));
+                let allocated: Allocated<AVAudioFile> =
+                    msg_send![AVAudioFile::class(), alloc];
+                let file = match AVAudioFile::initForWriting_settings_error(allocated, &url, &settings) {
+                    Ok(file) => file,
+                    Err(error) => {
+                        let _ = setup_tx.send(Err(format!(
+                            "could not create audio file: {}",
+                            error.localizedDescription().to_string()
+                        )));
+                        return;
+                    }
+                };
+                let block = RcBlock::new(move |buffer: NonNull<AVAudioBuffer>| {
+                    let raw =
+                        Retained::retain(buffer.as_ptr()).map(Retained::into_raw);
+                    if let Some(ptr) = raw {
+                        let _ = tx.send(SendPtr(ptr));
+                    }
+                });
+                synth.writeUtterance_toBufferCallback(&utterance, RcBlock::as_ptr(&block));
+                // The synthesizer copied the block; dropping ours only
+                // releases our own retain (same rule as dictate_macos).
+                drop(block);
+                let _ = setup_tx.send(Ok(SendPtr(Retained::into_raw(file))));
+            });
+        })
+        .map_err(|e| format!("speech render failed to start: {e:?}"))?;
+        let SendPtr(raw_file) = setup_rx
+            .recv_timeout(Duration::from_secs(30))
+            .map_err(|_| "timed out creating the audio file".to_string())??;
+        let file: Retained<AVAudioFile> = unsafe { Retained::from_raw(raw_file) }
+            .ok_or_else(|| "audio file handoff failed".to_string())?;
+        // Rendering runs faster than realtime, but lesson audio can be
+        // long: scale the ceiling with the text, generous either way.
+        let deadline = std::time::Instant::now()
+            + Duration::from_secs(120)
+                .max(Duration::from_millis(
+                    (deadline_chars as u64).saturating_mul(100),
+                ))
+                .min(Duration::from_secs(600));
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                let _ = app.run_on_main_thread(|| {
+                    with_main_synth(|synth| unsafe {
+                        synth.stopSpeakingAtBoundary(AVSpeechBoundary::Immediate);
+                    });
+                });
+                return Err("timed out rendering speech to a file".into());
+            }
+            let SendPtr(ptr) = rx
+                .recv_timeout(remaining)
+                .map_err(|_| "speech render ended without audio".to_string())?;
+            let audio: Retained<AVAudioBuffer> = unsafe { Retained::from_raw(ptr) }
+                .ok_or_else(|| "audio buffer handoff failed".to_string())?;
+            let obj: &AnyObject = &audio;
+            let Some(pcm) = obj.downcast_ref::<AVAudioPCMBuffer>() else {
+                return Err("unexpected audio buffer type".into());
+            };
+            if unsafe { pcm.frameLength() } == 0 {
+                // Trailing empty buffer: synthesis is complete.
+                break;
+            }
+            unsafe { file.writeFromBuffer_error(pcm) }.map_err(|e| {
+                e.localizedDescription().to_string()
+            })?;
+        }
+        eprintln!("[tts] {ctx}: saved {}", out_path.to_string_lossy());
+        Ok(out_path.to_string_lossy().into_owned())
+    }
+
+    /// File export needs `block2`, a macOS-only dependency: iOS
+    /// reports unsupported instead of carrying a second render path.
+    #[cfg(target_os = "ios")]
+    pub fn save_speech(
+        _app: &AppHandle,
+        _text: String,
+        _lang: String,
+        _voice: Option<String>,
+    ) -> Result<String, String> {
+        Err("saving speech to a file requires macOS".into())
+    }
+
     pub fn supported() -> bool {
         true
     }
@@ -735,6 +893,30 @@ pub fn tts_stop(app: AppHandle) -> Result<(), String> {
     }
 }
 
+/// Render `text` to an audio file with the same voice pick as live
+/// speech (macOS `AVSpeechSynthesizer` file export, Android
+/// `synthesizeToFile` into the app cache). Returns the saved path.
+/// Lesson-audio export for spaced-repetition decks; reuses the TTS
+/// bridges, new command. The Android path is code-only, unverified
+/// on device.
+#[tauri::command]
+pub fn tts_save_speech(
+    app: AppHandle,
+    text: String,
+    lang: String,
+    voice: Option<String>,
+) -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    return imp::save_speech(&app, text, lang, voice);
+    #[cfg(target_os = "android")]
+    return super::tts_android::save_to_file(&app, text, lang, voice);
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
+    {
+        let _ = (app, text, lang, voice);
+        return Err("saving speech to a file is not supported on this platform".into());
+    }
+}
+
 /// Identify the language of a text sample for highlight-to-speak in Latin
 /// scripts, where script detection cannot tell French from English.
 /// Returns a BCP-47-ish tag, or null when the sample is too short or the
@@ -745,8 +927,10 @@ pub fn tts_identify_lang(text: String) -> Option<String> {
     return imp::identify_lang(&text);
     #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     {
-        let _ = text;
-        return None;
+        // No `NLLanguageRecognizer` off Apple platforms: the offline
+        // stop-word scorer answers instead (same contract — None when
+        // the sample is too short or unscorable).
+        return super::langid::identify_lang_offline(&text);
     }
 }
 

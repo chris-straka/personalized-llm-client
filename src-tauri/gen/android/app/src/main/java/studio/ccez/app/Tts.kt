@@ -34,16 +34,47 @@ object Tts {
         override fun onStart(id: String) {}
         override fun onDone(id: String) {
             nativeOnTtsDone(id.toLongOrNull() ?: -1, null)
+            settleFile(id)
         }
         override fun onError(id: String) {
             nativeOnTtsDone(id.toLongOrNull() ?: -1, "speech error")
+            settleFile(id)
         }
         @Deprecated("Deprecated in Java")
         override fun onError(id: String, code: Int) {
             nativeOnTtsDone(id.toLongOrNull() ?: -1, "speech error $code")
+            settleFile(id)
         }
         override fun onStop(id: String?, cancel: Boolean) {
-            if (id != null) nativeOnTtsDone(id.toLongOrNull() ?: -1, if (cancel) "canceled" else null)
+            if (id != null) {
+                nativeOnTtsDone(id.toLongOrNull() ?: -1, if (cancel) "canceled" else null)
+                settleFile(id)
+            }
+        }
+    }
+
+    /**
+     * File-export rendezvous: `saveToFile` parks one latch per
+     * `file-<id>` utterance; the listener above releases it on
+     * completion. Live-speech ids are numeric, so their `tts-done`
+     * events already ignore these (`toLongOrNull` fails to -1).
+     */
+    private val fileLatches = java.util.concurrent.ConcurrentHashMap<String, CountDownLatch>()
+
+    private fun settleFile(id: String) {
+        fileLatches.remove(id)?.countDown()
+    }
+
+    /**
+     * Speech-rate parity with the macOS bridge, where Mandarin reads
+     * slightly slower for learners. Android rates multiply the engine
+     * default (1.0); only Chinese deviates.
+     */
+    private fun tuneFor(tts: TextToSpeech, locale: Locale) {
+        try {
+            tts.setSpeechRate(if (locale.language == "zh") 0.9f else 1.0f)
+        } catch (_: Exception) {
+            // Engine default stands in; still speak.
         }
     }
 
@@ -101,6 +132,7 @@ object Tts {
             } catch (_: Exception) {
                 // Engine default stands in; still speak.
             }
+            tuneFor(tts, locale)
             if (voiceName != null) {
                 try {
                     tts.voices?.firstOrNull { it.name == voiceName }?.let { tts.voice = it }
@@ -125,6 +157,64 @@ object Tts {
                 // Already stopped or gone; nothing to report.
             }
         }
+    }
+
+    /**
+     * Render [text] to a wav file in the app cache (lesson-audio
+     * export), with the same locale/voice tuning as live speech.
+     * Blocks the caller until the utterance completes (or two
+     * minutes pass) and returns the absolute path, or "" on failure.
+     * Code-only: unverified on device (no Android hardware ran it).
+     */
+    @JvmStatic
+    fun saveToFile(text: String, lang: String, voiceName: String?, id: Long): String {
+        val utterId = "file-$id"
+        val latch = CountDownLatch(1)
+        var path = ""
+        main.post {
+            try {
+                ensure()
+                val tts = engine
+                if (tts == null) {
+                    latch.countDown()
+                    return@post
+                }
+                val locale = try {
+                    Locale.forLanguageTag(lang)
+                } catch (_: Exception) {
+                    Locale.getDefault()
+                }
+                try {
+                    if (tts.isLanguageAvailable(locale) >= TextToSpeech.LANG_AVAILABLE) {
+                        tts.language = locale
+                    }
+                } catch (_: Exception) {
+                    // Engine default stands in; still render.
+                }
+                tuneFor(tts, locale)
+                if (voiceName != null) {
+                    try {
+                        tts.voices?.firstOrNull { it.name == voiceName }?.let { tts.voice = it }
+                    } catch (_: Exception) {
+                        // Named voice gone; engine default stands in.
+                    }
+                }
+                val file = java.io.File(appContext.cacheDir, "tts-$id.wav")
+                path = file.absolutePath
+                fileLatches[utterId] = latch
+                val rc = tts.synthesizeToFile(text, null, file, utterId)
+                if (rc != TextToSpeech.SUCCESS) {
+                    fileLatches.remove(utterId)
+                    latch.countDown()
+                }
+            } catch (_: Exception) {
+                fileLatches.remove(utterId)
+                latch.countDown()
+            }
+        }
+        latch.await(120, TimeUnit.SECONDS)
+        fileLatches.remove(utterId)
+        return path
     }
 
     /**

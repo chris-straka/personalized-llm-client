@@ -1,3 +1,4 @@
+import { extractAttachmentBytes, extractableFormat } from "./attachExtract";
 import { estimateTextTokens } from "./render";
 
 /**
@@ -73,6 +74,21 @@ export function newId(): string {
 	return crypto.randomUUID();
 }
 
+/** Shared constructor for inlined-text attachments (plain, PDF, docx). */
+function textAttachment(name: string, mime: string, text: string): Attachment {
+	return {
+		id: newId(),
+		name,
+		mime,
+		kind: "text",
+		dataUrl: null,
+		text,
+		width: null,
+		height: null,
+		tokens: estimateTextTokens(text)
+	};
+}
+
 const TEXT_MIMES = [
 	"text/",
 	"application/json",
@@ -131,17 +147,19 @@ export async function fileToAttachment(file: File): Promise<Attachment> {
 	if (isTextFile(file)) {
 		const raw = await file.text();
 		const text = raw.length > MAX_FILE_CHARS ? raw.slice(0, MAX_FILE_CHARS) : raw;
-		return {
-			id: newId(),
-			name: file.name || "pasted-text",
-			mime: file.type || "text/plain",
-			kind: "text",
-			dataUrl: null,
-			text,
-			width: null,
-			height: null,
-			tokens: estimateTextTokens(text)
-		};
+		return textAttachment(file.name || "pasted-text", file.type || "text/plain", text);
+	}
+	// PDF/docx carry no usable `File.text()`: pull the text out of the
+	// raw bytes offline (no downloads, no server) and inline it like
+	// any other text file. Images are already handled above.
+	const format = extractableFormat(file.name, file.type);
+	if (format) {
+		const bytes = new Uint8Array(await file.arrayBuffer());
+		const raw = extractAttachmentBytes(format, bytes)?.trim() ?? "";
+		if (raw) {
+			const text = raw.length > MAX_FILE_CHARS ? raw.slice(0, MAX_FILE_CHARS) : raw;
+			return textAttachment(file.name || `pasted-${format}`, file.type || format, text);
+		}
 	}
 	throw new Error(`Unsupported attachment: ${file.name || file.type || "unknown file"}`);
 }

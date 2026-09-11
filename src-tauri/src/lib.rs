@@ -13,6 +13,7 @@ mod dictate_linux;
 mod dictate_macos;
 mod dictate_windows;
 mod keyboard;
+mod langid;
 #[cfg(desktop)]
 mod menu;
 mod tts;
@@ -172,6 +173,7 @@ pub fn run() {
             tts::tts_supported,
             tts::tts_speak,
             tts::tts_stop,
+            tts::tts_save_speech,
             tts::tts_voices,
             tts::tts_identify_lang,
             ocr::ocr_supported,
