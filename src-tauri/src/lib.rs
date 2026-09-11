@@ -4,6 +4,7 @@
 mod dev_icon;
 mod annotate;
 mod dictation;
+mod dictate_linux;
 mod dictate_macos;
 mod dictate_windows;
 mod keyboard;
@@ -12,12 +13,20 @@ mod menu;
 mod tts;
 #[cfg(target_os = "android")]
 mod tts_android;
+mod tts_linux;
+mod tts_windows;
 #[cfg(target_os = "android")]
 mod secrets_android;
 
 /// Native dictation fallback for platforms without an implementation
-/// (Linux, iOS): the frontend falls back to Web Speech on invoke failure.
-#[cfg(not(any(target_os = "android", target_os = "macos", target_os = "windows")))]
+/// (iOS and the remaining stubs): the frontend falls back to Web
+/// Speech on invoke failure.
+#[cfg(not(any(
+    target_os = "android",
+    target_os = "macos",
+    target_os = "windows",
+    target_os = "linux"
+)))]
 mod dictate_unsupported {
     #[tauri::command]
     pub fn dictate_start(_app: tauri::AppHandle, _lang: Option<String>) -> Result<(), String> {
@@ -31,20 +40,31 @@ mod dictate_unsupported {
 }
 
 // Exactly one dictate_start/dictate_stop pair registers per platform:
-// real implementations on Android/macOS/Windows, Err stubs elsewhere.
+// real implementations on Android/macOS/Windows/Linux, Err stubs
+// elsewhere.
 #[cfg(target_os = "android")]
 use dictation::{dictate_start, dictate_stop};
 #[cfg(target_os = "macos")]
 use dictate_macos::{dictate_start, dictate_stop};
 #[cfg(target_os = "windows")]
 use dictate_windows::{dictate_start, dictate_stop};
-#[cfg(not(any(target_os = "android", target_os = "macos", target_os = "windows")))]
+#[cfg(target_os = "linux")]
+use dictate_linux::{dictate_start, dictate_stop};
+#[cfg(not(any(
+    target_os = "android",
+    target_os = "macos",
+    target_os = "windows",
+    target_os = "linux"
+)))]
 use dictate_unsupported::{dictate_start, dictate_stop};
 
-/// API-key storage: macOS Keychain via the `keyring` crate, Android
-/// Keystore via `secrets_android` (keyring has no Android backend — it
-/// falls back to an in-memory mock). Service name matches the Tauri
-/// bundle identifier.
+/// API-key storage: macOS Keychain / iOS keychain, Windows Credential
+/// Manager, and the Linux Secret Service (GNOME Keyring / KWallet) all
+/// via the `keyring` crate (`apple-native`, `windows-native`, and
+/// `sync-secret-service` features in `Cargo.toml`); Android Keystore
+/// via `secrets_android` (keyring has no Android backend — it falls
+/// back to an in-memory mock). Service name matches the Tauri bundle
+/// identifier.
 const KEYCHAIN_SERVICE: &str = "studio.ccez.app";
 
 /// Read a secret; `None` when nothing is stored under `account`.

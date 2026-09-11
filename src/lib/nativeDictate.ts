@@ -36,7 +36,7 @@ export type NativeDictateOutcome =
  * and unit-tested.
  */
 export function nativeDictateFallback(message: string): boolean {
-	return /not supported|requires (android|macos|windows)|bridge not initialized|no recognizer|recognizer (absent|unavailable|missing)/i.test(
+	return /not supported|requires (android|macos|windows|linux)|bridge not initialized|no recognizer|recognizer (absent|unavailable|missing)/i.test(
 		message
 	);
 }

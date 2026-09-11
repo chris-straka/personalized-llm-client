@@ -27,6 +27,12 @@ describe("nativeDictateFallback", () => {
 	it("falls back on unsupported platforms and missing bridges", () => {
 		expect(nativeDictateFallback("native dictation is not supported on this platform")).toBe(true);
 		expect(nativeDictateFallback("native dictation requires Android")).toBe(true);
+		expect(nativeDictateFallback("dictation requires Linux")).toBe(true);
+		expect(
+			nativeDictateFallback(
+				"native dictation is not supported on this platform: Linux has no OS speech-recognition API (install `nerd-dictation` for offline dictation, or use browser dictation)"
+			)
+		).toBe(true);
 		expect(nativeDictateFallback("dictation bridge not initialized")).toBe(true);
 		expect(nativeDictateFallback("no recognizer available")).toBe(true);
 	});
