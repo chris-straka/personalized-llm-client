@@ -751,7 +751,13 @@
 	</label>
 	{#if !androidUI}
 		<label>
-			Chat width
+			<button
+				type="button"
+				class="reset-width"
+				title="Reset to the default width"
+				onclick={() => (settings.chatWidth = CHAT_WIDTH_DEFAULT)}
+				>Chat width ({CHAT_WIDTH_DEFAULT})</button
+			>
 			<span class="font-row">
 				<input
 					type="range"
@@ -1201,6 +1207,7 @@
 	.hover-row {
 		display: flex;
 		gap: 1.2rem;
+		margin-bottom: 0.25rem;
 	}
 	.hover-row legend {
 		margin-bottom: 0.3rem;
@@ -1217,6 +1224,16 @@
 		gap: 0.5rem;
 		font-weight: 400;
 		cursor: pointer;
+	}
+	.reset-width {
+		background: none;
+		border: none;
+		padding: 0;
+		font: inherit;
+		cursor: pointer;
+		color: inherit;
+		text-decoration: underline;
+		text-underline-offset: 2px;
 	}
 
 	section > button {

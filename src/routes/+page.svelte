@@ -7528,7 +7528,15 @@
 		max-width: calc(var(--chat-width, 46) * 1rem);
 		box-sizing: border-box;
 	}
-	.prompt,
+	.prompt {
+		/* Pinned to the legacy width: the composer never grows with the
+		chat slider, but still shrinks on narrow columns. */
+		width: calc(100% - 2.4rem);
+		max-width: min(calc(var(--chat-width, 46) * 1rem), 46rem);
+		margin-left: auto;
+		margin-right: auto;
+		box-sizing: border-box;
+	}
 	.lang-menus,
 	.attachments,
 	.review,
