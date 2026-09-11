@@ -9,6 +9,9 @@ import {
 	CHAT_WIDTH_DEFAULT,
 	CHAT_WIDTH_MAX,
 	CHAT_WIDTH_MIN,
+	PROMPT_IDLE_DEFAULT,
+	PROMPT_IDLE_MAX,
+	PROMPT_IDLE_MIN,
 	activeThinkingId,
 	effectiveSystemPrompt,
 	systemLocale,
@@ -33,9 +36,11 @@ describe("settings", () => {
 		expect("readingAids" in s).toBe(false);
 		expect(s.vim).toBe(true);
 		expect(s.voice).toBe(false);
-		expect(s.ownBubble).toBe(true);
-		expect(s.hoverUserActions).toBe(false);
-		expect(s.hoverAssistantActions).toBe(false);
+		expect(s.ownBubble).toBe(false);
+		expect(s.hoverUserActions).toBe(true);
+		expect(s.hoverAssistantActions).toBe(true);
+		expect(s.scaleActionsWithFont).toBe(false);
+		expect(s.promptIdleSec).toBe(PROMPT_IDLE_DEFAULT);
 		expect(s.voiceEngine).toBe("native");
 		expect(s.voiceLang).toBe("en-US");
 		expect(s.systemPrompt).toBe(DEFAULT_SYSTEM_PROMPT);
@@ -94,6 +99,48 @@ describe("settings", () => {
 		(junk as unknown as Record<string, unknown>).chatWidth = "wide";
 		saveSettings(junk, memoryStore);
 		expect(loadSettings(memoryStore).chatWidth).toBe(CHAT_WIDTH_DEFAULT);
+	});
+
+	it("backfills and clamps the prompt idle timeout on old saves", () => {
+		expect(defaultSettings().promptIdleSec).toBe(PROMPT_IDLE_DEFAULT);
+		const s = blankSettings();
+		delete (s as unknown as Record<string, unknown>).promptIdleSec;
+		saveSettings(s, memoryStore);
+		expect(loadSettings(memoryStore).promptIdleSec).toBe(PROMPT_IDLE_DEFAULT);
+		const kept = blankSettings();
+		kept.promptIdleSec = 10;
+		saveSettings(kept, memoryStore);
+		expect(loadSettings(memoryStore).promptIdleSec).toBe(10);
+		const low = blankSettings();
+		low.promptIdleSec = PROMPT_IDLE_MIN - 1;
+		saveSettings(low, memoryStore);
+		expect(loadSettings(memoryStore).promptIdleSec).toBe(PROMPT_IDLE_DEFAULT);
+		const high = blankSettings();
+		high.promptIdleSec = PROMPT_IDLE_MAX + 1;
+		saveSettings(high, memoryStore);
+		expect(loadSettings(memoryStore).promptIdleSec).toBe(PROMPT_IDLE_DEFAULT);
+	});
+
+	it("keeps saved message chrome while fresh installs start plain and hover-only", () => {
+		const kept = blankSettings();
+		kept.ownBubble = true;
+		kept.hoverUserActions = false;
+		kept.hoverAssistantActions = false;
+		kept.scaleActionsWithFont = true;
+		saveSettings(kept, memoryStore);
+		const reloaded = loadSettings(memoryStore);
+		expect(reloaded.ownBubble).toBe(true);
+		expect(reloaded.hoverUserActions).toBe(false);
+		expect(reloaded.hoverAssistantActions).toBe(false);
+		expect(reloaded.scaleActionsWithFont).toBe(true);
+	});
+
+	it("allows chat widths past 80rem", () => {
+		expect(CHAT_WIDTH_MAX).toBeGreaterThan(80);
+		const kept = blankSettings();
+		kept.chatWidth = 100;
+		saveSettings(kept, memoryStore);
+		expect(loadSettings(memoryStore).chatWidth).toBe(100);
 	});
 
 	it("defaults mic dictation on and keeps an explicit off", () => {

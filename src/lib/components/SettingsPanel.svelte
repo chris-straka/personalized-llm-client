@@ -6,8 +6,12 @@
 		CHAT_WIDTH_DEFAULT,
 		CHAT_WIDTH_MAX,
 		CHAT_WIDTH_MIN,
+		PROMPT_IDLE_DEFAULT,
+		PROMPT_IDLE_MAX,
+		PROMPT_IDLE_MIN,
 		type AppSettings
 	} from "$lib/settings";
+	import { draggedSliderPastTop } from "$lib/chrome";
 	import { thinkingFor, resolveThinkingId } from "$lib/providers/thinking";
 	import { ejectProvider, restoreProvider } from "$lib/session";
 	import { hydrateSecrets, tauriBackendAvailable } from "$lib/secrets";
@@ -66,6 +70,27 @@
 		((globalThis as unknown as { __APP_VERSION__?: string }).__APP_VERSION__ ?? "");
 	const showStamp = !import.meta.env.DEV;
 
+	/**
+	 * Slider reset gestures (text size, chat width, idle timeout):
+	 * dragging upward past the slider's top edge restores the default,
+	 * and so does clicking the label text or the empty area beside the
+	 * slider. Clicks that land on the slider, its readout, or the
+	 * explicit reset button keep their own behavior.
+	 */
+	let sliderPressY: number | null = null;
+	function noteSliderPress(event: PointerEvent): void {
+		sliderPressY = event.clientY;
+	}
+	function sliderRelease(event: PointerEvent, reset: () => void): void {
+		const startY = sliderPressY;
+		sliderPressY = null;
+		if (startY != null && draggedSliderPastTop(startY, event.clientY)) reset();
+	}
+	function labelAreaReset(event: MouseEvent, reset: () => void): void {
+		const target = event.target;
+		if (target instanceof HTMLElement && target.closest("input, output, button")) return;
+		reset();
+	}
 	/**
 	 * Pull the provider's `/models` list into the Model picker's datalist.
 	 * Best-effort: failures surface transiently and the field keeps working
@@ -595,6 +620,10 @@
 				Switch message buttons to overlay menu
 			</label>
 			<label class="check">
+				<input type="checkbox" bind:checked={settings.scaleActionsWithFont} />
+				Scale message buttons with text size
+			</label>
+			<label class="check">
 				<input type="checkbox" bind:checked={settings.hideButtons} />
 				Hide message buttons until tapped
 			</label>
@@ -625,6 +654,10 @@
 		<label class="check">
 			<input type="checkbox" bind:checked={settings.ownBubble} />
 			Enable background on my messages
+		</label>
+		<label class="check">
+			<input type="checkbox" bind:checked={settings.scaleActionsWithFont} />
+			Scale message buttons with text size
 		</label>
 		<label class="check">
 			<input type="checkbox" bind:checked={settings.inspectEnabled} />
@@ -793,7 +826,8 @@
 			}}
 		/>
 	</div>
-	<label>
+	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+	<label onclick={(e) => labelAreaReset(e, () => (settings.fontScale = 1))}>
 		Text Size
 		<button
 			type="button"
@@ -809,6 +843,8 @@
 				step="5"
 				value={Math.round(settings.fontScale * 100)}
 				aria-label="Text size percent"
+				onpointerdown={noteSliderPress}
+				onpointerup={(e) => sliderRelease(e, () => (settings.fontScale = 1))}
 				oninput={(e) => {
 					settings.fontScale = Number(e.currentTarget.value) / 100;
 				}}
@@ -817,7 +853,8 @@
 		</span>
 	</label>
 	{#if !androidUI}
-		<label>
+		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+	<label onclick={(e) => labelAreaReset(e, () => (settings.chatWidth = CHAT_WIDTH_DEFAULT))}>
 			Chat width
 			<button
 				type="button"
@@ -834,6 +871,8 @@
 					step="1"
 					value={settings.chatWidth ?? CHAT_WIDTH_DEFAULT}
 					aria-label="Chat width in rem"
+					onpointerdown={noteSliderPress}
+					onpointerup={(e) => sliderRelease(e, () => (settings.chatWidth = CHAT_WIDTH_DEFAULT))}
 					oninput={(e) => {
 						settings.chatWidth = Number(e.currentTarget.value);
 					}}
@@ -842,6 +881,33 @@
 			</span>
 		</label>
 	{/if}
+	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+	<label onclick={(e) => labelAreaReset(e, () => (settings.promptIdleSec = PROMPT_IDLE_DEFAULT))}>
+		Hide prompt after idle
+		<button
+			type="button"
+			class="reset-width"
+			title="Reset to the default idle time"
+			onclick={() => (settings.promptIdleSec = PROMPT_IDLE_DEFAULT)}
+			>({PROMPT_IDLE_DEFAULT}s)</button
+		>
+		<span class="font-row">
+			<input
+				type="range"
+				min={PROMPT_IDLE_MIN}
+				max={PROMPT_IDLE_MAX}
+				step="1"
+				value={settings.promptIdleSec ?? PROMPT_IDLE_DEFAULT}
+				aria-label="Idle seconds before the prompt hides"
+				onpointerdown={noteSliderPress}
+				onpointerup={(e) => sliderRelease(e, () => (settings.promptIdleSec = PROMPT_IDLE_DEFAULT))}
+				oninput={(e) => {
+					settings.promptIdleSec = Number(e.currentTarget.value);
+				}}
+			/>
+			<output style="min-width: 3.6rem;">{settings.promptIdleSec ?? PROMPT_IDLE_DEFAULT} s</output>
+		</span>
+	</label>
 </section>
 
 <section aria-labelledby="color-scheme-heading">

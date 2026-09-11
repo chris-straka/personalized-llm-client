@@ -679,9 +679,10 @@
 		color: inherit;
 	}
 	.rendered :global(.ccez-thoughts) {
-		/* Thoughts track the message scale like the body (fixed rem
-		stranded them at 12.8px under a 600% reading size). */
-		font-size: calc(0.8rem * var(--font-scale, 1));
+		/* Thoughts use the SAME size as chat text (.rendered is
+		0.92rem × scale): a smaller factor stranded them below the
+		body at every text size. */
+		font-size: calc(0.92rem * var(--font-scale, 1));
 		color: #98989f;
 		margin-bottom: 0.4em;
 	}

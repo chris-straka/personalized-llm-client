@@ -172,6 +172,7 @@
 		type ClipboardItemLike
 	} from "$lib/touchPaste";
 	import { isKeyboardOpen, keyboardOverlapPx } from "$lib/viewportReflow";
+import { isPromptIdle } from "$lib/chrome";
 	import {
 		speakText,
 		speakMultilingual,
@@ -1057,6 +1058,39 @@
 		else openSettingsPanel();
 	}
 
+	/**
+	 * Idle-hide for the main prompt: any mouse, keyboard, touch, or
+	 * wheel input stamps lastInputAt and shows the composer instantly;
+	 * a 500ms ticker hides it (slides down out of view) once
+	 * settings.promptIdleSec elapses with no input. The timeout read
+	 * subscribes the effect, so a settings change re-arms the ticker.
+	 */
+	let lastInputAt = $state(Date.now());
+	let promptIdle = $state(false);
+	function noteInput(): void {
+		lastInputAt = Date.now();
+		promptIdle = false;
+	}
+	$effect(() => {
+		const idleSec = settings.promptIdleSec ?? 6;
+		const on = (): void => noteInput();
+		window.addEventListener("pointermove", on, { passive: true });
+		window.addEventListener("pointerdown", on, { passive: true });
+		window.addEventListener("keydown", on);
+		window.addEventListener("wheel", on, { passive: true });
+		window.addEventListener("touchstart", on, { passive: true });
+		const timer = window.setInterval(() => {
+			if (isPromptIdle(lastInputAt, Date.now(), idleSec)) promptIdle = true;
+		}, 500);
+		return () => {
+			window.removeEventListener("pointermove", on);
+			window.removeEventListener("pointerdown", on);
+			window.removeEventListener("keydown", on);
+			window.removeEventListener("wheel", on);
+			window.removeEventListener("touchstart", on);
+			window.clearInterval(timer);
+		};
+	});
 	/** UI text scale in 10% steps (50–600% desktop, 50–400% phones). */
 	function adjustFontScale(delta: number): void {
 		const cap = androidUI ? 4 : 6;
@@ -4640,6 +4674,7 @@
 	data-android={androidUI || null}
 	data-ios={iosUI || null}
 	style="--font-scale: {androidUI ? Math.min(4, settings.fontScale) : settings.fontScale}; --chat-width: {androidUI ? 46 : (settings.chatWidth ?? 36)}"
+	data-mac={isMac && !androidUI || null}
 >
 	<aside class:collapsed={settings.sidebarCollapsed} inert={settings.sidebarCollapsed} data-fade-scroll>
 		<div class="side-head" data-tauri-drag-region aria-hidden="true" onmousedown={dragWindow} ondblclick={zoomWindow}>
@@ -4724,6 +4759,7 @@
 		class:plain-user={!settings.ownBubble}
 		class:hover-user={settings.hoverUserActions}
 		class:hover-assistant={settings.hoverAssistantActions}
+		class:scale-actions={settings.scaleActionsWithFont}
 		class:alt={altHeld}
 		onpointerdown={noteMainDown}
 		onclick={closeSettingsFromMain}
@@ -4731,10 +4767,11 @@
 		{#if toast}
 			<button type="button" class="toast" title="Click to copy" aria-live="polite" transition:fade={{ duration: 160 }} onclick={copyToast}>{toast}</button>
 		{/if}
-		<!-- Slim title strip: an empty drag surface with the reply-language
-		pill's anchor (token count lives in the settings panel now, and
+		<!-- Slim title strip: app name plus the reply-language pill's
+		anchor (token count lives in the settings panel now, and
 		Settings itself moved to the menu bar). Double-click zooms. -->
 		<header role="toolbar" aria-label="App" tabindex="-1" onmousedown={dragWindow} ondblclick={zoomWindow}>
+			<span class="app-title">Ccez Studio</span>
 			<span class="tokens-wrap">
 				{#if activeReplyLang}
 					<span class="lang-chip-float" transition:fade={{ duration: 90 }}>
@@ -5223,6 +5260,7 @@
 			class:has-anns={annotations.length > 0}
 			class:has-mic={canMic && settings.micEnabled}
 			class:prompt-hidden={!!annPop && androidUI && !iosUI}
+			class:prompt-idle={promptIdle}
 			bind:this={promptEl}
 			onclick={focusPromptFloor}
 			ondragover={(e) => e.preventDefault()}
@@ -6439,6 +6477,15 @@
 		-webkit-user-select: none;
 		cursor: default;
 	}
+	/* App name in the title strip: quiet chrome beside the drag
+	surface, never interactive (double-click still zooms). */
+	.app-title {
+		font-weight: 600;
+		letter-spacing: 0.01em;
+		color: #6e6e73;
+		color: var(--muted);
+		pointer-events: none;
+	}
 	/* Chrome recedes so the chat leads: the language pill and waypoint
 	ticks rest dimmed until hovered or focused. */
 	.lang-chip {
@@ -7182,6 +7229,13 @@
 	main.empty .lang-menus {
 		justify-content: center;
 		padding: 0.55rem 1.2rem 0;
+	}
+	/* Mac desktop only: lift the language buttons clear of the
+	composer (the default gap reads stranded under macOS chrome).
+	A pure visual shift — layout never moves, so nothing overlaps.
+	Eyeball the exact offset on a Mac; touch layouts are untouched. */
+	.app[data-mac] main.empty .lang-menus {
+		transform: translateY(-1.5rem);
 	}
 	.lang-menu {
 		position: relative;
@@ -8444,6 +8498,11 @@
 		color: var(--ink);
 		text-decoration: none;
 	}
+	/* Opt-in (Settings): message buttons grow with the text-size
+	setting instead of holding their fixed 0.75rem. */
+	main.scale-actions .actions button {
+		font-size: calc(0.75rem * var(--font-scale, 1));
+	}
 	/* Loading buttons hold their look while the dots pulse. */
 	.actions button:disabled {
 		cursor: default;
@@ -8536,6 +8595,18 @@
 		the room). Restores the moment the box closes. */
 		display: none;
 	}
+	/* Idle-hide: with no input for the configured timeout the prompt
+	slides down until hidden, giving the chat the full column. Any
+	input restores it instantly (JS drops the class on the event,
+	so the return trip runs the same ramp in reverse). Visibility
+	flips at the end of the ramp so the slide reads, then the box
+	stops taking pointer hits. */
+	.prompt.prompt-idle {
+		transform: translateY(calc(100% + 2rem));
+		opacity: 0;
+		visibility: hidden;
+		pointer-events: none;
+	}
 	.prompt {
 		position: relative;
 		margin: 0.6rem 1.2rem 1.1rem;
@@ -8551,8 +8622,24 @@
 		about three text lines plus the tools row. */
 		min-height: 6.4rem;
 		box-sizing: border-box;
-		/* Ease the outline both in and out of hover. */
-		transition: border-color 0.18s ease;
+		/* Ease the outline both in and out of hover, plus the
+		idle-hide slide (visibility flips delayed on hide so the
+		ramp reads, instant on restore). */
+		transition:
+			border-color 0.18s ease,
+			transform 0.35s ease,
+			opacity 0.35s ease,
+			visibility 0s linear 0.35s;
+	}
+	/* Restoring from idle drops the class on the input event itself:
+	visibility must flip at once (no delay), while the slide and
+	fade still ramp back in. */
+	.prompt:not(.prompt-idle) {
+		transition:
+			border-color 0.18s ease,
+			transform 0.35s ease,
+			opacity 0.35s ease,
+			visibility 0s;
 	}
 	/* No entrance animation on the composer: it used to glide down on the
 	first message, exactly while the first tokens streamed in — on a slow
