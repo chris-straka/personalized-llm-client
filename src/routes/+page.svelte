@@ -6671,6 +6671,11 @@ import { isPromptIdle } from "$lib/chrome";
 	}
 	.sideview-toggle {
 		font: inherit;
+		/* The open strip is a fixed drawer (z-index 55) covering the
+		top bar: without its own stacking the toggle sinks under it
+		and can never be clicked shut. */
+		position: relative;
+		z-index: 56;
 		font-size: 0.78rem;
 		color: #1c1c1e;
 		color: var(--ink);

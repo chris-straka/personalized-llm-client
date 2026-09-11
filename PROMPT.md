@@ -84,3 +84,53 @@ Strongest learner combo: built-in-AI translate + dictionary/stroke-order + lesso
 And this for optional things but they all look good I think?
 
 I think hooking up a search to the ctrl+p shortcut would be good, and then for mobile if swiping left to right would open the chats sidebar and have a search text box you, where you can click at that search textbox to have the chats sidebar go away and the keyboard to step in to search for something. I also want the windows TTS and the Linux TTS. And the latex thing you mentioned earlier for math (between the $$ $$ and $$). I don't think I need latex rendering in the main text prompt itself, or markdown rendering in the main text prompt itself, just the main chat. I want similar fold and copy buttons for latex. I want linux TTS and dictate and I want Windows TTS and dictate. Also linux secrets (I'm assuming mac keychain and iOS is already covered). I think web secrets is done too with webcrypto right? This is everything else I can think of ever implementing in this app right now. I want you to spawn as many agents as you need to get all of this done as effectively and efficiently as possible. I'm thinking of letting this run all night, I'm about to go to sleep, so if you have any questions about all this, ask it now. ALthough it's fine if we build the wrong then and then we fix it tomorrow, but I think you know what I want anyway. Everything else that is in our TODO for later, let's do it all tonight. The "Chinese/Japanese" radical thing that we mentioned in the plan should only appear as a button next to the annotate button (on both mobile and desktop, meaning mobile should have annotate and "inspect" in the main text prompt whenever I hover kanji/hanzi. This new "Inspect" button should ONLY show up when I highlight Chinese or Japanese and ONLY when it's a single character in the highlight. When I click it, it should open an overlay similar to the keyboard shortcut overlay showing me the radicals and stuff. And it should show me an animation of the stroke order, the number of strokes, and the unihan definition. And this new inspect button should be locked behind a checkbox on the settings page with the other checkboxes. If it's off, then the button to Inspect should not appear anywhere at all. I think I want to produce the mac universal AND just the ARM in my assets for each release. I don't want the bloat of both versions in a single binary when I only use one. So I think that means two dmgs? Or is the point of a dmg to pick only one of the 15mb versions and then it only eats up 15mb on my computer's storage? Don't forget about tests. If you don't ask me any questions after I send this, I'll take that to mean you're good and I can go to bed, turn off my monitor and you can work on this all night. You can put the computer in sleep when you're done.
+
+# In addition
+
+Smooth scroll the chat with j/k on desktop when nothing is selected, and d and u should fast smooth scroll me.  
+
+Exiting full screen should be press and hold escape, not just tapping it.
+
+ The language buttons (e.g., French) needs to go up more on mac desktop
+
+When I'm inactive (no mouse movement or keyboard pressing and no mobile tapping), the main text prompt should slide down until it disappears and it should reveal all the other text. I should be able to configure the timing for when it disappears in the settings menu too
+
+ The top bar should show text, while still having the double tap to expand to full screen.
+
+The create annotation marker splits the word in half  for text selection
+
+ shift+command+plus and shift+command+minus should increase/decrease chat width
+
+I think (feel free to disagree or maybe it's too hard). The create annotation textbox should be centered in the middle of the selected text that it's highlighting and not at the end or to the right of it, IFF the text it's highlighting is smaller than the text box itself, if it's a larger paragraph it should just put the textbox where it does now. The annotate button to open the textbox should always still appear where it does currently I think (at the end of what I have selected near my cursor).
+
+ When I hover a previous message's annotations in the chat, I think that number should scale with the font size.
+
+Hitting gg when nothing is selected should go to the top and shift+g when nothing is selected should go to the bottom.
+
+I wonder if empty annotations should just have a "?" inserted for them, so the AI knows I'm confused.
+
+When I click and hold somewhere off the main chat and then drag into the main chat, I don't think it should highlight anything above the line that my cursor is currently on. Also, when selecting text  and while holding the mouse down and then dragging the cursor off screen, it should not highlight everything above that line I don't think.
+
+If i send a message that ONLY has annotations,  it should look like a – in the chat history with the annotations thing above it and it should be the same font size as the text.
+
+Thinking should have the same font size as the current chat font size
+
+ When I go to the main text prompt and click on the annotations button to bring up the overlay and edit an existing annotation, the save button only hovers out I think, it does animate as much when I hover in. Also, the text area is not styled that much maybe? Maybe it's okay, but the text area is quite dark and almost black. Maybe that's fine though tbh. Hitting enter on this text area should save and not create a new line though.
+
+Hitting z with my cursor hovered over a message should scroll me to the top of that message. And Z should scroll me to the bottom. 
+
+When I click and drag any of the two sliders and slide up, it will reset the slider value back to the default. Clicking anywhere in the label and to the right of the label (where there is no text) will also trigger the default.
+
+I think the chat width should be configured  past 80 rem.  
+
+On a fresh install, the default options/settings should be to have the background for my messages disabled and the buttons for both me and the AI to only appear on hover.
+
+If I change the thinking level while it's thinking, does it only save that setting for the next request? I imagine so eh? 
+
+I think there should be another option that enables whether or not the msg buttons scale with the font size. 
+
+As it currently operates, is the create annotation text box and text scaling with font size?  
+
+Hitting command+t should open a browser window that I can open and close with  command+t, only one tab allowed I think.  
+
+https://v2.tauri.app/reference/javascript/api/namespacewebview/

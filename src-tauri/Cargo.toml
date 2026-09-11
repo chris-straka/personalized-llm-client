@@ -64,7 +64,10 @@ jni = "0.21"
 windows = { version = "0.61", features = [
     "Foundation",
     "Globalization",
+    "Graphics_Imaging",
+    "Media_Ocr",
     "Media_SpeechRecognition",
+    "Storage_Streams",
     "Win32_Media_Speech",
     "Win32_System_Com",
 ] }

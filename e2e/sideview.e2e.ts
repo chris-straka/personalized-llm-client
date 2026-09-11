@@ -58,6 +58,10 @@ test("meta+t toggles the research panel", async ({ page }) => {
 	await page.locator(".cm-content").first().waitFor({ timeout: 60_000 });
 
 	const panel = page.getByRole("complementary", { name: "Research panel" });
+	// The composer autofocuses on load, which correctly swallows the
+	// chord: click neutral chrome first so the press starts outside
+	// message text (far left of the bar, away from its buttons).
+	await page.locator('header[aria-label="App"]').click({ position: { x: 5, y: 5 } });
 	await page.keyboard.press("Meta+t");
 	await expect(panel).toBeVisible();
 	await page.keyboard.press("Escape");

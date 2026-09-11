@@ -5,6 +5,10 @@ mod dev_icon;
 mod annotate;
 mod dictation;
 mod ocr;
+#[cfg(target_os = "windows")]
+mod ocr_windows;
+#[cfg(target_os = "linux")]
+mod ocr_linux;
 mod dictate_linux;
 mod dictate_macos;
 mod dictate_windows;

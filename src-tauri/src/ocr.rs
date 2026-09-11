@@ -25,10 +25,11 @@
 //! capability (unlike the mic / speech-recognition keys documented in
 //! `dictate_macos.rs`), so there is nothing to add to the bundle.
 //!
-//! Compiled only on macOS. Every other platform gets stubs that report
-//! "unsupported", and the frontend hides/gates the UI on `ocr_supported`.
-//! Windows WinRT OCR (`Windows.Media.Ocr`) is an explicit follow-up and
-//! is NOT started here.
+//! On-device OCR on every desktop OS: macOS Vision (`imp` below),
+//! Windows WinRT OCR (`ocr_windows.rs`), and Linux Tesseract
+//! (`ocr_linux.rs`). Every other platform gets stubs that report
+//! "unsupported", and the frontend hides/gates the UI on
+//! `ocr_supported`.
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
@@ -151,13 +152,18 @@ fn decode_image(input: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-/// Does this build recognize text on-device? Always true on macOS,
-/// always false elsewhere — the frontend gates the OCR affordance on this.
+/// Does this build recognize text on-device? True on macOS (Vision),
+/// Windows (WinRT OCR), and Linux with Tesseract installed — the
+/// frontend gates the OCR affordance on this.
 #[tauri::command]
 pub fn ocr_supported() -> bool {
     #[cfg(target_os = "macos")]
     return imp::supported();
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    return super::ocr_windows::ocr_supported();
+    #[cfg(target_os = "linux")]
+    return super::ocr_linux::ocr_supported();
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     return false;
 }
 
@@ -171,17 +177,22 @@ pub fn ocr_recognize(image: String, lang: Option<String>) -> Result<OcrOutput, S
     let bytes = decode_image(&image)?;
     let languages = recognition_languages(lang.as_deref());
     #[cfg(target_os = "macos")]
+    let candidates = imp::recognize(&bytes, &languages)?;
+    #[cfg(target_os = "windows")]
+    let candidates = super::ocr_windows::ocr_recognize(&bytes, &languages)?;
+    #[cfg(target_os = "linux")]
+    let candidates = super::ocr_linux::ocr_recognize(&bytes, &languages)?;
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
-        let candidates = imp::recognize(&bytes, &languages)?;
+        let _ = (bytes, languages);
+        return Err("on-device OCR is not supported on this platform".into());
+    }
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    {
         if candidates.iter().all(|(text, _)| text.trim().is_empty()) {
             return Err("no text found in this image".into());
         }
         Ok(shape_result(candidates))
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (bytes, languages);
-        Err("on-device OCR requires macOS (Windows WinRT OCR is a planned follow-up)".into())
     }
 }
 
