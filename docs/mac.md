@@ -12,8 +12,8 @@ for in-app updates only — unrelated to Gatekeeper).
 
 The bundle is **ad-hoc signed**. No Apple Developer account is used and
 the app is **not notarized**, so Gatekeeper does not recognize the
-developer. This is expected, not a broken download. Intel Macs are not
-covered by this build — Apple Silicon only.
+developer. This is expected, not a broken download. Since v0.1.4 the
+build is **universal** (Apple Silicon + Intel in one `.dmg`).
 
 ## First launch
 
@@ -33,11 +33,22 @@ System Settings → Privacy & Security → scroll to the Security section →
 **Open Anyway** (offered for about an hour after the blocked launch),
 then confirm with Open.
 
+Downloaded copies can hit a harsher dialog — "**damaged** and can't be
+opened … move to the Trash" — which offers no Open button at all. That
+is still the same ad-hoc signature, not a corrupt file. Clear it with:
+
+```sh
+xattr -d com.apple.quarantine "/Applications/Ccez LLM.app"
+```
+
+then right-click → Open once as above.
+
 ## Notes
 
 - The quarantine flag (`com.apple.quarantine`) is what triggers the
-  warning; the right-click-Open flow whitelists the app. Do not strip the
-  flag with `xattr` workarounds — the documented flow above is enough.
+  warnings. The right-click-Open flow whitelists the
+  "unverified developer" dialog; only the "damaged" dialog needs the
+  `xattr` command above.
 - In-app updates keep working once the app is past the first launch:
   they are verified against the updater public key in
   `src-tauri/tauri.conf.json`, not against Apple notarization.
