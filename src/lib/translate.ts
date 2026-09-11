@@ -16,6 +16,9 @@ export function buildTranslateMessages(text: string, target: string): Array<{ ro
 	];
 }
 
+/** Fallback invoked when on-device translation cannot serve (see builtinAi.hoverTranslate). */
+export type BuiltinFallback = (text: string, target: string) => Promise<string>;
+
 export async function translateSelection(
 	provider: ChatProvider,
 	text: string,

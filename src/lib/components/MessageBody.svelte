@@ -725,6 +725,14 @@
 	.rendered :global(mark.ccez-ann.leaving) {
 		animation: ann-wash-out 0.18s ease forwards;
 	}
+	/* Custom Highlight API wash (see annHighlights.paintAnnotationWash):
+	paints the same yellow over untouched DOM where CSS.highlights is
+	supported, so future stamps can skip mark-DOM wrapping. The mark
+	path above stays the live fallback. */
+	.rendered::highlight(ccez-ann) {
+		background-color: #fff3b0;
+		color: inherit;
+	}
 	/* Reading-aid text is overlay, not content: never selectable,
 	so it stays out of selections and selection-copies. */
 	.rendered :global(.frt) {
