@@ -18,7 +18,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# tray-icon + image-png feed the desktop summon kit (desktop.rs tray):
+# both crates already sit in Cargo.lock as transitive deps, so no new
+# crate is vendored by enabling them here.
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-opener = "2"
 tauri-plugin-updater = "2"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
@@ -41,7 +44,10 @@ objc2-foundation = "0.3"
 objc2-avf-audio = "0.3"
 objc2-natural-language = "0.3"
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = "0.3"
+# block2 feature feeds the desktop summon kit's global hotkey monitor
+# (desktop.rs); block2 itself is already a direct dep below, so no new
+# crate is vendored.
+objc2-app-kit = { version = "0.3", features = ["block2"] }
 # Speech-recognition authorization callback (dictate_macos only).
 block2 = "0.6"
 # On-device text recognition (Vision VNRecognizeTextRequest, ocr.rs).

@@ -226,6 +226,17 @@ import { isPromptIdle } from "$lib/chrome";
 	import { recognizeImageText, friendlyOcrError } from "$lib/nativeOcr";
 	import { voiceLocaleForInputSource } from "$lib/keyboardLang";
 	import { joinExternalDraft } from "$lib/externalText";
+	import {
+		listenDeepLinks,
+		isSummonHotkey,
+		studySheetMarkdown,
+		sheetTitle,
+		shareStudySheet,
+		printStudySheet,
+		desktopSleepBlock,
+		desktopSleepUnblock,
+		exportStudySheet
+	} from "$lib/desktop";
 
 	let chatState = $state(createChatState());
 	let settings = $state(loadSettings());
@@ -1182,6 +1193,34 @@ import { isPromptIdle } from "$lib/chrome";
 			window.removeEventListener("touchstart", on);
 			window.clearInterval(timer);
 		};
+	});
+	/**
+	 * Sleep prevention during speech/streaming (desktop shell only):
+	 * one backend claim stays live while a voice reads
+	 * (`speakingId`) or a reply streams (`chatState.sending`). The
+	 * bridge refcounts, so overlap never unblocks early; a stale
+	 * resolve after stop releases instead of holding. Outside the
+	 * shell the call resolves null — never a toast, never a throw.
+	 */
+	let sleepClaim: number | null = null;
+	let sleepWanted = false;
+	$effect(() => {
+		const active = speakingId !== null || chatState.sending;
+		if (active) {
+			sleepWanted = true;
+			void desktopSleepBlock("Ccez Studio speech or reply streaming").then((id) => {
+				if (id === null) return;
+				if (sleepWanted) sleepClaim = id;
+				else void desktopSleepUnblock(id);
+			});
+		} else {
+			sleepWanted = false;
+			if (sleepClaim !== null) {
+				const id = sleepClaim;
+				sleepClaim = null;
+				void desktopSleepUnblock(id);
+			}
+		}
 	});
 	/** UI text scale in 10% steps (50–600% desktop, 50–400% phones). */
 	function adjustFontScale(delta: number): void {
@@ -3268,6 +3307,10 @@ import { isPromptIdle } from "$lib/chrome";
 					stepChat(-1);
 				} else if (action === "shortcuts") {
 					shortcutsOpen = true;
+				} else if (action === "share-sheet") {
+					void shareCurrentChat();
+				} else if (action === "print-sheet") {
+					printCurrentChat();
 				} else if (action === "bigger-text") {
 					adjustFontScale(0.1);
 				} else if (action === "smaller-text") {
@@ -3280,6 +3323,64 @@ import { isPromptIdle } from "$lib/chrome";
 				error instanceof Error ? error.message : String(error)
 			);
 		}
+	}
+
+	/**
+	 * `ccez://` deep links (desktop shell only): `ccez://chat/<id>`
+	 * opens the chat when it exists (unknown ids are ignored, never
+	 * an error toast), `ccez://new` mints a chat. Cold-start links
+	 * wait in the backend drain slot; live ones arrive as events.
+	 */
+	async function wireDeepLinks(): Promise<void> {
+		if (!tauriBackendAvailable()) return;
+		try {
+			await listenDeepLinks((link) => {
+				if (link.kind === "new-chat") {
+					doNewChat();
+					return;
+				}
+				const exists = chatState.chats.some((c) => c.id === link.chatId);
+				if (!exists) return;
+				selectChat(chatState, link.chatId as ChatId);
+				enterEditMode();
+			});
+		} catch (error) {
+			console.warn(
+				"Deep-link events unavailable:",
+				error instanceof Error ? error.message : String(error)
+			);
+		}
+	}
+
+	/**
+	 * Share the visible chat as a study sheet: the backend writes the
+	 * file for native share-out, then the OS sheet / clipboard /
+	 * download fallback presents it. One toast names the outcome.
+	 */
+	async function shareCurrentChat(): Promise<void> {
+		const lines = chat.messages.map((m) => ({ role: m.role, content: m.content }));
+		const title = sheetTitle(lines);
+		const markdown = studySheetMarkdown(title, lines);
+		const saved = await exportStudySheet(title, lines);
+		const outcome = await shareStudySheet(title, markdown);
+		if (outcome === "shared") {
+			flashToast(saved ? `Study sheet shared (${saved})` : "Study sheet shared");
+		} else if (outcome === "copied") {
+			flashToast("Study sheet copied — paste it anywhere");
+		} else if (outcome === "downloaded") {
+			flashToast("Study sheet downloaded");
+		} else {
+			flashToast("Sharing is unavailable here");
+		}
+	}
+
+	/**
+	 * Print the visible chat as a study sheet (`#study-sheet-print`
+	 * is the only node the print stylesheet shows; Save as PDF in
+	 * that dialog writes the file).
+	 */
+	function printCurrentChat(): void {
+		if (!printStudySheet()) flashToast("Printing is unavailable here");
 	}
 
 	/**
@@ -3908,7 +4009,18 @@ import { isPromptIdle } from "$lib/chrome";
 				else openSearch();
 				return;
 			}
-			if (event.key === "Escape" && editingMsgId) {
+			if (isSummonHotkey(event) && !inEditor) {
+			// Summon chord (Cmd/Ctrl+Shift+Space): focus the composer
+			// from anywhere outside it. Inside the editor the chord
+			// stays unbound so Ctrl+Shift+Space still types a
+			// non-breaking space; the OS-global half (desktop.rs)
+			// skips focused windows for the same reason.
+			event.preventDefault();
+			event.stopPropagation();
+			enterEditMode();
+			return;
+		}
+		if (event.key === "Escape" && editingMsgId) {
 				// An in-progress message edit cancels from anywhere,
 				// including inside the prompt (capture phase pre-empts
 				// the editor, which binds nothing to Esc).
@@ -4786,6 +4898,7 @@ import { isPromptIdle } from "$lib/chrome";
 		window.visualViewport?.addEventListener("resize", onViewportResize);
 		window.visualViewport?.addEventListener("scroll", onViewportResize);
 		void listenMenuActions();
+		void wireDeepLinks();
 		window.addEventListener("keydown", onKey, true);
 		window.addEventListener("keydown", onAlt);
 		window.addEventListener("keyup", onAlt);
@@ -6149,6 +6262,18 @@ import { isPromptIdle } from "$lib/chrome";
 			</div>
 		</div>
 	{/if}
+	<!-- Print-only study sheet: hidden on screen, the sole visible
+	node under `@media print` (File → Print Study Sheet…, or Save as
+	PDF from that dialog). Plain text on purpose — the PDF is a study
+	artifact, not a theme snapshot. -->
+	<section id="study-sheet-print" aria-hidden="true">
+		<h1>{sheetTitle(chat.messages)}</h1>
+		<p class="sheet-sub">Ccez Studio study sheet — {chat.messages.length} message{chat.messages.length === 1 ? "" : "s"}.</p>
+		{#each chat.messages as msg (msg.id)}
+			<h2>{msg.role === "user" ? "You" : "Ccez"}</h2>
+			<p>{msg.content}</p>
+		{/each}
+	</section>
 </div>
 
 <style>
@@ -9268,4 +9393,37 @@ import { isPromptIdle } from "$lib/chrome";
 	/* .prompt rides --bg/--line/--line-hover/--focus now; no dark overrides needed. */
 	/* Lang menus ride --ink/--strong/--line/--bg-raised/--bg-wash/--focus now. */
 	/* .send-btn rides --invert/--invert-ink now. */
+	/* Study-sheet print: the section stays out of layout on screen;
+	the print dialog (File → Print Study Sheet…, Save as PDF there)
+	shows only it — every other .app child hides. */
+	#study-sheet-print {
+		display: none;
+	}
+	@media print {
+		.app > *:not(#study-sheet-print) {
+			display: none !important;
+		}
+		#study-sheet-print {
+			display: block !important;
+			color: #000;
+			background: #fff;
+			padding: 24px;
+		}
+		#study-sheet-print h1 {
+			font-size: 20px;
+			margin: 0 0 4px;
+		}
+		#study-sheet-print .sheet-sub {
+			color: #444;
+			margin: 0 0 16px;
+		}
+		#study-sheet-print h2 {
+			font-size: 15px;
+			margin: 16px 0 4px;
+		}
+		#study-sheet-print p {
+			white-space: pre-wrap;
+			margin: 0 0 8px;
+		}
+	}
 </style>
