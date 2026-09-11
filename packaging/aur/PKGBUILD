@@ -35,7 +35,7 @@ optdepends=('libayatana-appindicator: tray indicator support on GNOME')
 provides=('ccez-llm')
 conflicts=('ccez-llm')
 options=('!strip')
-source=("${_pkgdeb}-${pkgver}.deb::${url}/releases/download/v${pkgver}/${_pkgdeb}_${pkgver}_amd64.deb"
+source=("${_pkgdeb}-${pkgver}.deb::${url}/releases/download/v${pkgver}/CcezLLM-linux-x64.deb"
         "LICENSE::${url}/raw/refs/tags/v${pkgver}/LICENSE")
 # Release .debs are published by CI; replace SKIP with the real checksum:
 #   updpkgsums  (or: sha256sum ${_pkgdeb}-${pkgver}.deb)

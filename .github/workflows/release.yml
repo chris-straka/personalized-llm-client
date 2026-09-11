@@ -302,7 +302,7 @@ jobs:
   # the draft or any platform is missing from the updater manifest.
   # (GitHub serves spaces in bundle names as dots; match the served names.)
   verify-release:
-    needs: [release-android]
+    needs: [rename-assets]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -318,21 +318,21 @@ jobs:
           ASSETS="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')"
           missing=0
           for f in \
-            "Ccez.LLM_${VER}_aarch64.dmg" \
-            "Ccez.LLM_${VER}_aarch64.app.tar.gz" \
-            "Ccez.LLM_${VER}_aarch64.app.tar.gz.sig" \
-            "Ccez.LLM_${VER}_x64.dmg" \
-            "Ccez.LLM_${VER}_x64.app.tar.gz" \
-            "Ccez.LLM_${VER}_x64.app.tar.gz.sig" \
-            "Ccez.LLM_${VER}_amd64.deb" \
-            "Ccez.LLM_${VER}_amd64.deb.sig" \
-            "Ccez.LLM_${VER}_amd64.AppImage" \
-            "Ccez.LLM_${VER}_amd64.AppImage.sig" \
-            "Ccez.LLM_${VER}_x64-setup.exe" \
-            "Ccez.LLM_${VER}_x64-setup.exe.sig" \
-            "Ccez.LLM_${VER}_arm64-setup.exe" \
-            "Ccez.LLM_${VER}_arm64-setup.exe.sig" \
-            "app-universal-release.apk" \
+            "CcezLLM-macos-apple-silicon.dmg" \
+            "CcezLLM-macos-apple-silicon.app.tar.gz" \
+            "CcezLLM-macos-apple-silicon.app.tar.gz.sig" \
+            "CcezLLM-macos-intel.dmg" \
+            "CcezLLM-macos-intel.app.tar.gz" \
+            "CcezLLM-macos-intel.app.tar.gz.sig" \
+            "CcezLLM-linux-x64.deb" \
+            "CcezLLM-linux-x64.deb.sig" \
+            "CcezLLM-linux-x64.AppImage" \
+            "CcezLLM-linux-x64.AppImage.sig" \
+            "CcezLLM-windows-x64-setup.exe" \
+            "CcezLLM-windows-x64-setup.exe.sig" \
+            "CcezLLM-windows-arm64-setup.exe" \
+            "CcezLLM-windows-arm64-setup.exe.sig" \
+            "CcezLLM-android-arm64.apk" \
             "latest.json"; do
             echo "$ASSETS" | grep -qxF "$f" || { echo "MISSING: $f"; missing=1; }
           done
@@ -394,3 +394,81 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release edit "$GITHUB_REF_NAME" --draft=false
+
+  # Human-readable asset names: Tauri names bundles `Ccez LLM_<ver>_<arch>`
+  # with a different arch word per OS (aarch64/amd64/x64/arm64), which no
+  # downloader can decode at a glance. This job renames every file in place
+  # (download, re-upload under the clean name, delete the original) and
+  # rewrites any filenames embedded in latest.json. Signatures sign file
+  # contents, not names, so they stay valid; manifest URLs point at asset
+  # IDs and keep working. latest.json itself keeps its name (the updater
+  # fetches it by name).
+  rename-assets:
+    needs: [release-android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Rename release assets to OS-arch names
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd "$RUNNER_TEMP"
+          mkdir -p old new manifest
+          VER="${GITHUB_REF_NAME#v}"
+          R="$GITHUB_REPOSITORY"
+          rename() {
+            gh release download "$GITHUB_REF_NAME" --repo "$R" --pattern "$1" --dir old --clobber
+            mv "old/$1" "new/$2"
+            gh release upload "$GITHUB_REF_NAME" --repo "$R" "new/$2"
+            gh release delete-asset "$GITHUB_REF_NAME" --repo "$R" "$1" -y
+            rm -f "new/$2"
+          }
+          rename "Ccez.LLM_${VER}_aarch64.dmg" "CcezLLM-macos-apple-silicon.dmg"
+          rename "Ccez.LLM_${VER}_aarch64.app.tar.gz" "CcezLLM-macos-apple-silicon.app.tar.gz"
+          rename "Ccez.LLM_${VER}_aarch64.app.tar.gz.sig" "CcezLLM-macos-apple-silicon.app.tar.gz.sig"
+          rename "Ccez.LLM_${VER}_x64.dmg" "CcezLLM-macos-intel.dmg"
+          rename "Ccez.LLM_${VER}_x64.app.tar.gz" "CcezLLM-macos-intel.app.tar.gz"
+          rename "Ccez.LLM_${VER}_x64.app.tar.gz.sig" "CcezLLM-macos-intel.app.tar.gz.sig"
+          rename "Ccez.LLM_${VER}_amd64.deb" "CcezLLM-linux-x64.deb"
+          rename "Ccez.LLM_${VER}_amd64.deb.sig" "CcezLLM-linux-x64.deb.sig"
+          rename "Ccez.LLM_${VER}_amd64.AppImage" "CcezLLM-linux-x64.AppImage"
+          rename "Ccez.LLM_${VER}_amd64.AppImage.sig" "CcezLLM-linux-x64.AppImage.sig"
+          rename "Ccez.LLM_${VER}_x64-setup.exe" "CcezLLM-windows-x64-setup.exe"
+          rename "Ccez.LLM_${VER}_x64-setup.exe.sig" "CcezLLM-windows-x64-setup.exe.sig"
+          rename "Ccez.LLM_${VER}_arm64-setup.exe" "CcezLLM-windows-arm64-setup.exe"
+          rename "Ccez.LLM_${VER}_arm64-setup.exe.sig" "CcezLLM-windows-arm64-setup.exe.sig"
+          rename "app-universal-release.apk" "CcezLLM-android-arm64.apk"
+          gh release download "$GITHUB_REF_NAME" --repo "$R" --pattern "latest.json" --dir manifest --clobber
+          python3 - manifest/latest.json "$VER" <<'EOF'
+          import sys
+          path, ver = sys.argv[1], sys.argv[2]
+          pairs = [
+              (f"Ccez.LLM_{ver}_aarch64.dmg", "CcezLLM-macos-apple-silicon.dmg"),
+              (f"Ccez.LLM_{ver}_aarch64.app.tar.gz", "CcezLLM-macos-apple-silicon.app.tar.gz"),
+              (f"Ccez.LLM_{ver}_aarch64.app.tar.gz.sig", "CcezLLM-macos-apple-silicon.app.tar.gz.sig"),
+              (f"Ccez.LLM_{ver}_x64.dmg", "CcezLLM-macos-intel.dmg"),
+              (f"Ccez.LLM_{ver}_x64.app.tar.gz", "CcezLLM-macos-intel.app.tar.gz"),
+              (f"Ccez.LLM_{ver}_x64.app.tar.gz.sig", "CcezLLM-macos-intel.app.tar.gz.sig"),
+              (f"Ccez.LLM_{ver}_amd64.deb", "CcezLLM-linux-x64.deb"),
+              (f"Ccez.LLM_{ver}_amd64.deb.sig", "CcezLLM-linux-x64.deb.sig"),
+              (f"Ccez.LLM_{ver}_amd64.AppImage", "CcezLLM-linux-x64.AppImage"),
+              (f"Ccez.LLM_{ver}_amd64.AppImage.sig", "CcezLLM-linux-x64.AppImage.sig"),
+              (f"Ccez.LLM_{ver}_x64-setup.exe", "CcezLLM-windows-x64-setup.exe"),
+              (f"Ccez.LLM_{ver}_x64-setup.exe.sig", "CcezLLM-windows-x64-setup.exe.sig"),
+              (f"Ccez.LLM_{ver}_arm64-setup.exe", "CcezLLM-windows-arm64-setup.exe"),
+              (f"Ccez.LLM_{ver}_arm64-setup.exe.sig", "CcezLLM-windows-arm64-setup.exe.sig"),
+              ("app-universal-release.apk", "CcezLLM-android-arm64.apk"),
+          ]
+          body = open(path).read()
+          new = body
+          for old, new_name in pairs:
+              new = new.replace(old, new_name)
+          if new != body:
+              open(path, "w").write(new)
+              print("manifest filenames rewritten")
+          else:
+              print("manifest needed no rewrite")
+          EOF
+          gh release delete-asset "$GITHUB_REF_NAME" --repo "$R" "latest.json" -y
+          gh release upload "$GITHUB_REF_NAME" --repo "$R" "manifest/latest.json"

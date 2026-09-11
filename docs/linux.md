@@ -20,7 +20,7 @@ on **ubuntu-22.04** with `--bundles deb,appimage` and attaches
 `v*` tag. Install with:
 
 ```sh
-sudo apt install ./ccez-llm_0.1.0_amd64.deb
+sudo apt install ./CcezLLM-linux-x64.deb
 ```
 
 `apt install ./file.deb` (not `dpkg -i`) resolves the runtime deps below
@@ -49,7 +49,7 @@ makepkg -si
 
 Source: `packaging/aur/PKGBUILD`. Details:
 
-- Downloads `ccez-llm_${pkgver}_amd64.deb` from the GitHub release tag
+- Downloads `CcezLLM-linux-x64.deb` from the GitHub release tag
   `v${pkgver}` plus the `LICENSE` file; replace both `SKIP` checksums with
   `updpkgsums` output before submitting to the AUR.
 - `depends=('webkit2gtk-4.1' 'gtk3' 'libappindicator-gtk3' 'librsvg'
