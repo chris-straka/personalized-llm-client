@@ -33,10 +33,29 @@ None of that exists in src/ yet — I checked. Want me to implement one of the t
 """
 
 """
-[ITEMS 1–4 OF THIS LIST ARE MISSING — present in neither the chat message nor this file; the list as received starts at 5. Re-paste from the other API to recover them.]
+◆ You have: Keychain (mac), TTS (mac/iOS/Android), dictation (mac/Windows/Android), input-source check, Android annotate-intent, menu, updater. Chats persist to
+  localStorage in src/lib/chat.ts:86-97 — unencrypted, size-limited, no search.
 
-5. Desktop summon kit: global shortcut, tray, single-instance + ccez:// deep link, sleep-prevention during speech/stream, dock progress.
-6. Attachment text extraction in Rust (PDF/docx) + image downscale; offline language-ID for non-Apple platforms (tts_identify_lang returns None off macOS/iOS).
+  Missing, in priority order:
+
+  1. Android Keystore real backend (keys do not persist today), Android ACTION_SEND receive so sharing into the app works, finish Android TTS voice inventory.
+  2. Windows native TTS (WinRT) and Linux TTS (Speech Dispatcher). You have Windows dictation but no Windows TTS; both fall back to robotic web voices.
+  3. Learner OCR on-device: Vision via objc2 on macOS, WinRT OCR on Windows. Photo of Han text -> selectable text -> your existing pinyin/furigana path. Biggest learner
+     differentiator.
+  4. SQLite FTS5 in Rust for chat + annotation search, with encryption at rest to replace localStorage. This is the core best-client gap.
+  5. Desktop summon kit: global shortcut, tray, single-instance + ccez:// deep link, sleep-prevention during speech/stream, dock progress.
+  6. Attachment text extraction in Rust (PDF/docx) + image downscale; offline language-ID for non-Apple platforms (tts_identify_lang returns None off macOS/iOS).
+
+  Do not use for this: on-device embeddings/LLM in Rust. Bundle size and signing pain are high; if you want semantic recall for the annotated-history idea in TODO, do
+  it with transformers.js in a Worker + OPFS, no Rust.
+
+  Next after that: SQLite FTS5 for the search index if IndexedDB proves slow, and powerSaveBlocker-style sleep prevention during long TTS/stream.
+
+  I would not add: cloud sync, plugins, agents — your TODO explicitly marks those non-goals, and they would break the BYOK/local trust story that makes this good.
+
+  On agents: do not spawn a ton at once. Parallel writers corrupt the checkout even on different files, and check/lint/build invalidate HMR. Keep 2-3 max with isolated
+  worktrees, one workstream each (storage/search, Android gaps, Windows TTS or OCR), each landing with colocated Vitest + the three-runtime fallback. Tell me which
+  slice to start and I will sequence it.
 """
 
 """
