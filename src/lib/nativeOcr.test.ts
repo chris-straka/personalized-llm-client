@@ -1,0 +1,91 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
+import {
+	friendlyOcrError,
+	isOcrUnsupported,
+	ocrSupported,
+	recognizeImageText,
+	type OcrResult
+} from "./nativeOcr";
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+
+const mockInvoke = vi.mocked(invoke);
+
+beforeEach(() => {
+	mockInvoke.mockReset();
+	// No shell outside Tauri: every bridge call rejects, like the real
+	// invoke does in browsers and tests.
+	mockInvoke.mockRejectedValue(new Error("no bridge"));
+});
+
+describe("ocrSupported", () => {
+	it("is false without a bridge and never throws", async () => {
+		await expect(ocrSupported()).resolves.toBe(false);
+	});
+});
+
+describe("recognizeImageText", () => {
+	it("passes the image and hint through to the backend", async () => {
+		const result: OcrResult = {
+			text: "你好",
+			lines: [{ text: "你好", confidence: 0.9 }],
+			confidence: 0.9
+		};
+		mockInvoke.mockResolvedValueOnce(result);
+		await expect(recognizeImageText("data:image/jpeg;base64,aGk=", "zh-CN")).resolves.toEqual(
+			result
+		);
+		expect(mockInvoke).toHaveBeenCalledWith("ocr_recognize", {
+			image: "data:image/jpeg;base64,aGk=",
+			lang: "zh-CN"
+		});
+	});
+
+	it("defaults the hint to null (backend takes the learner default)", async () => {
+		mockInvoke.mockResolvedValueOnce({ text: "", lines: [], confidence: 0 });
+		await recognizeImageText("aGk=");
+		expect(mockInvoke).toHaveBeenCalledWith("ocr_recognize", {
+			image: "aGk=",
+			lang: null
+		});
+	});
+
+	it("rejects without a bridge so the caller can explain", async () => {
+		await expect(recognizeImageText("aGk=")).rejects.toThrow("no bridge");
+	});
+});
+
+describe("isOcrUnsupported", () => {
+	it("matches the platform stubs", () => {
+		expect(isOcrUnsupported("on-device OCR requires macOS (Windows WinRT OCR is a planned follow-up)")).toBe(
+			true
+		);
+		expect(isOcrUnsupported("native OCR is not supported on this platform")).toBe(true);
+	});
+
+	it("leaves real failures alone", () => {
+		expect(isOcrUnsupported("no text found in this image")).toBe(false);
+		expect(isOcrUnsupported("boom")).toBe(false);
+	});
+});
+
+describe("friendlyOcrError", () => {
+	it("maps non-macOS builds to the browser-preview note", () => {
+		expect(friendlyOcrError("on-device OCR requires macOS")).toContain("Mac app");
+	});
+
+	it("maps capability denials to a rebuild hint", () => {
+		expect(friendlyOcrError("ocr_recognize not allowed.")).toContain("permissions");
+	});
+
+	it("keeps the no-text message user-facing", () => {
+		expect(friendlyOcrError("no text found in this image")).toBe(
+			"No text found in this image."
+		);
+	});
+
+	it("passes unknown errors through untouched", () => {
+		expect(friendlyOcrError("boom")).toBe("boom");
+	});
+});
