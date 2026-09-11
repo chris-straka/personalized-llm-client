@@ -37,6 +37,12 @@ export default defineConfig(() => ({
     // pre-bundling would relocate the glue and break that link (per its docs).
     exclude: ["lindera-wasm"]
   },
+  test: {
+    // Isolated agent worktrees live under .muse/ inside the checkout:
+    // their checkouts lack node_modules, so their tests must never run
+    // as part of this tree's suite.
+    exclude: ["**/.muse/**", "**/node_modules/**"]
+  },
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

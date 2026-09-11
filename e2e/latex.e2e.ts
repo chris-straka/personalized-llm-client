@@ -3,11 +3,11 @@ import { seedChat } from "./helpers";
 
 const ASSISTANT = `The energy levels:
 
-$$E_n = -\\\\frac{13.6\\\\text{ eV}}{n^2}$$
+$$E_n = -\\frac{13.6\\text{ eV}}{n^2}$$
 
-where \\\\(n = 1, 2, \\\\dots\\\\) counts the level.
+where \\(n = 1, 2, \\dots\\) counts the level.
 
-Not math, just a price: $$totally broken \\\\sqrt{.
+Not math, just a price: $$totally broken \\sqrt{.
 
 \`\`\`tex
 $$E = mc^2$$
@@ -66,8 +66,9 @@ test("inline math renders with fold and copy", async ({ page }) => {
 
 /** Invalid math and fenced $$ stay plain text, never fatal. */
 test("invalid math and code fences stay plain", async ({ page }) => {
-	await expect(page.locator(".rendered").first()).toContainText("totally broken");
-	await expect(page.locator(".rendered").first()).toContainText("E = mc^2");
+	const body = page.locator(".rendered").last();
+	await expect(body).toContainText("totally broken");
+	await expect(body).toContainText("E = mc^2");
 	// One display block + one inline span; the broken $$ and the fence add none.
 	await expect(page.locator(".ccez-math")).toHaveCount(1);
 	await expect(page.locator(".ccez-math-inline")).toHaveCount(1);

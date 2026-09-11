@@ -783,7 +783,14 @@
 						});
 					}
 				}
-				void ensureSearchStore().index(buildSearchDocs(currentSearchDocs(), anns));
+				void ensureSearchStore()
+				.index(buildSearchDocs(currentSearchDocs(), anns))
+				.then(() => {
+					// The palette may have queried before this snapshot
+					// landed (fast typists beat the 500ms debounce): an
+					// open query re-runs against the fresh snapshot.
+					if (searchOpen && searchQuery.trim()) runSearchQuery();
+				});
 			} catch {
 				// Search never breaks the chat: stale snapshot stays live.
 			}

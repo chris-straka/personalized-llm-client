@@ -85,7 +85,9 @@ test.describe("touch paths", () => {
 
 	test("left-to-right swipe opens the chats sidebar with its search box", async ({ page }) => {
 		await seedThreeChats(page);
-		await expect(page.locator("aside")).toHaveClass(/collapsed/);
+		// The settings panel is a second aside: scope to the chats one.
+		const sidebar = page.locator("aside:not(.settings-panel)");
+		await expect(sidebar).toHaveClass(/collapsed/);
 		await page.evaluate(() => {
 			const touch = (x: number, y: number) =>
 				new Touch({ identifier: 7, target: document.body, clientX: x, clientY: y });
@@ -96,7 +98,7 @@ test.describe("touch paths", () => {
 				new TouchEvent("touchend", { bubbles: true, cancelable: true, composed: true, touches: [], changedTouches: [touch(200, 604)] })
 			);
 		});
-		await expect(page.locator("aside")).not.toHaveClass(/collapsed/);
+		await expect(sidebar).not.toHaveClass(/collapsed/);
 		await expect(page.getByLabel("Search chats")).toBeVisible();
 	});
 

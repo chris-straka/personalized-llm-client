@@ -241,22 +241,25 @@ export function mathHtml(entry: MathEntry, index: number): string {
 	}
 	// Same chrome as ccez-code: language/label head with Fold and Copy
 	// buttons per math block (clicks delegate in MessageBody like code).
-	const head =
-		`<div class="ccez-math-head">` +
+	// The inline head is a span: a div inside a paragraph would be
+	// ejected by the HTML parser, stranding the buttons outside the
+	// inline wrapper.
+	const head = (tag: "div" | "span"): string =>
+		`<${tag} class="ccez-math-head">` +
 		`<span class="ccez-math-lang">math</span>` +
 		`<button type="button" data-math-action="fold">Fold</button>` +
 		`<button type="button" data-math-action="copy">Copy</button>` +
-		`</div>`;
+		`</${tag}>`;
 	if (entry.kind === "display") {
 		return (
 			`<div class="ccez-math" data-math-index="${index}">` +
-			head +
+			head("div") +
 			`<div class="ccez-math-body">${inner}</div></div>`
 		);
 	}
 	return (
 		`<span class="ccez-math-inline" data-math-index="${index}">` +
-		head +
+		head("span") +
 		`<span class="ccez-math-body">${inner}</span></span>`
 	);
 }
