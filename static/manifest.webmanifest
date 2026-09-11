@@ -20,5 +20,16 @@
       "sizes": "48x48",
       "type": "image/x-icon"
     }
+  ],
+  "file_handlers": [
+    {
+      "action": ".",
+      "accept": {
+        "text/markdown": [
+          ".md",
+          ".markdown"
+        ]
+      }
+    }
   ]
 }
