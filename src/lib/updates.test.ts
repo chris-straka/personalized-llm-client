@@ -17,9 +17,9 @@ describe("updateRouteFor", () => {
 		expect(updateRouteFor(true, false)).toEqual({ kind: "releases", url: RELEASES_URL });
 	});
 
-	it("points at this repo's releases", () => {
+	it("points at the newest tagged release, not the list", () => {
 		expect(RELEASES_URL).toBe(
-			"https://github.com/chris-straka/personalized-llm-client/releases"
+			"https://github.com/chris-straka/personalized-llm-client/releases/latest"
 		);
 	});
 });

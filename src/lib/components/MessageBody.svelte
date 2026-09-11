@@ -671,16 +671,19 @@
 		z-index: 2;
 		user-select: none;
 		-webkit-user-select: none;
-		min-width: 1.15rem;
-		height: 1.15rem;
+		/* Dampened text-size tracking (≈30% of the message scale, so a
+		600% reading size makes a ~2.5× badge, never a 6× one): rem
+		units keep it absolute, never compounding the message size. */
+		min-width: calc(1.15rem * (1 + (var(--font-scale, 1) - 1) * 0.3));
+		height: calc(1.15rem * (1 + (var(--font-scale, 1) - 1) * 0.3));
 		padding: 0 0.25rem;
 		border: 0;
 		border-radius: 999px;
 		background: #5a9bf7;
 		color: #fff;
-		font-size: 0.7rem;
+		font-size: calc(0.7rem * (1 + (var(--font-scale, 1) - 1) * 0.3));
 		font-weight: 700;
-		line-height: 1.15rem;
+		line-height: calc(1.15rem * (1 + (var(--font-scale, 1) - 1) * 0.3));
 		text-align: center;
 		white-space: nowrap;
 		cursor: pointer;

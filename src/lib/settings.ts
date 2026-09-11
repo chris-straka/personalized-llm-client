@@ -133,12 +133,12 @@ const STORAGE_KEY = "ccez-studio-settings-v1";
 export const DEFAULT_SYSTEM_PROMPT = "";
 
 /**
- * Text-size multiplier bounds (persisted): desktop caps at 400%.
- * The phone cap stays at 200% — enforced by the panel slider and
- * adjustFontScale, not here, since profiles roam across devices.
+ * Text-size multiplier bounds (persisted): 50–400% on phones, up to
+ * 600% on desktop — profiles roam across devices, so the stored range
+ * fits the widest (desktop) cap and each UI clamps to its own max.
  */
 export const FONT_SCALE_MIN = 0.5;
-export const FONT_SCALE_MAX = 4;
+export const FONT_SCALE_MAX = 6;
 
 /** Desktop chat-column width in rem: 46 is the legacy fixed width. */
 export const CHAT_WIDTH_DEFAULT = 36;
@@ -312,8 +312,9 @@ export function loadSettings(store?: KeyValueStore): AppSettings {
 			if (!Array.isArray(entry.models)) entry.models = [];
 		}
 		// Clamp the text-size multiplier (range inputs persist strings).
-		// Desktop allows up to 400%; the phone cap (200%) is enforced
-		// by the panel slider and adjustFontScale instead.
+		// Up to 600% on desktop, 400% on phones (each UI clamps its own
+		// max; the stored range fits the widest so roamed profiles keep
+		// working).
 		if (
 			typeof merged.fontScale !== "number" ||
 			!(merged.fontScale >= FONT_SCALE_MIN && merged.fontScale <= FONT_SCALE_MAX)

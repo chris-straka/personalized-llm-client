@@ -160,6 +160,7 @@
 		quoteLangForContext,
 		currentKeyboardInputSource
 	} from "$lib/nativeTts";
+	import { startNativeDictation } from "$lib/nativeDictate";
 	import { voiceLocaleForInputSource } from "$lib/keyboardLang";
 	import { joinExternalDraft } from "$lib/externalText";
 
@@ -642,9 +643,9 @@
 		else openSettingsPanel();
 	}
 
-	/** UI text scale in 10% steps (desktop 50–400%, phone 50–200%). */
+	/** UI text scale in 10% steps (50–600% desktop, 50–400% phones). */
 	function adjustFontScale(delta: number): void {
-		const cap = androidUI ? 2 : 4;
+		const cap = androidUI ? 4 : 6;
 		const next = Math.min(cap, Math.max(0.5, Math.round((settings.fontScale + delta) * 10) / 10));
 		if (next === settings.fontScale) return;
 		settings.fontScale = next;
@@ -1984,14 +1985,44 @@
 		stopPillDictation = null;
 		pillDictating = false;
 	}
-	function togglePillMic(): void {
+	/**
+	 * Native-first dictation: the OS recognizer where one exists
+	 * (Android/macOS/Windows shell), web SpeechRecognition otherwise.
+	 * Resolves a stop function, or null when neither path can listen
+	 * (the caller toasts). Native hard errors (denied, busy) surface
+	 * directly and skip the web attempt.
+	 */
+	let micStarting = false;
+	async function dictateNativeFirst(
+		onResult: (transcript: string) => void,
+		onError: (message: string) => void
+	): Promise<(() => void) | null> {
+		micStarting = true;
+		try {
+			const outcome = await startNativeDictation(latinFallback(), {
+				onFinal: onResult,
+				onError
+			});
+			if (outcome.kind === "started") return outcome.stop;
+			if (outcome.kind === "error") {
+				onError(outcome.message);
+				return null;
+			}
+		} catch {
+			// Bridge blew up mid-start; the web path gets its chance below.
+		} finally {
+			micStarting = false;
+		}
+		return dictateOnce(latinFallback(), onResult, onError);
+	}
+	async function togglePillMic(): Promise<void> {
+		if (micStarting) return;
 		if (stopPillDictation) {
 			stopPillMic();
 			return;
 		}
 		dismissToast();
-		const stop = dictateOnce(
-			latinFallback(),
+		const stop = await dictateNativeFirst(
 			(transcript) => {
 				annDraft =
 					annDraft === "" || annDraft.endsWith(" ") ? annDraft + transcript : `${annDraft} ${transcript}`;
@@ -2010,7 +2041,8 @@
 		pillDictating = true;
 	}
 
-	function toggleMic(): void {
+	async function toggleMic(): Promise<void> {
+		if (micStarting) return;
 		if (dictating) {
 			stopDictation?.();
 			stopDictation = null;
@@ -2018,8 +2050,7 @@
 			return;
 		}
 		dismissToast();
-		const stop = dictateOnce(
-			latinFallback(),
+		const stop = await dictateNativeFirst(
 			(transcript) => {
 				editor?.insertText(transcript.endsWith(" ") ? transcript : `${transcript} `);
 				dictating = false;
@@ -2722,6 +2753,63 @@
 			if (window.getSelection()?.isCollapsed === false) return null;
 			return contentSwipeTarget(start.x, start.y, ended.clientX, ended.clientY);
 		}
+		/**
+		 * Shared edge-stroke outcome (touch swipes and desktop mouse
+		 * drags): dismiss first, summon second. A rightward stroke with
+		 * settings open closes settings; a leftward stroke with chats
+		 * open closes the sheet. Gutter double-click stays as-is.
+		 */
+		function applyEdgeTarget(target: EdgePanel | null): void {
+			if (target === "chats") {
+				if (settingsOpen) toggleSettingsPanel();
+				// Android: two-finger double-tap owns the sidebar — a
+				// rightward stroke only ever dismisses settings.
+				else if (!androidUI) toggleSidebar();
+			} else if (target === "settings") {
+				// A leftward stroke never closes settings once open —
+				// only a rightward stroke (the "chats" branch) dismisses.
+				if (settingsOpen) return;
+				if (!settings.sidebarCollapsed) {
+					settings.sidebarCollapsed = true;
+					persistSettings();
+				} else toggleSettingsPanel();
+			}
+		}
+		/**
+		 * Desktop mouse edge-drag: the desktop analog of the touch edge
+		 * swipe — press near the screen edge and drag horizontally to
+		 * summon or dismiss the sidebars. Touch hardware rides the touch
+		 * path above, so this is mouse-only and desktop-only. Text
+		 * selection drags never count: a stroke that changed the
+		 * selection, or started in an editable or on a control, is
+		 * ignored. Passive: the app never blocks the drag.
+		 */
+		let edgeMouse: { x: number; y: number; clean: boolean; sel: string } | null = null;
+		window.addEventListener("pointerdown", (event) => {
+			if (androidUI || event.pointerType !== "mouse" || event.button !== 0) return;
+			const target = event.target;
+			const clean =
+				!(target instanceof Element) ||
+				target.closest(
+					".cm-content, input, textarea, select, [contenteditable='true'], button, a"
+				) === null;
+			edgeMouse = {
+				x: event.clientX,
+				y: event.clientY,
+				clean,
+				sel: window.getSelection()?.toString() ?? ""
+			};
+		});
+		window.addEventListener("pointerup", (event) => {
+			const start = edgeMouse;
+			edgeMouse = null;
+			if (!start || !start.clean || androidUI) return;
+			if (event.pointerType !== "mouse" || event.button !== 0) return;
+			if ((window.getSelection()?.toString() ?? "") !== start.sel) return;
+			applyEdgeTarget(
+				edgeSwipeTarget(start.x, start.y, event.clientX, event.clientY, window.innerWidth)
+			);
+		});
 		let edgeTouch: {
 			id: number;
 			x: number;
@@ -2793,24 +2881,7 @@
 					? null
 					: (edgeSwipeTarget(start.x, start.y, ended.clientX, ended.clientY, window.innerWidth) ??
 						middleSwipeTarget(start, ended));
-				// Swipes dismiss first, summon second: a rightward stroke
-				// with settings open closes settings (it doesn't summon
-				// chats), and a leftward stroke with chats open closes
-				// the sheet (it doesn't summon settings).
-				if (target === "chats") {
-					if (settingsOpen) toggleSettingsPanel();
-					// Android: two-finger double-tap owns the sidebar — a
-					// rightward stroke only ever dismisses settings.
-					else if (!androidUI) toggleSidebar();
-				} else if (target === "settings") {
-					// A leftward stroke never closes settings once open —
-					// only a rightward stroke (the "chats" branch) dismisses.
-					if (settingsOpen) return;
-					if (!settings.sidebarCollapsed) {
-						settings.sidebarCollapsed = true;
-						persistSettings();
-					} else toggleSettingsPanel();
-				}
+				applyEdgeTarget(target);
 			},
 			{ passive: true }
 		);
@@ -3874,7 +3945,7 @@
 	data-shell={tauriBackendAvailable() ? "tauri" : "browser"}
 	data-android={androidUI || null}
 	data-ios={iosUI || null}
-	style="--font-scale: {settings.fontScale}; --chat-width: {androidUI ? 46 : (settings.chatWidth ?? 36)}"
+	style="--font-scale: {androidUI ? Math.min(4, settings.fontScale) : settings.fontScale}; --chat-width: {androidUI ? 46 : (settings.chatWidth ?? 36)}"
 >
 	<aside class:collapsed={settings.sidebarCollapsed} inert={settings.sidebarCollapsed} data-fade-scroll>
 		<div class="side-head" data-tauri-drag-region aria-hidden="true" onmousedown={dragWindow} ondblclick={zoomWindow}>
@@ -5461,7 +5532,7 @@
 	zoom is what unlocks sideways panning): phone fields floor at
 	16px. Desktop keeps its optical sizes. */
 	.app[data-android] .prompt :global(.ta-input) {
-		font-size: max(16px, calc(0.95rem * var(--font-scale, 1)));
+		font-size: 16px;
 	}
 	.app[data-android] main:not(.empty) .prompt {
 		margin-bottom: 1.8rem;
@@ -7422,17 +7493,21 @@
 		padding-right: 8.9rem;
 	}
 	.prompt :global(.cm-editor) {
-		/* Beats the CodeMirror theme's own font-size on specificity. */
-		font-size: calc(0.95rem * var(--font-scale, 1));
+		/* Beats the CodeMirror theme's own font-size on specificity.
+		Fixed size on purpose: the text-size setting scales reading
+		(messages), never the input — typing at 400%+ shows a word or
+		two per line. */
+		font-size: 0.95rem;
 		/* The prompt grows with typing, but never eats the messages:
 		past this the editor scrolls internally. */
 		max-height: 40vh;
 	}
-	/* Android textarea composer: same seat as .cm-content above. */
+	/* Android textarea composer: fixed like the CodeMirror input above —
+	the text-size setting scales reading, never typing. */
 	.prompt :global(.ta-input) {
 		font-family:
 			-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
-		font-size: calc(0.95rem * var(--font-scale, 1));
+		font-size: 0.95rem;
 		padding: 0.6rem 4.6rem 0.6rem 0;
 		caret-color: #1c1c1e;
 		/* Mechanical twin of the cm rules: same pairs, Android-only node. */

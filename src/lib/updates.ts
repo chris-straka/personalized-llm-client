@@ -1,9 +1,11 @@
 // Update routing: the Tauri auto-updater is desktop-only, so on Android
-// "check for updates" means opening the Releases page for the newest APK,
-// and on the web build (no Tauri shell at all) there is nothing to check —
-// a redeploy updates the site, so the updater stays disabled.
+// "check for updates" means opening the latest release page for the newest
+// APK (/releases/latest redirects to the newest tagged release, not the
+// list the app was installed from), and on the web build (no Tauri shell
+// at all) there is nothing to check — a redeploy updates the site, so the
+// updater stays disabled.
 export const RELEASES_URL =
-	"https://github.com/chris-straka/personalized-llm-client/releases";
+	"https://github.com/chris-straka/personalized-llm-client/releases/latest";
 
 export type UpdateRoute = { kind: "updater" } | { kind: "releases"; url: string } | { kind: "none" };
 

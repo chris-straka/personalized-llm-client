@@ -57,6 +57,8 @@
 	the bottom of the menu. */
 	const buildStamp =
 		((globalThis as unknown as { __BUILD_STAMP__?: string }).__BUILD_STAMP__ ?? "release");
+	const appVersion =
+		((globalThis as unknown as { __APP_VERSION__?: string }).__APP_VERSION__ ?? "");
 	const showStamp = !import.meta.env.DEV;
 
 	/**
@@ -176,7 +178,7 @@
 				} else {
 					window.open(route.url, "_blank", "noopener");
 				}
-				updateStatus = "Grab the newest APK from the releases page to update.";
+				updateStatus = "Grab the newest APK from the latest release page to update.";
 			} catch {
 				updateStatus = `Couldn't open it automatically — get the newest APK at ${route.url}`;
 			} finally {
@@ -216,7 +218,20 @@
 			isWindowsShell = false;
 			isLinuxShell = false;
 		}
-		void nativeTtsSupported().then(async (supported) => {
+		void loadVoices();
+	});
+
+	/**
+	 * Voice inventory probe, extracted so fresh installs get picked up
+	 * without reopening the app: runs on open and from the "check again"
+	 * button under each picker. Never throws; failures land in
+	 * voiceLoadError and keep the last good inventory.
+	 */
+	let refreshingVoices = $state(false);
+	async function loadVoices(): Promise<void> {
+		refreshingVoices = true;
+		try {
+			const supported = await nativeTtsSupported();
 			nativeVoice = supported;
 			// A persisted "native" choice from another machine is meaningless here.
 			if (!supported) {
@@ -237,14 +252,17 @@
 			// gone): a persisted "web" choice from an older build flips
 			// back silently. Android's pin lives in the page probe.
 			if (!androidUI && settings.voiceEngine !== "native") settings.voiceEngine = "native";
+			voiceLoadError = "";
 			installedVoices = installed;
 			// A picked voice that is no longer installed falls back to auto.
 			if (settings.nativeVoiceId && !installed.some((v) => v.id === settings.nativeVoiceId)) {
 				settings.nativeVoiceId = null;
 			}
 			voicesLoaded = true;
-		});
-	});
+		} finally {
+			refreshingVoices = false;
+		}
+	}
 
 	async function openVoiceSetup() {
 		voiceSetupError = "";
@@ -502,7 +520,7 @@
 		</label>
 	{:else if ejected}
 		<p class="key-state" role="status">
-			Key ejected for this session.
+			Key set aside for this session — the saved key is untouched.
 			<button type="button" onclick={restore}>Restore</button>
 		</p>
 	{:else}
@@ -519,11 +537,11 @@
 	{/if}
 	<p class="note">
 		{#if inShell && !androidUI}
-			Keys stay in the macOS Keychain, never in a file. Eject unloads a key
-			for this session only.
+			Keys stay in the macOS Keychain, never in a file. Eject sets a key
+			aside until you restore it or reopen the app.
 		{:else if inShell}
 			Keys stay in this app's secured storage, never in a file. Eject
-			unloads a key for this session only.
+			sets a key aside until you restore it or reopen the app.
 		{:else}
 			Keys stay on this machine, in this app's local storage.
 		{/if}
@@ -619,12 +637,17 @@
 					</select>
 				</div>
 			{:else if voicesLoaded}
-				<p class="note">
+				<p class="note voice-note">
 					No voices installed for {voiceLangTag} — Auto uses your
-					system default.
+					system default. Voices come from the system's
+					text-to-speech engine, not the keyboard: install one,
+					then check again.
 				</p>
 			{/if}
 		{/if}
+		<button type="button" class="linklike" onclick={() => void loadVoices()} disabled={refreshingVoices}>
+			{refreshingVoices ? "Checking…" : "Check for new voices"}
+		</button>
 	{/if}
 	{#if androidUI && !inShell}
 		<label class="check">
@@ -686,12 +709,15 @@
 						</select>
 					</div>
 				{:else if voicesLoaded}
-					<p class="note">
+					<p class="note voice-note">
 						No premium or enhanced voices installed for {voiceLangTag} — Auto uses your
 						System Voice.
 					</p>
 				{/if}
 			{/if}
+			<button type="button" class="linklike" onclick={() => void loadVoices()} disabled={refreshingVoices}>
+				{refreshingVoices ? "Checking…" : "Check for new voices"}
+			</button>
 		</fieldset>
 		{:else if inShell && voiceLoadError && !androidUI}
 			<fieldset>
@@ -744,11 +770,17 @@
 	</div>
 	<label>
 		Text Size
+		<button
+			type="button"
+			class="reset-width"
+			title="Reset to the default size"
+			onclick={() => (settings.fontScale = 1)}
+		>(100%)</button>
 		<span class="font-row">
 			<input
 				type="range"
 				min="80"
-				max={androidUI ? 200 : 400}
+				max={androidUI ? 400 : 600}
 				step="5"
 				value={Math.round(settings.fontScale * 100)}
 				aria-label="Text size percent"
@@ -835,13 +867,13 @@
 			<button type="button" onclick={() => void checkUpdates()} disabled={checkingUpdate}>
 				{checkingUpdate ? "Checking…" : "Check for updates"}
 			</button>
-			{#if updateStatus}<p class="result" role="status">{updateStatus}</p>{/if}
+			{#if updateStatus}<p class={updateRoute.kind === "releases" ? "note" : "result"} role="status">{updateStatus}</p>{/if}
 		{/if}
 	</section>
 </div>
 
 {#if showStamp}
-	<p class="build-stamp">build {buildStamp}</p>
+	<p class="build-stamp">{appVersion ? `v${appVersion} · build ${buildStamp}` : `build ${buildStamp}`}</p>
 {/if}
 
 <style>
@@ -1126,6 +1158,26 @@
 	.note button:hover {
 		color: #1c1c1e;
 	}
+	/* Empty-inventory note: breathing room below before the next
+	control, and a quiet inline re-check action in the same voice. */
+	.voice-note {
+		margin-bottom: 0.9rem;
+	}
+	.linklike {
+		font: inherit;
+		font-size: 0.84rem;
+		color: inherit;
+		text-decoration: underline;
+		text-underline-offset: 2px;
+		background: none;
+		border: 0;
+		padding: 0;
+		cursor: pointer;
+	}
+	.linklike:disabled {
+		cursor: default;
+		opacity: 0.6;
+	}
 	.key-state {
 		font-size: 0.87rem;
 		display: flex;
@@ -1218,10 +1270,10 @@
 	.hover-row {
 		display: flex;
 		gap: 1.2rem;
-		margin-bottom: 0.25rem;
+		margin-bottom: 0.7rem;
 	}
 	.hover-row legend {
-		margin-bottom: 0.3rem;
+		margin-bottom: 0.6rem;
 	}
 	legend {
 		font-size: 0.87rem;

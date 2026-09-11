@@ -11,6 +11,16 @@ describe("session ejection", () => {
 		restoreProvider("muse");
 		expect(isEjected("muse")).toBe(false);
 	});
+
+	it("reopening the app clears ejections (state is memory-only)", () => {
+		resetSession();
+		ejectProvider("muse");
+		expect(isEjected("muse")).toBe(true);
+		// A fresh launch starts with an empty set: resetSession models
+		// what a reload does, since nothing is ever persisted.
+		resetSession();
+		expect(isEjected("muse")).toBe(false);
+	});
 });
 
 describe("maskKey", () => {

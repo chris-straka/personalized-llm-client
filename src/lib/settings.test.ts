@@ -60,13 +60,13 @@ describe("settings", () => {
 		expect(loadSettings(memoryStore).fontScale).toBe(1.2);
 	});
 
-	it("persists desktop text size up to 400% and resets strays", () => {
+	it("persists text size up to 600% and resets strays", () => {
 		const max = blankSettings();
-		max.fontScale = 4;
+		max.fontScale = 6;
 		saveSettings(max, memoryStore);
-		expect(loadSettings(memoryStore).fontScale).toBe(4);
+		expect(loadSettings(memoryStore).fontScale).toBe(6);
 		const over = blankSettings();
-		over.fontScale = 4.5;
+		over.fontScale = 6.5;
 		saveSettings(over, memoryStore);
 		expect(loadSettings(memoryStore).fontScale).toBe(1);
 	});

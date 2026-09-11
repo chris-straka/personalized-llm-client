@@ -24,12 +24,20 @@ test("own-bubble toggle reads as Enable background on my messages", async ({ pag
 	await expect(page.locator(".settings-panel").getByText("Enable background on my messages")).toBeVisible();
 });
 
-/** Desktop text size caps at 400% (phones keep 200%). */
-test("desktop text slider caps at 400 percent", async ({ page }) => {
+/** Text size caps at 600% on desktop, 400% on phones. */
+test("desktop text slider caps at 600 percent", async ({ page }) => {
 	await expect(page.locator('.settings-panel input[aria-label="Text size percent"]')).toHaveAttribute(
 		"max",
-		"400"
+		"600"
 	);
+});
+
+test("text size reset button restores 100 percent", async ({ page }) => {
+	const slider = page.locator('.settings-panel input[aria-label="Text size percent"]');
+	await slider.fill("200");
+	await expect(slider).toHaveValue("200");
+	await page.locator('.settings-panel button[title="Reset to the default size"]').click();
+	await expect(slider).toHaveValue("100");
 });
 
 /** Bubble toggle sits below the hover row on desktop. */

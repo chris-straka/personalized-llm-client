@@ -44,3 +44,33 @@ test("command plus and minus scale text", async ({ page }) => {
 	await page.keyboard.press("Meta+-");
 	await expect(page.locator(".toast")).toContainText("Text size 100%");
 });
+
+/** Text size scales messages, never the composer input; annotation
+badges track it at a dampened rate (30%: 600% reads ≈2.5× badges). */
+test("text size scales messages and badges, not the composer", async ({ page }) => {
+	await seedChat(page, [{ role: "assistant", content: "hello" }]);
+	await page.goto("/");
+	await expect(page.locator("article .rendered").first()).toBeVisible();
+	const px = (sel: string) =>
+		page.evaluate((s) => {
+			const el = document.querySelector(s);
+			if (!el) throw new Error(`missing ${s}`);
+			return parseFloat(getComputedStyle(el as HTMLElement).fontSize);
+		}, sel);
+	// A badge in the message rides the same scale var at the dampened rate.
+	await page.evaluate(() => {
+		const rendered = document.querySelector("article .rendered");
+		const badge = document.createElement("button");
+		badge.className = "ccez-ann-badge";
+		badge.textContent = "1";
+		rendered?.appendChild(badge);
+	});
+	const msgBefore = await px("article .rendered");
+	const editorBefore = await px(".prompt .cm-editor");
+	const badgeBefore = await px("button.ccez-ann-badge");
+	await page.keyboard.press("Meta+=");
+	await expect(page.locator(".toast")).toContainText("Text size 110%");
+	expect(await px("article .rendered")).toBeCloseTo(msgBefore * 1.1, 1);
+	expect(await px(".prompt .cm-editor")).toBeCloseTo(editorBefore, 1);
+	expect(await px("button.ccez-ann-badge")).toBeCloseTo(badgeBefore * 1.03, 1);
+});

@@ -14,7 +14,8 @@ export default defineConfig(() => ({
   // they were compiled, so "am I behind?" is one glance. Dev shows
   // "live" instead (HMR is always fresh; a server-start stamp would lie).
   define: {
-    __BUILD_STAMP__: JSON.stringify(new Date().toISOString().slice(0, 16).replace("T", " ") + "Z")
+    __BUILD_STAMP__: JSON.stringify(new Date().toISOString().slice(0, 16).replace("T", " ") + "Z"),
+    __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? "0.0.0")
   },
   optimizeDeps: {
     // lindera-wasm resolves its .wasm sibling via `new URL(..., import.meta.url)`;
