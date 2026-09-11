@@ -1,7 +1,7 @@
 // Release helper: bump the version everywhere it lives, commit the
 // version files only, tag, and push. The `v*` tag is what starts release CI:
 // one tag fans out to every platform job in .github/workflows/release.yml
-// (macOS ad-hoc-signed ARM64 .dmg + updater artifacts, signed Android APK,
+// (macOS ad-hoc-signed per-arch .dmgs + updater artifacts, signed Android APK,
 // plus the windows/linux/web sibling jobs). All targets read the same four
 // version files below, so a single bump versions everything at once.
 // No Apple Developer account, no notarization: the macOS bundle is ad-hoc

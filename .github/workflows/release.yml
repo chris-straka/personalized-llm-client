@@ -1,8 +1,9 @@
 name: release
 
 # Cut a release: push a tag like `v0.1.0` and CI builds the
-# signed-for-updates macOS .dmgs (universal + ARM64-only) and the signed
-# Android APK, attaching all to a GitHub Release as a draft.
+# signed-for-updates macOS .dmgs (per-arch: ARM64-only + Intel-only,
+# no universal binary) and the signed Android APK, attaching all to
+# a GitHub Release as a draft.
 #
 # One-time setup before the first release (repo Settings -> Secrets -> Actions):
 #   updater (both jobs sign macOS updates with this):
@@ -23,7 +24,7 @@ on:
       - "v*"
 
 jobs:
-  release-macos:
+  release-macos-x86_64:
     runs-on: macos-latest
     permissions:
       contents: write
@@ -32,7 +33,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: x86_64-apple-darwin
       - run: bun install
       - uses: tauri-apps/tauri-action@v1
         env:
@@ -43,9 +44,9 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "Ccez LLM ${{ github.ref_name }}"
           releaseDraft: true
-          # Universal binary (Apple Silicon + Intel): one _universal.dmg
-          # instead of a per-arch name nobody can read.
-          args: --target universal-apple-darwin
+          # Intel-only .dmg: no universal binary ships, so nobody
+          # downloads or stores a slice their Mac can't use.
+          args: --target x86_64-apple-darwin
 
   release-macos-aarch64:
     runs-on: macos-latest
@@ -67,8 +68,8 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "Ccez LLM ${{ github.ref_name }}"
           releaseDraft: true
-          # Apple Silicon-only .dmg alongside the universal one above:
-          # smaller download for M1+ Macs, same signed-for-updates flow.
+          # Apple Silicon-only .dmg alongside the Intel-only one above:
+          # M1+ Macs download just their slice, same signed-for-updates flow.
           args: --target aarch64-apple-darwin
 
   release-android:
