@@ -130,4 +130,14 @@ describe("friendlyMicError", () => {
 	it("passes unknown messages through", () => {
 		expect(friendlyMicError("weird-code")).toBe("weird-code");
 	});
+	it("names offline distinctly from unreachable", () => {
+		const was = Object.getOwnPropertyDescriptor(window.navigator, "onLine");
+		Object.defineProperty(window.navigator, "onLine", { value: false, configurable: true });
+		try {
+			expect(friendlyMicError("network")).toMatch(/offline/i);
+		} finally {
+			if (was) Object.defineProperty(window.navigator, "onLine", was);
+		}
+		expect(friendlyMicError("network")).toMatch(/transcription service/i);
+	});
 });

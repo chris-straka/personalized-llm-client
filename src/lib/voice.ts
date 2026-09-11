@@ -300,6 +300,13 @@ export function friendlyMicError(message: string): string {
 	if (/no-speech/i.test(message)) return "Didn't catch anything — try again.";
 	if (/audio-capture|not-found|no-microphone/i.test(message)) return "No microphone found.";
 	if (/network/i.test(message)) {
+		try {
+			if (typeof navigator !== "undefined" && navigator.onLine === false) {
+				return "You're offline — reconnect and try dictation again.";
+			}
+		} catch {
+			// Navigator unreadable; fall through to the generic guidance.
+		}
 		return "Couldn't reach the transcription service — check your connection (or VPN/ad-blocker) and try again.";
 	}
 	return message;
