@@ -102,6 +102,12 @@
 		lockSelectionToMessage,
 		quoteTextNodes,
 		occurrenceAtPosition,
+		snapSelectionToWordEdges,
+		placeAnnPopX,
+		REFS_ONLY_BODY,
+		lineStartOffset,
+		clampDragAnchorToFocusLine,
+		reviewEditKey,
 		loadDraftAnnotations,
 		saveDraftAnnotations,
 		type Annotation,
@@ -450,6 +456,9 @@
 	let selMenu = $state<{
 		x: number;
 		y: number;
+		/** Highlight rect (viewport px): centers the create box when narrow. */
+		left: number;
+		w: number;
 		quote: string;
 		messageId: ChatMsgId;
 	} | null>(null);
@@ -1477,6 +1486,10 @@
 		// article trims back to the anchor message's edge first.
 		const live = window.getSelection();
 		if (live) lockSelectionToMessage(live, articleOf);
+		// The create marker never splits a word in half: boundaries cut
+		// mid-word snap out to the word's edges before the menu reads
+		// the quote (CJK has no word characters, so it never snaps).
+		if (live) snapSelectionToWordEdges(live);
 		placeSelMenu(cursorX);
 	}
 
@@ -1521,7 +1534,7 @@
 			y = rect.top - 41;
 			if (y < 8) y = rect.bottom + 14;
 		}
-		selMenu = { x, y, quote: found.quote, messageId: found.messageId };
+		selMenu = { x, y, left: rect.left, w: rect.width, quote: found.quote, messageId: found.messageId };
 	}
 
 	function clearSelection(): void {
@@ -1611,14 +1624,23 @@
 		const width = popWidth();
 		// The comment box sits a breath below the Annotate menu's
 		// anchor: sharing selMenu.y leaves it floating high above tall
-		// CJK lines.
-		let x = Math.min(Math.max(8, selMenu.x), window.innerWidth - width - 8);
+		// CJK lines. Narrow highlights center the box over themselves;
+		// wide ones keep the end-of-selection placement. The Annotate
+		// button itself never moves (stays at the cursor end).
+		// Phone: the keyboard eats the lower screen, so the composer
+		// pins high and centered instead of at the selection — it is
+		// never covered, wherever the quote sits.
+		const x = androidUI
+			? Math.max(8, (window.innerWidth - width) / 2)
+			: placeAnnPopX({
+					cursorX: selMenu.x,
+					highlightLeft: selMenu.left,
+					highlightWidth: selMenu.w,
+					popWidth: width,
+					viewportWidth: window.innerWidth
+				});
 		let y = Math.min(Math.max(8, selMenu.y + 2), window.innerHeight - 72);
 		if (androidUI) {
-			// Phone: the keyboard eats the lower screen, so the composer
-			// pins high and centered instead of at the selection — it is
-			// never covered, wherever the quote sits.
-			x = Math.max(8, (window.innerWidth - width) / 2);
 			y = Math.max(8, window.innerHeight * 0.12);
 		}
 		selMenu = null;
@@ -4261,17 +4283,71 @@
 		// the anchor article trims back live (mouseup's lock only fixed
 		// it after the fact, flashing two messages blue mid-drag).
 		let selectingInMessage = false;
+		// A drag that starts off-chat (gutter, margins, off-screen)
+		// never highlights above the cursor's current line: while the
+		// button is down, an anchor end outside message text pins back
+		// to the focus line's start on every selection change.
+		let offChatDragArmed = false;
 		const armMessageDrag = (event: MouseEvent): void => {
 			const target = event.target instanceof Element ? event.target : null;
-			selectingInMessage = !!target?.closest(".messages .rendered");
+			selectingInMessage = event.button === 0 && !!target?.closest(".messages .rendered");
+			offChatDragArmed = event.button === 0 && !target?.closest(".messages .rendered");
 		};
 		const trimMessageDrag = (): void => {
-			if (!selectingInMessage) return;
-			const live = window.getSelection();
-			if (live) lockSelectionToMessage(live, articleOf);
+			if (selectingInMessage) {
+				const live = window.getSelection();
+				if (live) lockSelectionToMessage(live, articleOf);
+				return;
+			}
+			clampOffChatDrag();
+		};
+		const clampOffChatDrag = (): void => {
+			if (!offChatDragArmed) return;
+			try {
+				const live = window.getSelection();
+				if (!live || live.isCollapsed || live.rangeCount === 0) return;
+				const anchorNode = live.anchorNode;
+				const focusNode = live.focusNode;
+				if (!anchorNode || !focusNode) return;
+				const anchorEl = anchorNode instanceof Element ? anchorNode : anchorNode.parentElement;
+				const focusEl = focusNode instanceof Element ? focusNode : focusNode.parentElement;
+				if (!focusEl?.closest(".messages .rendered")) return;
+				// Anchors in controls or the prompt are their own
+				// gesture (editor selections, button presses) — never
+				// an off-chat message drag.
+				if (anchorEl?.closest(".messages .rendered, .cm-content, input, textarea")) return;
+				// Only the upward side clamps: an anchor below the
+				// cursor highlights below it, which is allowed.
+				let anchorAbove: boolean;
+				if (anchorNode === focusNode) anchorAbove = live.anchorOffset < live.focusOffset;
+				else {
+					anchorAbove = !!(anchorNode.compareDocumentPosition(focusNode) & Node.DOCUMENT_POSITION_FOLLOWING);
+				}
+				if (!anchorAbove) return;
+				if (anchorNode instanceof Text && anchorNode === focusNode) {
+					const text = anchorNode.textContent ?? "";
+					const fixed = clampDragAnchorToFocusLine(text, live.anchorOffset, live.focusOffset);
+					if (fixed !== live.anchorOffset) {
+						live.setBaseAndExtent(anchorNode, fixed, focusNode, live.focusOffset);
+					}
+					return;
+				}
+				// Cross-node: the anchor sits in earlier (or foreign)
+				// content — pin it to the cursor line's start inside
+				// the focus node, so nothing above that line stays
+				// highlighted.
+				if (focusNode instanceof Text) {
+					const text = focusNode.textContent ?? "";
+					const start = lineStartOffset(text, live.focusOffset);
+					live.setBaseAndExtent(focusNode, start, focusNode, live.focusOffset);
+				}
+			} catch {
+				// Selection trimming is cosmetic: never break the drag.
+			}
 		};
 		const onMouseUp = (event: MouseEvent) => {
 			selectingInMessage = false;
+			offChatDragArmed = false;
 			// Compat mouseup trailing a touch-handled selection: the menu
 			// is already up, and the staleness check below would clear it
 			// as a no-change click (touchMenuAt lives with the touchend
@@ -4831,14 +4907,14 @@
 					onmouseenter={() => (hoveredIdx = i)}
 					onmouseleave={(event) => onArticleLeave(event, msg, i)}
 				>
-					{#if sentRefs && (!refsOnly || isFolded)}
+					{#if sentRefs}
 						<!-- Baked annotation block, collapsed above the
 						message: the count stays visible like the composer
 						pill; hovering (or tabbing to) the number itself
 						reveals the saved quotes. Provider context is
 						unaffected — only the display is redacted. A
-						refs-only message shows the pill only while folded:
-						unfolded, the full block is the display. -->
+						refs-only message always shows the pill: unfolded,
+						its body is just an em-dash (see REFS_ONLY_BODY). -->
 						<div class="ann-refs">
 							<button
 								type="button"
@@ -4873,7 +4949,7 @@
 							onBadgeClick={openBadgeClick}
 							onFoldToggle={(index: number) => togglePasteFold(msg, index)}
 							textOverride={aidedTextFor(msg)}
-							contentOverride={sentRefs ? (refsOnly && !isFolded ? null : sentRefs.text) : null}
+							contentOverride={sentRefs ? (refsOnly && !isFolded ? REFS_ONLY_BODY : sentRefs.text) : null}
 							aidPreview={aidPeek?.id === msg.id && !aidPin.has(msg.id)}
 							aidKinds={localAidsOverrideFor(msg)}
 							aidPreferred={preferredLocalAid(activeReplyCode)}
@@ -5247,6 +5323,19 @@
 										<label>
 											<span class="review-label">note:</span>
 											<textarea rows="2" bind:this={editBox} bind:value={editDraft} placeholder="Add an optional comment…"
+												aria-label="Edit annotation note. Enter saves, Shift+Enter adds a line, Escape cancels."
+												onkeydown={(e) => {
+													const action = reviewEditKey(e.key, e.shiftKey);
+													if (action === "save") {
+														e.preventDefault();
+														saveEdit(ann.id);
+													} else if (action === "cancel") {
+														e.preventDefault();
+														editingId = null;
+														highlightAnnId = null;
+														focusPill();
+													}
+												}}
 											></textarea>
 										</label>
 										<div class="review-edit-actions">
@@ -7731,6 +7820,18 @@
 		font-weight: 600;
 		padding: 0.5rem 1.4rem;
 		cursor: pointer;
+		/* On the base (not :hover) so the hover animates symmetrically
+		in and back out, instead of snapping one way. */
+		transition:
+			filter 0.15s ease,
+			transform 0.15s ease;
+	}
+	.ann-save:hover {
+		filter: brightness(1.08);
+		transform: scale(1.03);
+	}
+	.ann-save:active {
+		transform: scale(1);
 	}
 	/* Fresh pill keeps the mic mounted and cross-fades it, so the
 	textarea never reflows when typing starts. Faded buttons are out of
@@ -7842,6 +7943,17 @@
 		border-color: #1c1c1e;
 		border-color: var(--strong);
 	}
+	/* The edit box stays readable in dark mode: the near-black field
+	surface swallows typed text under dim panels, so edits ride a
+	raised surface with light ink instead. */
+	:global(html[data-theme="dark"]) .review textarea {
+		background: #3a3a3c;
+		color: #f2f2f7;
+		border-color: #636366;
+	}
+	:global(html[data-theme="dark"]) .review textarea::placeholder {
+		color: #aeaeb2;
+	}
 	/* Save is the solid primary pill (same fill as the send button);
 	Cancel is quiet text — the two never look like twins. */
 	.review-edit-actions {
@@ -7862,6 +7974,13 @@
 		background: var(--invert);
 		color: #fff;
 		color: var(--invert-ink);
+		/* On the base (not :hover) so Save and Cancel animate
+		symmetrically in and back out, instead of snapping one way. */
+		transition:
+			opacity 0.15s ease,
+			color 0.15s ease,
+			background-color 0.15s ease,
+			border-color 0.15s ease;
 	}
 	.review-edit-actions button:hover {
 		opacity: 0.8;
