@@ -307,6 +307,9 @@ jobs:
     permissions:
       contents: read
     steps:
+      # gh release download shells out to git; without a checkout the
+      # manifest download fails even when every asset is present.
+      - uses: actions/checkout@v4
       - name: Verify all release assets and updater platforms
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
