@@ -575,7 +575,9 @@
 		background: #fff;
 	}
 	.rendered :global(.ccez-thoughts) {
-		font-size: 0.8rem;
+		/* Thoughts track the message scale like the body (fixed rem
+		stranded them at 12.8px under a 600% reading size). */
+		font-size: calc(0.8rem * var(--font-scale, 1));
 		color: #98989f;
 		margin-bottom: 0.4em;
 	}
