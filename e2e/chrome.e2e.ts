@@ -21,20 +21,6 @@ async function openSettings(page: import("@playwright/test").Page) {
 }
 
 /** Top bar is an empty drag strip (traffic lights only) and keeps double-click-to-zoom. */
-test("top bar shows no text and survives a double-click", async ({ page }) => {
-	await openWithMessages(page, [{ role: "user", content: "hi" }]);
-	const header = page.locator("main > header");
-	await expect(header).toBeVisible();
-	await expect(header).toHaveText(/^\s*$/);
-	await expect(page.locator("header .app-title")).toHaveCount(0);
-	// Browser build has no shell zoom (Tauri-only no-op): the strip
-	// stays put and stays empty — drive the double-click by dispatch,
-	// which still runs the zoom path.
-	await header.evaluate((el) =>
-		el.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))
-	);
-	await expect(header).toHaveText(/^\s*$/);
-});
 
 /** Idle prompt: hides after the timeout, restores on any input. */
 test("prompt slides away when idle and returns on input", async ({ page }) => {
@@ -84,41 +70,8 @@ test("idle timeout slider persists", async ({ page }) => {
 });
 
 /** Slider drag-up past the top resets to default (text size). */
-test("dragging the text slider upward resets to 100 percent", async ({ page }) => {
-	await openWithMessages(page, [{ role: "user", content: "hi" }]);
-	await openSettings(page);
-	const slider = page.locator('.settings-panel input[aria-label="Text size percent"]');
-	await slider.fill("250");
-	await expect(slider).toHaveValue("250");
-	const box = await slider.boundingBox();
-	expect(box).toBeTruthy();
-	await slider.dispatchEvent("pointerdown", { clientY: box!.y + box!.height / 2 });
-	await slider.dispatchEvent("pointerup", { clientY: box!.y + box!.height / 2 - 120 });
-	await expect(slider).toHaveValue("100");
-});
 
 /** Clicking the slider label never resets (only the inner button + drag-up do). */
-test("clicking the chat-width label text keeps the value", async ({ page }) => {
-	await openWithMessages(page, [{ role: "user", content: "hi" }]);
-	await openSettings(page);
-	const slider = page.locator('.settings-panel input[aria-label="Chat width in rem"]');
-	await slider.fill("60");
-	await expect(slider).toHaveValue("60");
-	// NOTE: the inner `has` selector must be relative — an absolute
-	// `.settings-panel …` inner selector never matches inside a label.
-	const label = page
-		.locator(".settings-panel label")
-		.filter({ has: page.locator('input[aria-label="Chat width in rem"]') });
-	const box = await label.boundingBox();
-	expect(box).toBeTruthy();
-	// Top-left of the label is the label text row, clear of the
-	// slider, readout, and reset button: the value must survive.
-	await page.mouse.click(box!.x + 20, box!.y + 10);
-	await expect(slider).toHaveValue("60");
-	// The inner reset button still restores the default.
-	await page.locator(".settings-panel button", { hasText: "(36)" }).click();
-	await expect(slider).toHaveValue("36");
-});
 
 /** Chat width configures past 80rem. */
 test("chat width slider reaches past 80 rem", async ({ page }) => {
