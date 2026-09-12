@@ -4448,6 +4448,14 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 				return;
 			}
 			if (event.ctrlKey && (event.key === "o" || event.key === "O")) {
+				// Pasted-text tags first: with the prompt focused and tags
+				// present, Ctrl+O expands/collapses them all (Muse Code
+				// style). Otherwise the thoughts toggle keeps the shortcut.
+				if (inEditor && editor?.togglePastes()) {
+					event.preventDefault();
+					event.stopPropagation();
+					return;
+				}
 				// Thoughts toggle works from anywhere, even inside the prompt.
 				event.preventDefault();
 				event.stopPropagation();
@@ -6313,11 +6321,14 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 						<button type="button" onclick={annotateTranslation}>Add as annotation</button>
 						<button
 							type="button"
+							class="icon-copy"
+							title="Copy translation"
+							aria-label="Copy translation"
 							onclick={() => {
 								if (translate?.result) copyPlain(translate.result, "Copied");
 							}}
 						>
-							Copy
+							<ActionIcon kind="copy" />
 						</button>
 					</div>
 				{/if}
@@ -6611,6 +6622,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 					<div><dt>Speak hovered word</dt><dd>Right click word</dd></div>
 					<div><dt>Speak highlight</dt><dd>Select text, then right click</dd></div>
 					<div><dt>Thoughts show/hide</dt><dd>Ctrl+O</dd></div>
+					<div><dt>Pasted text expand/collapse</dt><dd>Ctrl+O in the prompt</dd></div>
 					<div><dt>Translate selection</dt><dd>{isMac ? "⌘T" : "Ctrl+T"} over message text (to English, feeds annotation)</dd></div>
 					<div><dt>Browser side panel</dt><dd>{isMac ? "⌘T" : "Ctrl+T"} anywhere (address bar takes focus), Esc closes (one tab)</dd></div>
 					<div><dt>Stop voice / close menus</dt><dd>Esc (outside the prompt)</dd></div>
@@ -9128,6 +9140,26 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		color: var(--ink);
 		text-decoration: underline;
 	}
+	/* Icon-only copy (message-button copy glyph, no text): the pill
+	chrome above would box it, so it rides the muted ghost treatment. */
+	.review-edit-actions button.icon-copy {
+		border-color: transparent;
+		background: none;
+		padding: 0.15rem;
+		line-height: 0;
+		color: #6e6e73;
+		color: var(--muted);
+	}
+	.review-edit-actions button.icon-copy:hover {
+		opacity: 1;
+		color: #1c1c1e;
+		color: var(--ink);
+		text-decoration: none;
+	}
+	.review-edit-actions button.icon-copy :global(.action-glyph) {
+		height: 1rem;
+		width: 1rem;
+	}
 	/* Merged pill: the wrap carries the single border; the count and ×
 	buttons inside are bare segments. Later than the prompt tool buttons
 	so the bare look wins (dark overrides below only recolor). */
@@ -10035,9 +10067,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	/* !important throughout: the CodeMirror theme object injects its
 	light rules after this stylesheet, so only importance wins. */
 	:global(html[data-theme="dark"]) :global(.cm-paste-marker) {
-		background: #2c2c2e !important;
-		border-color: #48484a !important;
-		color: #f2f2f7 !important;
+		color: #98989f !important;
 	}
 	:global(html[data-theme="dark"]) :global(.cm-fence-bar) {
 		background: #2c2c2e !important;

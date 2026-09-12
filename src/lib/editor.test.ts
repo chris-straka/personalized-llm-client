@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { trimPasteTail, sendPasteFolds } from "./editor";
+import { trimPasteTail, sendPasteFolds, pasteToggleAction } from "./editor";
 import { stripImageMarkers, IMAGE_MARKER } from "./attachments";
 
 describe("trimPasteTail", () => {
@@ -75,5 +75,20 @@ describe("sendPasteFolds", () => {
 			{ start: 0, end: 2, chars: 2 },
 			{ start: 6, end: 8, chars: 2 }
 		]);
+	});
+});
+
+describe("pasteToggleAction", () => {
+	it("expands while any tag is still collapsed", () => {
+		expect(pasteToggleAction(2, 1)).toBe("expand");
+		expect(pasteToggleAction(1, 0)).toBe("expand");
+	});
+
+	it("collapses back once everything is expanded", () => {
+		expect(pasteToggleAction(0, 3)).toBe("collapse");
+	});
+
+	it("claims nothing with no tags, so Ctrl+O keeps its thoughts toggle", () => {
+		expect(pasteToggleAction(0, 0)).toBe("none");
 	});
 });

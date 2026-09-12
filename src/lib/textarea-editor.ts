@@ -109,6 +109,8 @@ export function createTextareaEditor(
 		getText: () => ta.value,
 		// No collapsing here: everything sends unfolded.
 		getPastes: () => [],
+		// No tags to toggle: Ctrl+O falls through to the thoughts toggle.
+		togglePastes: () => false,
 		setText: (text: string) => {
 			ta.value = text;
 			notify();

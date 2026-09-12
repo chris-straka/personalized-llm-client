@@ -55,6 +55,9 @@ export interface PromptEditor {
 	getText(): string;
 	/** Collapsed-paste spans in document coordinates (for send-time folds). */
 	getPastes(): PasteSpan[];
+	/** Ctrl+O: expand every paste tag, or re-collapse expanded ones.
+	 * True when it did anything (the caller then owns the keystroke). */
+	togglePastes(): boolean;
 	setText(text: string): void;
 	/** Insert text at the cursor (used for pasted-image markers). */
 	insertText(text: string): void;
@@ -129,39 +132,91 @@ interface PasteCollapse {
 
 const addPaste = StateEffect.define<PasteCollapse>();
 const expandPaste = StateEffect.define<number>();
+const expandAllPastes = StateEffect.define<void>();
+const collapseAllPastes = StateEffect.define<void>();
 
 /**
  * The paste-decoration field of the live composer (single instance).
  * Read it with pasteSpans — never touch it directly.
  */
-let pasteFieldRef: StateField<DecorationSet> | null = null;
+let pasteFieldRef: StateField<PasteField> | null = null;
+
+/**
+ * Paste-tag field: collapsed markers as decorations, plus the spans
+ * expanded out of them (single click or Ctrl+O) so a later collapse can
+ * put the tags back. Positions on both sides remap through edits; a span
+ * that stops being a valid range is forgotten, never re-marked.
+ */
+interface PasteField {
+	deco: DecorationSet;
+	open: PasteCollapse[];
+}
+
+/** Drop one collapsed marker, remembering its span for re-collapse. */
+function openMarker(deco: DecorationSet, open: PasteCollapse[], pasteId: number): PasteField {
+	const ranges: Range<Decoration>[] = [];
+	let opened: PasteCollapse | null = null;
+	const cursor = deco.iter();
+	while (cursor.value) {
+		const widget = (cursor.value.spec as { widget?: unknown }).widget;
+		if (widget instanceof PasteMarker && widget.pasteId === pasteId) {
+			opened = { id: pasteId, from: cursor.from, to: cursor.to, chars: widget.charCount };
+		} else {
+			ranges.push(cursor.value.range(cursor.from, cursor.to));
+		}
+		cursor.next();
+	}
+	return {
+		deco: Decoration.set(ranges),
+		open: opened ? [...open, opened] : open
+	};
+}
 
 function pastePlaceholders(): Extension {
-	const field = StateField.define<DecorationSet>({
-		create: () => Decoration.none,
-		update: (deco, tr) => {
-			let next = deco.map(tr.changes);
+	const field = StateField.define<PasteField>({
+		create: () => ({ deco: Decoration.none, open: [] }),
+		update: (value, tr) => {
+			let deco = value.deco.map(tr.changes);
+			let open = value.open;
+			if (open.length > 0) {
+				const mapped: PasteCollapse[] = [];
+				for (const rec of open) {
+					const from = tr.changes.mapPos(rec.from, 1);
+					const to = tr.changes.mapPos(rec.to, -1);
+					if (from < to) mapped.push({ ...rec, from, to });
+				}
+				open = mapped;
+			}
 			for (const effect of tr.effects) {
 				if (effect.is(addPaste)) {
 					const { id, from, to, chars } = effect.value;
 					const marker = Decoration.replace({ widget: new PasteMarker(id, chars) });
-					next = next.update({ add: [marker.range(from, to)] });
+					deco = deco.update({ add: [marker.range(from, to)] });
 				} else if (effect.is(expandPaste)) {
-					const ranges: Range<Decoration>[] = [];
-					const cursor = next.iter();
+					({ deco, open } = openMarker(deco, open, effect.value));
+				} else if (effect.is(expandAllPastes)) {
+					const ids: number[] = [];
+					const cursor = deco.iter();
 					while (cursor.value) {
 						const widget = (cursor.value.spec as { widget?: unknown }).widget;
-						if (!(widget instanceof PasteMarker && widget.pasteId === effect.value)) {
-							ranges.push(cursor.value.range(cursor.from, cursor.to));
-						}
+						if (widget instanceof PasteMarker) ids.push(widget.pasteId);
 						cursor.next();
 					}
-					next = Decoration.set(ranges);
+					for (const id of ids) ({ deco, open } = openMarker(deco, open, id));
+				} else if (effect.is(collapseAllPastes)) {
+					for (const rec of open) {
+						if (rec.from < 0 || rec.to > tr.newDoc.length || rec.from >= rec.to) continue;
+						const marker = Decoration.replace({
+							widget: new PasteMarker(rec.id, rec.chars)
+						});
+						deco = deco.update({ add: [marker.range(rec.from, rec.to)] });
+					}
+					open = [];
 				}
 			}
-			return next;
+			return { deco, open };
 		},
-		provide: (f) => EditorView.decorations.from(f)
+		provide: (f) => EditorView.decorations.from(f, (value) => value.deco)
 	});
 	const clicks = Prec.high(
 		EditorView.domEventHandlers({
@@ -200,10 +255,10 @@ export interface SendFold {
 
 /** Current collapsed-paste spans in document coordinates. Never throws. */
 export function pasteSpans(state: EditorState): PasteSpan[] {
-	if (!pasteFieldRef) return [];
 	let set: DecorationSet;
 	try {
-		set = state.field(pasteFieldRef);
+		if (!pasteFieldRef) return [];
+		set = state.field(pasteFieldRef).deco;
 	} catch {
 		return [];
 	}
@@ -217,6 +272,33 @@ export function pasteSpans(state: EditorState): PasteSpan[] {
 		cursor.next();
 	}
 	return out;
+}
+
+/**
+ * Ctrl+O target from tag counts alone (pure, unit-tested): tags still
+ * collapsed expand first; with none left, expanded tags collapse back;
+ * with no tags at all the keystroke belongs to someone else.
+ */
+export function pasteToggleAction(collapsed: number, open: number): "expand" | "collapse" | "none" {
+	if (collapsed > 0) return "expand";
+	if (open > 0) return "collapse";
+	return "none";
+}
+
+/** Expand every paste tag, or re-collapse expanded ones. Never throws. */
+export function togglePastes(view: EditorView): boolean {
+	let field: PasteField | null;
+	try {
+		field = pasteFieldRef ? view.state.field(pasteFieldRef) : null;
+	} catch {
+		return false;
+	}
+	if (!field) return false;
+	const action = pasteToggleAction(pasteSpans(view.state).length, field.open.length);
+	if (action === "expand") view.dispatch({ effects: expandAllPastes.of(undefined) });
+	else if (action === "collapse") view.dispatch({ effects: collapseAllPastes.of(undefined) });
+	else return false;
+	return true;
 }
 
 /**
@@ -622,14 +704,12 @@ const appTheme = EditorView.theme({
 	// the hidden lines.
 	".cm-scroller": { maxHeight: "12rem", overflowY: "auto" },
 	".cm-focused": { outline: "none" },
+	// Grey shade, never a code block: the tag carries no background or
+	// border of its own, just muted text (Muse Code style).
 	".cm-paste-marker": {
 		display: "inline-block",
 		fontSize: "0.78rem",
-		color: "#3a3a3c",
-		background: "#eef4ff",
-		border: "1px solid #c7c7cc",
-		borderRadius: "6px",
-		padding: "0.1rem 0.5rem",
+		color: "#6e6e73",
 		cursor: "pointer"
 	},
 	// Fence bars echo the message code-head: label left, icon buttons
@@ -761,6 +841,7 @@ export function createPromptEditor(
 	return {
 		getText: () => view.state.doc.toString(),
 		getPastes: () => pasteSpans(view.state),
+		togglePastes: () => togglePastes(view),
 		setText: (text: string) =>
 			view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } }),
 		insertText: (text: string) => {

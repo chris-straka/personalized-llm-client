@@ -119,6 +119,75 @@ test("deleting the tag drops the pill", async ({ page }) => {
 	await expect(card).toHaveCount(0);
 	await expect(page.locator(".cm-content")).toContainText("hello");
 });
+test("long paste collapses to a tag; Ctrl+O expands and re-collapses", async ({
+	page
+}) => {
+	// A >100-char paste renders as one grey tag, not the raw text.
+	const pasted = "lorem ipsum dolor sit amet ".repeat(20);
+	await page.locator(".cm-content").first().click();
+	await page.evaluate((text) => {
+		const target = document.querySelector(".cm-content");
+		if (!target) throw new Error("missing editor");
+		const transfer = new DataTransfer();
+		transfer.setData("text/plain", text);
+		const event = new ClipboardEvent("paste", { bubbles: true, cancelable: true });
+		Object.defineProperty(event, "clipboardData", { value: transfer });
+		target.dispatchEvent(event);
+	}, pasted);
+	const marker = page.locator(".cm-paste-marker");
+	await expect(marker).toBeVisible();
+	await expect(marker).toContainText("Pasted content");
+	// Grey shade, no own background: the tag is not a code block.
+	const box = await marker.evaluate((el) => {
+		const style = getComputedStyle(el);
+		return { background: style.backgroundColor, borderWidth: style.borderWidth };
+	});
+	expect(box.background).toBe("rgba(0, 0, 0, 0)");
+	expect(box.borderWidth).toBe("0px");
+	// Ctrl+O expands every tag…
+	await page.keyboard.press("Control+o");
+	await expect(marker).toHaveCount(0);
+	await expect(page.locator(".cm-content").first()).toContainText("lorem ipsum");
+	// …and again re-collapses.
+	await page.keyboard.press("Control+o");
+	await expect(marker).toBeVisible();
+});
+
+test("Ctrl+O without paste tags still toggles thoughts", async ({ page }) => {
+	// The shortcut is composer-first, not composer-only: with no tags
+	// to expand, it keeps its thoughts toggle from inside the prompt.
+	await page.addInitScript(() => {
+		window.localStorage.setItem(
+			"ccez-studio-chats-v1",
+			JSON.stringify([
+				{
+					id: "e2e-chat",
+					createdAt: 1,
+					replyLang: null,
+					messages: [
+						{ id: "e2e-m0", role: "user", content: "hi", usage: null, error: null },
+						{
+							id: "e2e-m1",
+							role: "assistant",
+							content: "<think>quiet plan</think>Final answer",
+							usage: null,
+							error: null
+						}
+					]
+				}
+			])
+		);
+	});
+	await page.reload();
+	const thoughts = page.locator("article.assistant .ccez-thoughts").first();
+	await expect(thoughts).toBeVisible({ timeout: 60_000 });
+	await page.locator(".cm-content").first().click();
+	await page.keyboard.press("Control+o");
+	await expect(thoughts).toHaveAttribute("open", "");
+	await page.keyboard.press("Control+o");
+	await expect(thoughts).not.toHaveAttribute("open", "");
+});
+
 test("screenshot-to-chat is gone, paste still takes images", async ({ page }) => {
 	// Shot was removed (paste + OCR remain the image paths): no Shot
 	// control even where screen capture is supported.

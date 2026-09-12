@@ -83,10 +83,13 @@ cut; release chain outcome still unconfirmed (see Now).
 - [x] Composer code block: typing triple-backtick changes nothing until
       Shift+Enter commits the block; empty fence assumes text; no nesting;
       3x Shift+Enter exits. (Done on work/stream-composer2; fence e2e green.)
-- [ ] Pasted-text tag: Ctrl+O expands/collapses all text in the tag (Muse
+- [x] Pasted-text tag: Ctrl+O expands/collapses all text in the tag (Muse
       Code style) — grey shade, not a code block, no own background.
-      (Open Sep 2026: no Ctrl+O handler in tree; stream-composer2 did the
-      paste-IMAGE tag line, not this.)
+      (Done on work/stream-composer3: prompt-focused Ctrl+O expands every
+      `[Pasted content N chars]` tag, repeat re-collapses via remembered
+      spans; falls through to the thoughts toggle with no tags; marker
+      restyled grey with no background/border. `editor.test.ts` x12 +
+      `intake.e2e.ts` 8/8 green, incl. the `[Pasted image]` tag tests.)
 - [x] Image pill <-> `[Pasted image]` tag two-way removal (removing one removes
       the other). (Done on work/stream-composer2; intake e2e green.)
 - [x] Paste-image flow: say `[Pasted image]`, no leading newline, cursor one
@@ -100,9 +103,12 @@ cut; release chain outcome still unconfirmed (see Now).
 - [x] Image cards replace pills: thumbnail preview + footer (tokens,
       icon copy button, OCR, X). (Done on work/stream-composer2; intake e2e
       "image cards" green.)
-- [ ] Icon-only copy buttons everywhere (reuse message-button copy logo).
-      (Partial Sep 2026: fence buttons done on stream-composer2, message-side
-      per-annotation buttons done on stream-annotation2; full sweep unverified.)
+- [x] Icon-only copy buttons everywhere (reuse message-button copy logo).
+      (Done on work/stream-composer3: full sweep found exactly one text
+      button left — the translate-result Copy — now the shared copy glyph
+      with an accessible name; message rows, per-annotation buttons,
+      fence bars, attachment cards already icon-only. New
+      `copy-buttons.test.ts` x3 + `composer-tools.e2e.ts` 9/9 green.)
 - [x] Sent-message attachment chip above the message, left of annotation marker.
       (Done on work/stream-composer2; chip e2e green.)
 - [x] ESC with composer focused unfocuses everything.
