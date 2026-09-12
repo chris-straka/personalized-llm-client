@@ -74,6 +74,13 @@ describe("annotations-only messages", () => {
 	});
 });
 
+describe("sent-message annotation count", () => {
+	it("scales the refs count with the message font size", () => {
+		const css = pageStyle();
+		expect(css).toMatch(/\.ann-refs-pill\s*\{[^}]*var\(--font-scale, 1\)/);
+	});
+});
+
 describe("off-chat drag clamp", () => {
 	it("trims selections whose press started off-chat on every change", () => {
 		const source = pageSource();

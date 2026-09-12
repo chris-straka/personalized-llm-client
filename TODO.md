@@ -142,7 +142,9 @@ cut; release chain outcome still unconfirmed (see Now).
   the annotate path — centered when highlight < box, cursor placement
   otherwise, clamped on screen; e2e narrow/wide specs in
   `annotations-ux.e2e.ts`. No code change needed.)
-- [ ] Hovering a previous message's annotation count scales with font size.
+- [x] Hovering a previous message's annotation count scales with font size.
+  (Done Sep 2026 on work/stream-annotation2: `.ann-refs-pill` reads
+  `var(--font-scale, 1)` like badges; locked in `annotations-ux.test.ts`.)
 - [ ] Empty annotations get "?" inserted so the AI knows I'm confused.
 - [ ] Click-hold off-chat then drag into chat must not highlight above the
       current line; dragging off-screen must not highlight everything above.
