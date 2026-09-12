@@ -1416,6 +1416,11 @@ import { isPromptIdle } from "$lib/chrome";
 				if (focus) enterEditMode();
 				return;
 			}
+			// File the leaving chat's drafts away first: resetDraftExtras
+			// empties `annotations`, and the autosave effect would then
+			// persist the empty list under the old id (draft restore
+			// on return would come back blank).
+			saveDraftAnnotations(chatState.activeChatId, annotations, chats.map((c) => c.id));
 			resetDraftExtras();
 			newChat(chatState);
 			scrollBox?.scrollTo({ top: 0, behavior: "smooth" });
@@ -1500,6 +1505,15 @@ import { isPromptIdle } from "$lib/chrome";
 	function doNewChat(): void {
 		previewChatId = null;
 		stopVoice();
+		// File the leaving chat's drafts away before resetDraftExtras
+		// empties them — otherwise the autosave effect files the empty
+		// list under the old chat's id and return-restore comes back
+		// blank (same ordering as transitionToChat's save-before-load).
+		saveDraftAnnotations(
+			chatState.activeChatId,
+			annotations,
+			chatState.chats.map((c) => c.id)
+		);
 		resetDraftExtras();
 		newChat(chatState);
 		scrollBox?.scrollTo({ top: 0, behavior: "smooth" });
@@ -3253,8 +3267,29 @@ import { isPromptIdle } from "$lib/chrome";
 	 */
 	function dropChat(id: ChatId): void {
 		stopVoice();
-		resetDraftExtras();
-		deleteChat(chatState, id);
+		if (id === chatState.activeChatId) {
+			// Dropping the open chat discards its drafts (stored entry
+			// pruned via the empty save), then the neighbor that slides
+			// into its place restores its own filed drafts.
+			saveDraftAnnotations(
+				id,
+				[],
+				chatState.chats.map((c) => c.id).filter((c) => c !== id)
+			);
+			resetDraftExtras();
+			deleteChat(chatState, id);
+			annotations = loadDraftAnnotations(chatState.activeChatId);
+		} else {
+			// Dropping a background chat must not touch the open
+			// composer's in-memory drafts or attachments: only prune the
+			// deleted id out of storage.
+			deleteChat(chatState, id);
+			saveDraftAnnotations(
+				chatState.activeChatId,
+				annotations,
+				chatState.chats.map((c) => c.id)
+			);
+		}
 		if (chatState.chats.length === 1 && chatState.chats[0]?.messages.length === 0) {
 			void resetVoiceLangFromKeyboard();
 		}
@@ -3265,6 +3300,9 @@ import { isPromptIdle } from "$lib/chrome";
 		stopVoice();
 		resetDraftExtras();
 		deleteAllChats(chatState);
+		// Every filed draft died with its chat: prune the whole record
+		// so the fresh blank starts clean even in storage.
+		saveDraftAnnotations(chatState.activeChatId, [], [chatState.activeChatId]);
 		void resetVoiceLangFromKeyboard();
 	}
 
