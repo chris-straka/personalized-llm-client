@@ -359,7 +359,10 @@ to whole words` in `annotations-ux.e2e.ts`. No code change needed.)
       (Decided + done on work/stream-chrome2: drag-up resets, label clicks
       keep ("chat-width label text keeps the value" e2e), idle tops at 10s
       with "never"; settings-panel e2e green.)
-- [ ] Sidebar: animated slide + opaque background (no see-through).
+- [x] Sidebar: animated slide + opaque background (no see-through).
+      (Verified Sep 2026 on work/w1-waypoint: drawers are `position: fixed`
+      with solid `var(--bg)`, box-shadow + border, and 0.22s transform/width
+      transitions both ways — slide reads on open and close, no transparency.)
 - [x] Header: remove top-right buttons; rebrand Ccez Studio -> Ccez LLM
       (UI strings only). (Done on work/stream-chrome2; "top bar shows text"
       chrome e2e green. Residual: one "Ccez Studio" in the sleep-block
