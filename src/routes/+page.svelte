@@ -2982,8 +2982,11 @@ import { isPromptIdle } from "$lib/chrome";
 		// The prompt empties the moment the message goes out — not when the
 		// (possibly long) reply finishes streaming in. The annotation pill
 		// and count go with it: the block is already baked into the sent
-		// message, so nothing waits on the reply.
+		// message, so nothing waits on the reply. Attachment pills clear
+		// with it (`outgoing` already captured them for the send).
 		editor?.clear();
+		attachments = [];
+		previewId = null;
 		annotations = [];
 		pendingAnn = null;
 		reviewOpen = false;
