@@ -134,11 +134,19 @@ cut; release chain outcome still unconfirmed (see Now).
       (Done on work/stream-composer2; chip e2e green.)
 - [x] ESC with composer focused unfocuses everything.
       (Done on work/stream-composer2; "ESC drops focus" e2e green.)
-- [ ] Fenced-code input box revival (shelved): fencelang + Shift+Enter
+- [x] Fenced-code input box revival (shelved): fencelang + Shift+Enter
       auto-close, language bar w/ Collapse/Copy glyphs, per-lang highlight,
-      triple-Shift+Enter exits, Enter inside = newline, Cmd+Enter sends. Parked
-      WebKit/Tauri bugs must be solved first (empty body row has no caret home;
-      block-widget adjacency drops rows).
+      triple-Shift+Enter exits, Enter inside = newline, Cmd+Enter sends.
+      (Revived Sep 2026 on work/s3-leftover with no editor surgery: the
+      parked WebKit/Tauri block bugs are avoided by design — only the two
+      fence bar lines become widgets, body rows stay real text so the
+      caret/IME always sit on text (`src/lib/fences.ts` pure parser +
+      `editor.ts` fence widgets). Verified `fences.test.ts` x11 +
+      `editor.test.ts` x12 + `e2e/fence.e2e.ts` 6/6 green. Deliberate
+      deltas from the old spec: the triple-Shift+Enter exit collapsed to
+      a single Shift+Enter on an empty body, and plain Enter inside a
+      fence still sends (newline is Shift+Enter; Cmd+Enter sends). Native
+      WebKit/Tauri-shell behavior unverified here — e2e runs Chromium.)
 
 ## Pile: messages + rendering
 
