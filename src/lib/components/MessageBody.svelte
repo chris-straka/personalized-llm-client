@@ -335,7 +335,8 @@
 				}
 				return;
 			}
-			// Display body click copies the TeX plus a toast. Inline
+			// Display body click copies the TeX wrapped in $$ delimiters
+			// plus a toast (the paste re-renders as display math). Inline
 			// math stays bare and copies nothing (its TeX is one
 			// message-copy away). A live selection means the click ends
 			// a drag — never clobber the clipboard for it.
@@ -346,20 +347,18 @@
 			) {
 				if (!navigator.clipboard) onToast?.("Couldn't copy to the clipboard.");
 				else
-					void navigator.clipboard.writeText(entry.tex).then(
+					void navigator.clipboard.writeText(`$$${entry.tex}$$`).then(
 						() => onToast?.("Copied"),
 						() => onToast?.("Couldn't copy to the clipboard.")
 					);
 			}
 			return;
 		}
-		// Buttonless code chrome, same contract as math: the head bar
-		// folds, the body copies with a toast.
+		// Buttonless code chrome: the head bar folds; body clicks
+		// select natively and never copy (copying stays the
+		// message-copy button's job).
 		const codeBlock = (event.target as HTMLElement).closest<HTMLElement>(".ccez-code");
-		if (!codeBlock || !rendered) return;
-		const index = Number(codeBlock.dataset.codeIndex ?? -1);
-		const entry = rendered.codes[index];
-		if (!entry) return;
+		if (!codeBlock) return;
 		const bar = (event.target as HTMLElement).closest<HTMLElement>(".ccez-code-head");
 		if (bar) {
 			const folded = codeBlock.dataset.folded === "1";
@@ -370,20 +369,6 @@
 				codeBlock.dataset.folded = "1";
 				bar.setAttribute("aria-expanded", "false");
 			}
-			return;
-		}
-		// Body click copies the code plus a toast — never while a
-		// selection is live, so drag-selects don't clobber the clipboard.
-		if (
-			(event.target as HTMLElement).closest("pre") &&
-			window.getSelection()?.isCollapsed !== false
-		) {
-			if (!navigator.clipboard) onToast?.("Couldn't copy to the clipboard.");
-			else
-				void navigator.clipboard.writeText(entry.code).then(
-					() => onToast?.("Copied"),
-					() => onToast?.("Couldn't copy to the clipboard.")
-				);
 		}
 	}
 </script>
@@ -391,7 +376,7 @@
 {#if folded}
 	<div class="folded-preview">{foldPreview ?? (message.content.split("\n")[0] ?? "").slice(0, 140)}</div>
 {:else}
-	<!-- Delegated code fold/copy buttons live inside the sanitized HTML. -->
+	<!-- Delegated code fold buttons live inside the sanitized HTML. -->
 	<!-- The key swaps only for pinned model-aid text: previews and local
 	ruby render in place (readings fading in) so hovering never flashes
 	the body or moves the row. -->

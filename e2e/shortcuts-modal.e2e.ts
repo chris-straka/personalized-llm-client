@@ -35,7 +35,7 @@ test("first entry toggles the modal; list is pithy with current keys", async ({ 
 	for (const name of ["Send message", "New chat", "Edit own message", "Focus composer"]) {
 		await expect(keys.locator("div > dt", { hasText: name })).toBeVisible();
 	}
-	// Right-click speak is listed: selection first, word under cursor.
+	// Right-click speak is listed: selection first, whole message, again stops.
 	await expect(keys.locator("div > dt", { hasText: "Speak text aloud" })).toBeVisible();
 	// No paren spam in the entry copy (each dd reads flat).
 	const details = await keys.locator("dd").allInnerTexts();

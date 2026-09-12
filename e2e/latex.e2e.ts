@@ -47,12 +47,15 @@ test("bar click folds the math body", async ({ page }) => {
 	await expect(block).not.toHaveAttribute("data-folded", "1");
 });
 
-/** Body-click copies the raw TeX (not the delimiters or the rendering) plus a toast. */
-test("body click copies raw tex with a toast", async ({ page }) => {
+/** Body-click copies the TeX wrapped in $$ delimiters (a paste re-renders as display math) plus a toast. */
+test("body click copies tex with delimiters plus a toast", async ({ page }) => {
 	const block = page.locator(".ccez-math").first();
 	await block.locator(".ccez-math-body").click();
 	await expect(page.locator(".toast")).toHaveText("Copied", { timeout: 10_000 });
-	expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("E_n");
+	const clip = await page.evaluate(() => navigator.clipboard.readText());
+	expect(clip).toContain("E_n");
+	expect(clip.trim().startsWith("$$")).toBe(true);
+	expect(clip.trim().endsWith("$$")).toBe(true);
 });
 
 /** Inline math renders bare with no chrome at all. */
@@ -97,8 +100,10 @@ test("composer does not render latex", async ({ page }) => {
 	await expect(composer.locator(".ccez-math-inline")).toHaveCount(0);
 });
 
-/** Right-clicking the fold bar never starts audio: nothing speaks and the live highlight keeps. */
-test("right-click on the math fold bar stays silent", async ({ page }) => {
+/** Right-clicking the fold bar toggles the fold and never starts audio: zero speaking classes and the live highlight keeps. */
+test("right-click on the math fold bar toggles the fold and stays silent", async ({
+	page
+}) => {
 	const para = page.locator("article .rendered p").first();
 	const box = await para.boundingBox();
 	if (!box) throw new Error("paragraph has no box");
@@ -107,12 +112,18 @@ test("right-click on the math fold bar stays silent", async ({ page }) => {
 	await page.mouse.down();
 	await page.mouse.move(box.x + 120, y, { steps: 5 });
 	await page.mouse.up();
-	const bar = page.locator(".ccez-math-head").first();
-	await bar.click({ button: "right" });
+	const block = page.locator(".ccez-math").first();
+	const body = block.locator(".ccez-math-body");
+	await expect(body).toBeVisible();
+	await block.locator(".ccez-math-head").click({ button: "right" });
+	await expect(block).toHaveAttribute("data-folded", "1");
+	await expect(body).toBeHidden();
 	await page.waitForTimeout(500);
 	await expect(page.locator("article.speaking, article.speaking-sel")).toHaveCount(0);
 	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
 	expect(selected).not.toBe("");
+	await block.locator(".ccez-math-head").click({ button: "right" });
+	await expect(body).toBeVisible();
 });
 
 /** Equation granularity decision: a partial pick inside one equation

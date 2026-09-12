@@ -3,8 +3,9 @@ import { seedChat } from "./helpers";
 
 /**
  * Right-click reads aloud on desktop: a live selection first, else the
- * word under the cursor — and the native menu is never blocked (no
- * preventDefault), so Copy stays available beside speech.
+ * whole message (a playing message stops instead) — and the native menu
+ * is never blocked (no preventDefault), so Copy stays available beside
+ * speech.
  */
 test.beforeEach(async ({ page }) => {
 	await page.addInitScript(() => {
@@ -50,13 +51,20 @@ test("right-click with a selection reads the selection, menu unblocked", async (
 	if (!box) throw new Error("missing para box");
 	await page.mouse.click(box.x + 10, box.y + 10, { button: "right" });
 	await expect.poll(() => spoken(page), { timeout: 10_000 }).toContain(selected);
-	const blocked = await page.evaluate(
-		() => (window as unknown as { __menuBlocked: boolean[] }).__menuBlocked ?? []
-	);
-	expect(blocked).toEqual([false]);
+	// The recorder pushes off a nested timeout, so poll for it instead
+	// of asserting immediately (cold-compile flakes otherwise).
+	await expect
+		.poll(
+			() =>
+				page.evaluate(
+					() => (window as unknown as { __menuBlocked: boolean[] }).__menuBlocked ?? []
+				),
+			{ timeout: 10_000 }
+		)
+		.toEqual([false]);
 });
 
-test("right-click a word with no selection reads the word", async ({ page }) => {
+test("right-click with no selection reads the whole message", async ({ page }) => {
 	const para = page.locator("article.assistant .rendered p").first();
 	// Aim at the first word's own pixels: the paragraph box is wider
 	// than its text, and blank space rightly reads nothing.
@@ -69,9 +77,29 @@ test("right-click a word with no selection reads the word", async ({ page }) => 
 		const rect = range.getBoundingClientRect();
 		return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
 	});
-	// No selection: the word under the cursor goes out alone.
+	// No selection: the entire message goes out, not one word.
 	await page.mouse.click(point.x, point.y, { button: "right" });
 	await expect.poll(() => spoken(page), { timeout: 10_000 }).not.toHaveLength(0);
 	const texts = await spoken(page);
-	expect(texts.some((t) => /^[A-Za-z]+$/.test(t.trim()))).toBe(true);
+	expect(texts.join(" ").replace(/\s+/g, " ")).toContain("alpha beta gamma delta");
+});
+
+test("right-click a playing message stops it instead", async ({ page }) => {
+	const para = page.locator("article.assistant .rendered p").first();
+	const point = await para.evaluate((el) => {
+		const text = el.firstChild;
+		if (!text || text.nodeType !== Node.TEXT_NODE) throw new Error("no text node");
+		const range = document.createRange();
+		range.setStart(text, 0);
+		range.setEnd(text, 5);
+		const rect = range.getBoundingClientRect();
+		return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+	});
+	await page.mouse.click(point.x, point.y, { button: "right" });
+	await expect(page.locator("article.assistant.speaking")).toBeVisible({ timeout: 10_000 });
+	const count = (await spoken(page)).length;
+	// Same message, still no selection: stops instead of restarting.
+	await page.mouse.click(point.x, point.y, { button: "right" });
+	await expect(page.locator("article.assistant.speaking")).toBeHidden({ timeout: 10_000 });
+	expect(await spoken(page)).toHaveLength(count);
 });
