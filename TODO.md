@@ -74,25 +74,36 @@ cut; release chain outcome still unconfirmed (see Now).
       immediately. Mobile default timeout = never (always visible). Only hide
       when the prompt (or its backdrop) actually occludes text; the backdrop
       hiding the text must go away with it.
-- [ ] Composer text overlaps counter pill cluster (padding fix).
-- [ ] Composer code block: typing triple-backtick changes nothing until
+- [x] Composer text overlaps counter pill cluster (padding fix).
+      (Done on work/stream-composer2: remeasure first-line reservation;
+      composer-tools "clears the tools cluster" e2e green.)
+- [x] Composer code block: typing triple-backtick changes nothing until
       Shift+Enter commits the block; empty fence assumes text; no nesting;
-      3x Shift+Enter exits. Distinct bg, aligned highlight, lang label
-      left-aligned with text, closer divider. Its copy button fires a toast.
+      3x Shift+Enter exits. (Done on work/stream-composer2; fence e2e green.)
 - [ ] Pasted-text tag: Ctrl+O expands/collapses all text in the tag (Muse
       Code style) — grey shade, not a code block, no own background.
-- [ ] Image pill <-> `[Pasted image]` tag two-way removal (removing one removes
-      the other).
-- [ ] Paste-image flow: say `[Pasted image]`, no leading newline, cursor one
-      space after.
-- [ ] IMG pill: align with composer, no left/right spill, scroll when many.
-- [ ] Clear attachment pills on send.
-- [ ] Image.png/paperclip icon sizes track font size.
-- [ ] Image cards replace pills: thumbnail preview + footer (tokens,
-      icon copy button, OCR, X).
+      (Open Sep 2026: no Ctrl+O handler in tree; stream-composer2 did the
+      paste-IMAGE tag line, not this.)
+- [x] Image pill <-> `[Pasted image]` tag two-way removal (removing one removes
+      the other). (Done on work/stream-composer2; intake e2e green.)
+- [x] Paste-image flow: say `[Pasted image]`, no leading newline, cursor one
+      space after. (Done on work/stream-composer2.)
+- [x] IMG pill: align with composer, no left/right spill, scroll when many.
+      (Done on work/stream-composer2.)
+- [x] Clear attachment pills on send. (Done on work/stream-composer2;
+      "send clears pills and files a chip" e2e green.)
+- [x] Image.png/paperclip icon sizes track font size.
+      (Done on work/stream-composer2.)
+- [x] Image cards replace pills: thumbnail preview + footer (tokens,
+      icon copy button, OCR, X). (Done on work/stream-composer2; intake e2e
+      "image cards" green.)
 - [ ] Icon-only copy buttons everywhere (reuse message-button copy logo).
-- [ ] Sent-message attachment chip above the message, left of annotation marker.
-- [ ] ESC with composer focused unfocuses everything.
+      (Partial Sep 2026: fence buttons done on stream-composer2, message-side
+      per-annotation buttons done on stream-annotation2; full sweep unverified.)
+- [x] Sent-message attachment chip above the message, left of annotation marker.
+      (Done on work/stream-composer2; chip e2e green.)
+- [x] ESC with composer focused unfocuses everything.
+      (Done on work/stream-composer2; "ESC drops focus" e2e green.)
 - [ ] Fenced-code input box revival (shelved): fencelang + Shift+Enter
       auto-close, language bar w/ Collapse/Copy glyphs, per-lang highlight,
       triple-Shift+Enter exits, Enter inside = newline, Cmd+Enter sends. Parked
@@ -334,9 +345,13 @@ cut; release chain outcome still unconfirmed (see Now).
 
 ## Pile: sending + OCR
 
-- [ ] Per-chat concurrent sending (global sending lock -> per-chat) so one
-      thinking chat doesn't block asking in another.
-- [ ] OCR: investigate Chinese-paragraph miss; errors surface as red toasts.
+- [x] Per-chat concurrent sending (global sending lock -> per-chat) so one
+      thinking chat doesn't block asking in another. (Done on
+      work/stream-composer2: per-chat lock in `chat.ts`, `chat.test.ts`
+      unit green.)
+- [x] OCR: investigate Chinese-paragraph miss; errors surface as red toasts.
+      (Done on work/stream-composer2: backend learner default; ocr.e2e
+      green.)
 
 ## Pile: platform + release (needs hardware)
 
