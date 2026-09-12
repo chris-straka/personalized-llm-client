@@ -4448,6 +4448,14 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 				return;
 			}
 			if (event.ctrlKey && (event.key === "o" || event.key === "O")) {
+				// Pasted-text tags first: with the prompt focused and tags
+				// present, Ctrl+O expands/collapses them all (Muse Code
+				// style). Otherwise the thoughts toggle keeps the shortcut.
+				if (inEditor && editor?.togglePastes()) {
+					event.preventDefault();
+					event.stopPropagation();
+					return;
+				}
 				// Thoughts toggle works from anywhere, even inside the prompt.
 				event.preventDefault();
 				event.stopPropagation();
@@ -6611,6 +6619,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 					<div><dt>Speak hovered word</dt><dd>Right click word</dd></div>
 					<div><dt>Speak highlight</dt><dd>Select text, then right click</dd></div>
 					<div><dt>Thoughts show/hide</dt><dd>Ctrl+O</dd></div>
+					<div><dt>Pasted text expand/collapse</dt><dd>Ctrl+O in the prompt</dd></div>
 					<div><dt>Translate selection</dt><dd>{isMac ? "⌘T" : "Ctrl+T"} over message text (to English, feeds annotation)</dd></div>
 					<div><dt>Browser side panel</dt><dd>{isMac ? "⌘T" : "Ctrl+T"} anywhere (address bar takes focus), Esc closes (one tab)</dd></div>
 					<div><dt>Stop voice / close menus</dt><dd>Esc (outside the prompt)</dd></div>
@@ -10035,9 +10044,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	/* !important throughout: the CodeMirror theme object injects its
 	light rules after this stylesheet, so only importance wins. */
 	:global(html[data-theme="dark"]) :global(.cm-paste-marker) {
-		background: #2c2c2e !important;
-		border-color: #48484a !important;
-		color: #f2f2f7 !important;
+		color: #98989f !important;
 	}
 	:global(html[data-theme="dark"]) :global(.cm-fence-bar) {
 		background: #2c2c2e !important;
