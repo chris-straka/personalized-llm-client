@@ -1,9 +1,5 @@
 name: release
 
-# DRY-RUN-ONLY: this branch has never cut a real tag. A real tag push
-# (e.g. `v0.3.x`) is the only true test of this workflow -- merge only
-# after a tag proves the matrix + tail flow below end to end.
-#
 # Cut a release: push a tag like `v0.1.0` and CI builds every artifact
 # into ONE draft GitHub Release:
 #   macOS: per-arch .dmgs (ARM64-only + Intel-only, no universal binary)
