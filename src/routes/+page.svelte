@@ -5437,9 +5437,9 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			// copy icon is a button, but a code block (body or folded
 			// label) toggles its fold here, never speech. Headless
 			// chrome has no fold bar, so the wrapper toggles directly;
-			// the copy icon itself stays silent via the control check.
+			// the copy and Run icons stay silent via the control check.
 			const codeBlock = target?.closest(".ccez-code");
-			if (codeBlock && body.contains(codeBlock) && !target?.closest("[data-code-copy]")) {
+			if (codeBlock && body.contains(codeBlock) && !target?.closest("[data-code-copy], [data-code-run]")) {
 				const el = codeBlock as HTMLElement;
 				if (el.dataset.folded === "1") el.removeAttribute("data-folded");
 				else el.dataset.folded = "1";
