@@ -7072,8 +7072,9 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	{#if inspectChar && inspectData}
 		<!-- Character Inspect overlay: same modal-veil/modal pattern as
 		the shortcuts overlay. Components come from the offline curated
-		table (radicals.ts); count + definition from the compact offline
-		table (inspect.ts). The stroke preview is schematic (stepped by
+		table (radicals.ts); count + short gloss from the compact table
+		(inspect.ts), definition fallback + readings (Mandarin, Japanese
+		on/kun) from the generated Unihan bundle. The stroke preview is schematic (stepped by
 		stroke count) until per-character vector data lands. The
 		JP/中文 toggle flips the predicted reading locale (kana =
 		Japanese, else Chinese) for genuinely ambiguous Han text. -->
@@ -7132,6 +7133,15 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 							<p><strong>Definition:</strong> {inspectData.definition}</p>
 						{:else}
 							<p class="note">Unihan definition unavailable offline for this character.</p>
+						{/if}
+						{#if inspectData.mandarin !== null}
+							<p><strong>Mandarin:</strong> <span lang="zh-Latn-pinyin">{inspectData.mandarin}</span></p>
+						{/if}
+						{#if inspectData.japaneseOn !== null}
+							<p><strong>Japanese on:</strong> {inspectData.japaneseOn}</p>
+						{/if}
+						{#if inspectData.japaneseKun !== null}
+							<p><strong>Japanese kun:</strong> {inspectData.japaneseKun}</p>
 						{/if}
 					</div>
 				</div>
