@@ -1,5 +1,50 @@
 import { describe, expect, it } from "vitest";
-import { plainParagraphs } from "./pinyin";
+import { pinyinBlock, pinyinRuby, plainParagraphs } from "./pinyin";
+
+describe("pinyinRuby", () => {
+	it("annotates Han characters with tone-marked readings", () => {
+		expect(pinyinRuby("你好")).toBe("<ruby>你<rt>nǐ</rt></ruby><ruby>好<rt>hǎo</rt></ruby>");
+	});
+
+	it("never annotates Japanese segments: any kana run passes through bare", () => {
+		// pinyin-pro returns Chinese readings for Japanese kanji
+		// (dú for 読む's 読) — wrong readings — so the engine bails
+		// on kana-bearing input no matter who calls it.
+		expect(pinyinRuby("漢字を読む")).toBe("漢字を読む");
+		expect(pinyinRuby("テストtest测试")).toBe("テストtest测试");
+		expect(pinyinRuby("今日はとてもいい天気です")).toBe("今日はとてもいい天気です");
+	});
+
+	it("passes non-Han text through escaped", () => {
+		expect(pinyinRuby("hello")).toBe("hello");
+		expect(pinyinRuby("a & b")).toBe("a &amp; b");
+		expect(pinyinRuby("")).toBe("");
+	});
+});
+
+describe("pinyinBlock", () => {
+	it("converts Han-only lines and leaves Japanese lines bare", () => {
+		expect(pinyinBlock("漢字を読む\n你好")).toBe(
+			"漢字を読む\n<ruby>你<rt>nǐ</rt></ruby><ruby>好<rt>hǎo</rt></ruby>"
+		);
+		// Same-line mixing reads as Japanese: kana wins, as in detection.
+		expect(pinyinBlock("テストtest测试")).toBe("テストtest测试");
+	});
+
+	it("preserves line count and escapes the rest", () => {
+		expect(pinyinBlock("你好\n\n世界")).toBe(
+			"<ruby>你<rt>nǐ</rt></ruby><ruby>好<rt>hǎo</rt></ruby>\n\n<ruby>世<rt>shì</rt></ruby><ruby>界<rt>jiè</rt></ruby>"
+		);
+		expect(pinyinBlock("Hello & <world>")).toBe("Hello &amp; &lt;world&gt;");
+	});
+
+	it("lets the reply-language pill own ambiguous Han-only lines", () => {
+		expect(pinyinBlock("你好", "furigana")).toBe("你好");
+		expect(pinyinBlock("你好", "pinyin")).toContain("<ruby>");
+		// Kana is unambiguous: the pill never overrides it.
+		expect(pinyinBlock("漢字を読む", "pinyin")).toBe("漢字を読む");
+	});
+});
 
 describe("plainParagraphs", () => {
 	it("mirrors the markdown renderer (breaks: true)", () => {
