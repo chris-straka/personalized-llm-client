@@ -1182,8 +1182,9 @@ import { isPromptIdle } from "$lib/chrome";
 				(options) => navigator.mediaDevices.getDisplayMedia(options),
 				grabVideoFrame
 			);
+			const images = file.type.startsWith("image/") ? 1 : 0;
 			await addFiles([file]);
-			editor?.insertText(imageMarkerInsert(editor.getText()));
+			insertImageMarkers(images);
 		} catch (error) {
 			if (!isPermissionDismissal(error)) {
 				attachError = error instanceof Error ? error.message : String(error);
@@ -1653,16 +1654,21 @@ import { isPromptIdle } from "$lib/chrome";
 	}
 
 	function onImagePasted(file: File): void {
-		void addFiles([file]).then(() => {
-			if (!editor) return;
-			markerSyncMuted = true;
-			try {
+		void addFiles([file]).then(() => insertImageMarkers(1));
+	}
+
+	/** One `[Pasted image]` tag per fresh image, caret after each tag's space. */
+	function insertImageMarkers(count: number): void {
+		if (!editor || count <= 0) return;
+		markerSyncMuted = true;
+		try {
+			for (let i = 0; i < count; i++) {
 				editor.insertText(imageMarkerInsert(editor.getText()));
-				prevMarkerCount = countMarkerLines(editor.getText());
-			} finally {
-				markerSyncMuted = false;
 			}
-		});
+			prevMarkerCount = countMarkerLines(editor.getText());
+		} finally {
+			markerSyncMuted = false;
+		}
 	}
 
 	/**
@@ -5914,7 +5920,10 @@ import { isPromptIdle } from "$lib/chrome";
 			ondrop={(e) => {
 				e.preventDefault();
 				const files = dropFilesFromDataTransfer(e.dataTransfer);
-				if (files.length > 0) void addFiles(files);
+				if (files.length > 0) {
+					const images = files.filter((f) => f.type.startsWith("image/")).length;
+					void addFiles(files).then(() => insertImageMarkers(images));
+				}
 			}}
 		>
 			<div class="prompt-tools">
