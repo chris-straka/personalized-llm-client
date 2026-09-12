@@ -54,7 +54,8 @@
 		replyLanguageFor,
 		type LanguageMenu
 	} from "$lib/languages";
-	import { listProviders, createProvider } from "$lib/providers/registry";
+	import { listProviders, createProvider, getProviderDef } from "$lib/providers/registry";
+	import { offlineTarget, onlineRestore } from "$lib/offline";
 	import { MockProvider, mockProviderEnabled } from "$lib/providers/mock";
 	import { getCurrentWindow } from "@tauri-apps/api/window";
 	import { invoke } from "@tauri-apps/api/core";
@@ -1322,6 +1323,11 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		window.addEventListener("keydown", on);
 		window.addEventListener("wheel", on, { passive: true });
 		window.addEventListener("touchstart", on, { passive: true });
+		window.addEventListener("offline", handleOffline);
+		window.addEventListener("online", handleOnline);
+		// Boot already offline (plane, dead wifi): park on Gemma now
+		// instead of showing a dead cloud provider.
+		if (typeof navigator !== "undefined" && !navigator.onLine) handleOffline();
 		const timer = window.setInterval(() => {
 			if (!isPromptIdle(lastInputAt, Date.now(), idleSec)) return;
 			if (viewChat.messages.length === 0) return;
@@ -1338,6 +1344,8 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			window.removeEventListener("keydown", on);
 			window.removeEventListener("wheel", on);
 			window.removeEventListener("touchstart", on);
+			window.removeEventListener("offline", handleOffline);
+			window.removeEventListener("online", handleOnline);
 			window.clearInterval(timer);
 		};
 	});
@@ -3035,11 +3043,38 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		saveSettingsNow();
 	}
 
+	/**
+	 * Offline fallback parking: the drop parks a cloud provider on the
+	 * on-device Gemma option; the reconnect restores only what the drop
+	 * parked. Not rendered state — the provider switch re-renders itself.
+	 */
+	let offlineParkedFrom: string | null = null;
+
+	function handleOffline(): void {
+		const target = offlineTarget(settings.activeProviderId);
+		if (!target) return;
+		offlineParkedFrom = settings.activeProviderId;
+		settings.activeProviderId = target;
+		persistSettings();
+	}
+
+	function handleOnline(): void {
+		const restore = onlineRestore(offlineParkedFrom, settings.activeProviderId);
+		offlineParkedFrom = null;
+		if (!restore) return;
+		settings.activeProviderId = restore;
+		persistSettings();
+	}
+
 	function resolveProvider(): ChatProvider | null {
 		if (useMock) return new MockProvider();
 		if (isEjected(settings.activeProviderId)) return null;
 		const conf = settings.providers[settings.activeProviderId];
-		if (!conf?.apiKey.trim()) return null;
+		// Keyless on-device endpoints carry no key by design.
+		const keyless =
+			getProviderDef(settings.activeProviderId, settings.customProviders).keyless === true;
+		if (!keyless && !conf?.apiKey.trim()) return null;
+		if (!conf) return null;
 		return createProvider(settings.activeProviderId, conf, settings.customProviders);
 	}
 

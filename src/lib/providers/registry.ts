@@ -7,6 +7,8 @@ export interface ProviderDef {
 	defaultModel: string;
 	/** Short hint shown under the key field. Never a real key. */
 	keyHint: string;
+	/** Keyless endpoints (on-device servers): no API key is needed or asked for. */
+	keyless?: boolean;
 }
 
 export const PROVIDERS: ProviderDef[] = [
@@ -23,6 +25,14 @@ export const PROVIDERS: ProviderDef[] = [
 		defaultBaseUrl: "https://api.deepseek.com",
 		defaultModel: "deepseek-flash",
 		keyHint: "Starts with sk-"
+	},
+	{
+		id: "local-gemma",
+		label: "Gemma (on-device)",
+		defaultBaseUrl: "http://localhost:11434/v1",
+		defaultModel: "gemma4:latest",
+		keyHint: "served by Ollama on this device",
+		keyless: true
 	}
 ];
 

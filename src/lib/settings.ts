@@ -219,7 +219,7 @@ export function envProviderDefaults(
 	env: Record<string, string | undefined>
 ): Record<string, ProviderSettings> {
 	const providers: Record<string, ProviderSettings> = {};
-	for (const id of ["deepseek", "muse"]) {
+	for (const id of ["deepseek", "muse", "local-gemma"]) {
 		const def = getProviderDef(id);
 		providers[id] = {
 			baseUrl: firstSet(env, BASE_URL_ALIASES[id] ?? []) || def.defaultBaseUrl,

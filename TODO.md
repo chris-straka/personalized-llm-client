@@ -492,10 +492,18 @@ to whole words` in `annotations-ux.e2e.ts`. No code change needed.)
       (Blocked Sep 2026, stream-platform: all four need a real Android
       device to see/verify — untouched. Voice/chrome areas belong to
       sibling streams; coordinate before changing.)
-- [ ] Offline AI fallback — DO LAST (after 0.3.0): when offline, Gemma becomes its own
+- [x] Offline AI fallback: when offline, Gemma becomes its own
       settings option replacing the DeepSeek/Muse bubbles; auto-switch back on
       reconnect. Android via MediaPipe; Mac via the user's existing Ollama (audit
       installs, pick the right model for an M4 mini, remove cruft, wire in).
+      (Done Sep 2026: `local-gemma` built-in (Ollama `gemma4:latest` on this
+      16GB M4 mini), keyless providers end-to-end (registry, settings
+      defaults, no-auth headers, panel hint instead of key field), offline
+      parks cloud providers on Gemma and reconnect restores only what the
+      drop parked (`offline.ts`, unit + `offline-fallback.e2e.ts` green,
+      live Ollama completion verified). Android MediaPipe leg still needs a
+      real device. Model cruft (55GB, e.g. qwen3:30b 18GB, dup qwen3.5 tags)
+      listed, nothing deleted — removals are the user's call.)
 
 ## Non-goals
 

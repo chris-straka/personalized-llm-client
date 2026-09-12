@@ -34,6 +34,9 @@ export class OpenAICompatProvider implements ChatProvider {
 	}
 
 	private headers(): Record<string, string> {
+		// Keyless on-device servers (Ollama) take no credentials: sending one:
+		// An empty credential header would only confuse request logs.
+		if (!this.config.apiKey) return { "Content-Type": "application/json" };
 		return {
 			"Content-Type": "application/json",
 			Authorization: `Bearer ${this.config.apiKey}`

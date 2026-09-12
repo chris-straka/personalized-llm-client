@@ -592,7 +592,9 @@
 		</datalist>
 		{#if modelError}<span class="hint" role="alert">{modelError}</span>{/if}
 	</label>
-	{#if showKeyField}
+	{#if activeDef.keyless}
+		<p class="key-state" role="status">No key needed — {activeDef.keyHint}.</p>
+	{:else if showKeyField}
 		<label>
 			API key <span class="hint">{activeDef.keyHint}</span>
 			<input
