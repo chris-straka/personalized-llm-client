@@ -336,7 +336,11 @@ to whole words` in `annotations-ux.e2e.ts`. No code change needed.)
       (Verified Sep 2026 on work/w1-waypoint: `CHAT_WIDTH_MAX` = 120 in
       `src/lib/settings.ts`, settings slider `max={CHAT_WIDTH_MAX}`, no
       80rem remnant anywhere; keyboard chords clamp to the same max.)
-- [ ] Own messages stop drifting right past AI width.
+- [x] Own messages stop drifting right past AI width.
+      (Verified Sep 2026 on work/w1-waypoint: `article.user` shrink-wraps
+      with `margin-right` docking its edge to the assistant column
+      (`min(85%, chat-width)`), so own messages never drift right past
+      AI width on narrow windows.)
 - [ ] Fresh-install defaults: own-message background OFF; message buttons
       hover-only for both me and AI.
 - [ ] Option for message buttons scaling with font size (verify current state;
