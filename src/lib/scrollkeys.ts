@@ -9,9 +9,10 @@
 /** One j/k step: a few lines, fixed so unit tests can pin it. */
 export const SCROLLKEY_LINE_PX = 72;
 
-/** How long Escape must be held to exit fullscreen (a tap still
-dismisses menus/overlays exactly as today). */
-export const ESCAPE_HOLD_MS = 500;
+/** How long Escape must be held to exit fullscreen: two full seconds,
+Chrome parity — a tap or a firm press still only dismisses
+menus/overlays exactly as today. */
+export const ESCAPE_HOLD_MS = 2000;
 
 /** Lone-g arming window for gg (mirrors the scroll-mode beat). */
 export const GG_WINDOW_MS = 800;

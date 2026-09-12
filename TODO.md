@@ -425,7 +425,12 @@ to whole words` in `annotations-ux.e2e.ts`. No code change needed.)
 - [x] Submit button: drop pinned language buttons from the top bar; replace
       the submit arrow with the emoji, centered vertically + horizontally.
       (Verified Sep 2026: 📨 emoji send already on main, no pinned lang
-      buttons in the top bar — no change needed.)
+      buttons in the top bar — no change needed.
+      REVERSED Sep 2026 per user: the button shows ↑ with no language and
+      the language flag while one is set (replacing 📨 entirely); the
+      top-left pill is gone, its click-to-clear replaced by the menu
+      toggle (same as the number-key repeat). Pinned by
+      `send-button.e2e.ts`.)
 - [x] Own-message background breaks at large font sizes — fix.
       (Done Sep 2026 on work/pile-submit: radius/padding track
       `min(var(--font-scale, 1), 2)`; `user-bubble.e2e.ts` green.)
@@ -457,7 +462,10 @@ to whole words` in `annotations-ux.e2e.ts`. No code change needed.)
       never cut off top messages (only window bounds clip text).
       (Done Sep 2026 on work/pile-sidebar: app-title removed, header is an
       empty drag strip; find bar moved in-flow; chrome + sidebar-topbar
-      16/16 green.)
+      16/16 green. Sep 2026 follow-up: the reply-language pill left the
+      header too (flag now lives on the send button) — the strip paints
+      nothing (static, transparent, verified live) and keeps only drag,
+      zoom, and traffic-light clearance.)
 - [x] Settings menu shows the build version (or "dev" in dev).
       (Status Sep 2026, stream-platform: release builds already stamp
       `v{version} · build {stamp}` in SettingsPanel; dev hides the stamp

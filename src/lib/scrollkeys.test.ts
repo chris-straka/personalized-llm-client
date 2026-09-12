@@ -80,6 +80,10 @@ describe("messageEdgeScrollTop", () => {
 });
 
 describe("isEscapeHold", () => {
+	it("pins the two-second Chrome-parity threshold", () => {
+		expect(ESCAPE_HOLD_MS).toBe(2000);
+	});
+
 	it("holds past the timer threshold, taps below it", () => {
 		expect(isEscapeHold(1000, 1000 + ESCAPE_HOLD_MS)).toBe(true);
 		expect(isEscapeHold(1000, 1000 + ESCAPE_HOLD_MS + 2000)).toBe(true);

@@ -231,7 +231,6 @@ for (const t of THEMES) {
 		const ink = t.name === "light" ? "rgb(28, 28, 30)" : "rgb(242, 242, 247)";
 		const line = t.name === "light" ? "rgb(199, 199, 204)" : "rgb(72, 72, 74)";
 		const raised = t.name === "light" ? t.bg : "rgb(28, 28, 30)";
-		const strong = t.name === "light" ? "rgb(28, 28, 30)" : "rgb(174, 174, 178)";
 		const menu = page.locator(".lang-menu > button").first();
 		await menu.click();
 		const list = page.locator(".lang-list");
@@ -249,12 +248,10 @@ for (const t of THEMES) {
 			"color",
 			t.name === "light" ? "rgb(58, 58, 60)" : "rgb(174, 174, 178)"
 		);
-		// Picking a language stamps the chip; reopening shows the wash kept.
+		// Picking a language stamps the send button with its flag.
+		const badge = (await list.locator(".badge").last().innerText()).trim();
 		await nearest.click();
-		const chip = page.locator(".lang-chip");
-		await expect(chip).toBeVisible();
-		await expect(chip).toHaveCSS("color", ink);
-		await expect(chip).toHaveCSS("border-color", strong);
+		await expect(page.locator(".send-btn")).toContainText(badge);
 		await menu.click();
 		await expect(list.locator("button.selected")).toHaveCSS("background-color", t.wash);
 	});

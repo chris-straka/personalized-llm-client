@@ -320,7 +320,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VER="${GITHUB_REF_NAME#v}"
-          ASSETS="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')"
+          # The release lookup itself retries: v0.3.0/v0.3.1 both failed
+          # here with transient "release not found" on a draft that
+          # existed before and after (all assets present on manual
+          # re-check). The asset gate below stays required — retries
+          # only cover the lookup, never a missing file.
+          ASSETS=""
+          for i in 1 2 3 4 5; do
+            if ASSETS="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' 2>/dev/null)"; then
+              break
+            fi
+            echo "release lookup failed (attempt $i/5), retrying in 15s..."
+            sleep 15
+          done
+          [ -n "$ASSETS" ] || { echo "release not found after retries"; exit 1; }
           missing=0
           for f in \
             "CcezLLM-macos-apple-silicon.dmg" \
@@ -341,7 +354,14 @@ jobs:
             "latest.json"; do
             echo "$ASSETS" | grep -qxF "$f" || { echo "MISSING: $f"; missing=1; }
           done
-          gh release download "$GITHUB_REF_NAME" --pattern "latest.json" --dir "$RUNNER_TEMP/manifest"
+          for i in 1 2 3 4 5; do
+            if gh release download "$GITHUB_REF_NAME" --pattern "latest.json" --dir "$RUNNER_TEMP/manifest" 2>/dev/null; then
+              break
+            fi
+            echo "manifest download failed (attempt $i/5), retrying in 15s..."
+            sleep 15
+          done
+          [ -f "$RUNNER_TEMP/manifest/latest.json" ] || { echo "latest.json missing after retries"; exit 1; }
           for platform in darwin-aarch64 darwin-x86_64 linux-x86_64 windows-x86_64 windows-aarch64; do
             grep -q "\"$platform\"" "$RUNNER_TEMP/manifest/latest.json" || { echo "MISSING PLATFORM: $platform"; missing=1; }
           done

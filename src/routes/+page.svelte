@@ -3886,6 +3886,21 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			androidUI = false;
 			iosUI = false;
 		}
+		// Chromium-only viewport key, appended at runtime on Android
+		// alone: a static tag makes WebKit log "not recognized" noise
+		// on every desktop/iOS load, and only the Android WebView
+		// reads it (keyboard resizes the layout viewport there).
+		try {
+			if (isAndroidUserAgent(navigator.userAgent)) {
+				const meta = document.querySelector('meta[name="viewport"]');
+				const content = meta?.getAttribute("content") ?? "";
+				if (meta && !content.includes("interactive-widget")) {
+					meta.setAttribute("content", `${content}, interactive-widget=resizes-content`);
+				}
+			}
+		} catch {
+			// Viewport tuning is best-effort; the visualViewport pin covers the rest.
+		}
 		// Shortcuts-modal labels: navigator.platform with User-Agent
 		// Client Hints winning (see currentPlatform). Unknown platforms
 		// read as non-Mac, so the Ctrl/Alt labels show.
@@ -5587,24 +5602,10 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			<button type="button" class="toast" title="Click to copy" aria-live="polite" transition:fade={{ duration: 160 }} onclick={copyToast}>{toast}</button>
 		{/if}
 		<!-- Empty drag strip: nothing but the traffic-light clearance (the
-		reply-language pill and browser address bar only appear here
-		while summoned). Double-click zooms. -->
+		browser address bar only appears here while summoned; the
+		active reply language shows on the send button instead).
+		Double-click zooms. -->
 		<header role="toolbar" aria-label="App" tabindex="-1" onmousedown={dragWindow} ondblclick={zoomWindow}>
-			<span class="tokens-wrap">
-				{#if activeReplyLang}
-					<span class="lang-chip-float" transition:fade={{ duration: 90 }}>
-						<button
-							type="button"
-							class="lang-chip"
-							title="{activeReplyLang.name} — click to clear"
-							aria-label="Reply language {activeReplyLang.name} — click to clear"
-							onclick={clearReplyLang}
-						>
-							<span aria-hidden="true">{activeReplyLang.badge}</span> <ActionIcon kind="close" />
-						</button>
-					</span>
-				{/if}
-			</span>
 			<!-- Browser side panel: Cmd+T docks a single-tab browser
 			right in the same window. Shortcut-only on purpose (no
 			toggle button): the combo opens from anywhere, including
@@ -6379,11 +6380,15 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 				class="send-btn"
 				class:wide={altHeld}
 				disabled={!canSubmit}
-				title={altHeld ? `Stage (${altm}+Enter)` : "Send (Enter)"}
-				aria-label={altHeld ? "Stage" : "Send"}
+				title={altHeld
+					? `Stage (${altm}+Enter)`
+					: activeReplyLang
+						? `Send in ${activeReplyLang.name} (Enter) — repeat its number key to clear`
+						: "Send (Enter)"}
+				aria-label={altHeld ? "Stage" : activeReplyLang ? `Send in ${activeReplyLang.name}` : "Send"}
 				onclick={(event) => onSubmit(altHeld || event.altKey ? "stage" : "send")}
 			>
-				{altHeld ? "Add +" : "📨"}
+				{altHeld ? "Add +" : activeReplyLang ? activeReplyLang.badge : "↑"}
 			</button>
 		</div>
 		{#if vocalizeError}
@@ -6453,7 +6458,9 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 										role="menuitem"
 										class:selected={activeReplyCode === lang.code}
 										title={quickKey ? `${lang.name} (${quickKey})` : lang.name}
-										onclick={() => setReplyLang(lang.code)}
+										onclick={() =>
+										activeReplyCode === lang.code ? clearReplyLang() : setReplyLang(lang.code)
+									}
 									>
 										<span class="badge" aria-hidden="true">{lang.badge}</span>
 										{lang.name}
@@ -6709,7 +6716,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 					<div><dt>Thinking level</dt><dd>Ctrl+{altm}+↓ / ↑ cycle levels</dd></div>
 					<div><dt>Scroll messages</dt><dd>J / K · gg top · G bottom · Ctrl+U / Ctrl+D skip</dd></div>
 					<div><dt>Scroll chat (nothing selected)</dt><dd>J / K glide on hold · D / U fast · gg top · G bottom · z / Z hovered top / bottom</dd></div>
-					<div><dt>Exit fullscreen</dt><dd>Hold Esc · a tap still closes menus</dd></div>
+					<div><dt>Exit fullscreen</dt><dd>Hold Esc 2s · a tap still closes menus</dd></div>
 					<div><dt>Chat list</dt><dd>{isMac ? "⌘B or ⇧⌘H" : "Ctrl+B or Ctrl+Shift+H"} · opens on the current chat · J / K walk · Space enters</dd></div>
 					<div><dt>Export chat</dt><dd>Chats-list row icon, left of ×</dd></div>
 					<div><dt>Search chats</dt><dd>{isMac ? "⌘P" : "Ctrl+P"} · J / K move · Esc to list · Enter jumps</dd></div>
@@ -7478,24 +7485,8 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		-webkit-user-select: none;
 		cursor: default;
 	}
-	/* Chrome recedes so the chat leads: the language pill and waypoint
-	ticks rest dimmed until hovered or focused. */
-	.lang-chip {
-		opacity: 0.55;
-		/* Ease the dim in and out (color included); the persistent layer
-		keeps the chip's × glyph from re-rasterizing sideways on hover. */
-		transition:
-			opacity 0.18s ease,
-			color 0.18s ease;
-		transform: translateZ(0);
-	}
-	.lang-chip:hover,
-	.lang-chip:focus-visible {
-		opacity: 1;
-	}
 	/* The title strip stays a drag surface everywhere except controls
-	(see dragWindow); the token tally (now in the settings panel) and
-	the reply-language pill keep their own copyable treatment. */
+	(see dragWindow). */
 	/* Hidden until the pointer comes near (JS toggles .wp-near by
 	distance); nearness alone brings the stack to a dim rest.
 	Clickable only while visible. */
@@ -7563,45 +7554,9 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			opacity: 1;
 		}
 	}
-	/* Anchor for the reply-language pill: the pill floats beside the
-	anchor instead of sitting in flow, so popping it in never moves
-	the strip. The float (not the button) carries the fade, leaving
-	the button's own hover-dim opacity transition alone. */
-	.tokens-wrap {
-		position: relative;
-		display: inline-flex;
-		align-items: center;
-	}
-	.lang-chip-float {
-		position: absolute;
-		left: 100%;
-		margin-left: 1rem;
-		top: 50%;
-		transform: translateY(-50%);
-		display: inline-flex;
-	}
-	.lang-chip {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.35rem;
-		font: inherit;
-		font-size: 0.78rem;
-		color: #1c1c1e;
-		color: var(--ink);
-		border: 1px solid #1c1c1e;
-		border-color: var(--strong);
-		border-radius: 999px;
-		background: none;
-		cursor: pointer;
-		padding: 0.2rem 0.7rem;
-		white-space: nowrap;
-	}
-	.lang-chip :global(.action-glyph) {
-		height: 0.8rem;
-	}
-	/* Browser panel chrome recedes like the language pill. The bar
-	docks right in the title strip; the panel is shortcut-only, so
-	this only shows the address bar while it is open. */
+	/* Browser panel chrome: the bar docks right in the title strip;
+	the panel is shortcut-only, so this only shows the address bar
+	while it is open. */
 	.sideview-bar {
 		margin-left: auto;
 		display: inline-flex;

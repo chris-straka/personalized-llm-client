@@ -232,3 +232,12 @@ test("shift-meta-plus widens the chat column", async ({ page }) => {
 		.poll(() => page.evaluate(() => window.localStorage.getItem("ccez-studio-settings-v1")))
 		.toContain('"chatWidth":38');
 });
+
+/** WebKit sees no interactive-widget key: it ships only to Android at runtime. */
+test("viewport meta stays Chromium-key-free on desktop", async ({ page }) => {
+	await openWithMessages(page, [{ role: "user", content: "hi" }]);
+	const content = await page.evaluate(
+		() => document.querySelector('meta[name="viewport"]')?.getAttribute("content") ?? ""
+	);
+	expect(content).not.toContain("interactive-widget");
+});

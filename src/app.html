@@ -19,8 +19,11 @@
     and the caret reveal no longer pans by tap position (top taps
     parked the composer far too high). The visualViewport height pin
     in +page.svelte then sees tracked heights and stays inert; it
-    remains as the fallback for pre-108 WebViews. Ignored on iOS. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    remains as the fallback for pre-108 WebViews. Chromium-only: it
+    stays OUT of this static tag (WebKit logs "not recognized" noise
+    on every load) and +page.svelte appends it at runtime on Android,
+    the only runtime that reads it. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <!-- Status-bar / task-switcher tint, matched to the app's light/dark --bg. -->
     <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#17171a" media="(prefers-color-scheme: dark)" />
