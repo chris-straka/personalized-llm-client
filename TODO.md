@@ -233,16 +233,42 @@ cut; release chain outcome still unconfirmed (see Now).
       macOS showed readings ~5px right of their kanji at -2px, ~0.6px at -8px.
       Accept: ruby-wrap wrap test measures ink (<2px) on mac, boxes (<4px)
       elsewhere — 6/6 green.
-- [ ] Message-button icons scale with the text-size setting (pill buttons
+- [x] Message-button icons scale with the text-size setting (pill buttons
       already do; logos/icons don't).
-- [ ] Per-segment TTS voices for mixed-language messages (same-voice fallback
+      (Done Sep 2026 on work/stream-voice2: `.action-glyph` holds 1.05rem
+      by default; the `scaleActionsWithFont` opt-in now grows it with the
+      text buttons (`main.scale-actions .actions .icon-btn .action-glyph`).
+      Pinned in `actions-reveal.test.ts`.)
+- [x] Per-segment TTS voices for mixed-language messages (same-voice fallback
       today).
-- [ ] Single-kanji inspect: hovering/selecting exactly one CJK char shows an
+      (Verified Sep 2026 on work/stream-voice2, no change: already shipped
+      (`f820daf`) — `speechLangsFor` routes each sentence sync, `speakReply`
+      speaks via `speakMultilingual`/`speakNativeMulti`; unit-locked in
+      `voice.test.ts`/`nativeTts.test.ts`, behavior pinned in
+      `ios-voice`/`native-voice-fallback` e2e.)
+- [x] Single-kanji inspect: hovering/selecting exactly one CJK char shows an
       Inspect button -> modal with mdbg-like info (stroke order, radical, unihan;
       skip Cantonese).
-- [ ] Voice readback: per-chat setting, not global.
-- [ ] Thinking-level change mid-thinking applies to next request (confirm/ensure).
-- [ ] Mic button on macOS: user doesn't care — NO ACTION.
+      (Verified Sep 2026 on work/stream-voice2, no change: already shipped
+      (`c4e688a`) — `shouldShowInspect` gates the button, overlay shows
+      components/count/definition + a labeled schematic stroke-step preview
+      (`hasStrokePaths: false` until KanjiVG vector data lands); settings
+      gate `inspectEnabled`; `inspect.e2e.ts` green.)
+- [x] Voice readback: per-chat setting, not global.
+      (Done Sep 2026 on work/stream-voice2: `Chat.voice: boolean | null`
+      override in `chat.ts` (`chatVoiceReadback`/`setChatVoice`, null
+      follows the `settings.voice` default, loader heals pre-override
+      stores); toggle/shortcut/button all write the visible chat only;
+      `settings.ts` untouched. Unit-locked in `chat.test.ts`.)
+- [x] Thinking-level change mid-thinking applies to next request (confirm/ensure).
+      (Confirmed Sep 2026 on work/stream-voice2, pin test only: the page
+      evaluates `activeThinkingId(settings)` synchronously per send/resend
+      and the provider bakes the captured string into that request's body,
+      so a mid-flight change can't touch the in-flight call; same-instance
+      two-send pin in `openai-compat.test.ts`.)
+- [x] Mic button on macOS: user doesn't care — NO ACTION.
+      (Verified Sep 2026 on work/stream-voice2: intentionally untouched —
+      `toggleMic`/`dictateOnce` paths unchanged, `mic-toggle.e2e.ts` green.)
 
 ## Pile: scroll + navigation + chrome
 
