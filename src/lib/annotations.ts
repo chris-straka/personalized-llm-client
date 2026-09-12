@@ -942,6 +942,20 @@ export function annRefsFor(content: string): { text: string; refs: AnnotationRef
  */
 export const REFS_ONLY_BODY = "—";
 
+/**
+ * Display-copy text for a message body: the baked annotation block is
+ * metadata, never prose, so message copy redacts it. A refs-only body
+ * holds nothing else — copying an empty string would strand the
+ * button, so it falls back to the quotes themselves (the message's
+ * only substance). Pure and unit-tested.
+ */
+export function redactedCopyText(body: string): string {
+	const split = annRefsFor(body);
+	if (!split) return body;
+	if (split.text.trim()) return split.text;
+	return split.refs.map((ref) => ref.quote).join("\n");
+}
+
 /** True when a baked block is the message's whole content (redact to REFS_ONLY_BODY). */
 export function isRefsOnly(content: string): boolean {
 	const split = annRefsFor(content);

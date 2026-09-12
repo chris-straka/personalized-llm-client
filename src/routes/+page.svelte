@@ -102,6 +102,7 @@
 		withAnnotations,
 		quoteFragmentText,
 		equationBodyOf,
+		redactedCopyText,
 		newAnnotationId,
 		annRefsFor,
 		lockSelectionToMessage,
@@ -1645,7 +1646,15 @@ import { isPromptIdle } from "$lib/chrome";
 	}
 
 	function copyText(content: string, role: string): void {
-		copyPlain(plainBody(content, role, sourcesWanted), "Copied");
+		// Message copy excludes baked annotations (metadata, not prose);
+		// refs-only messages fall back to their quotes, never "".
+		copyPlain(redactedCopyText(plainBody(content, role, sourcesWanted)), "Copied");
+	}
+
+	/** Copy one annotation (either overlay): quote plus comment, no numbers. */
+	function copyAnnotation(quote: string, comment: string): void {
+		const text = comment.trim() ? `"${quote}" — ${comment.trim()}` : `"${quote}"`;
+		copyPlain(text, "Copied");
 	}
 
 	/**
@@ -5380,6 +5389,15 @@ import { isPromptIdle } from "$lib/chrome";
 										{#if ref.comment}
 											<span class="ann-refs-comment">{ref.comment}</span>
 										{/if}
+										<button
+											type="button"
+											class="ann-refs-copy"
+											title="Copy annotation"
+											aria-label="Copy annotation {ref.n}"
+											onclick={() => copyAnnotation(ref.quote, ref.comment)}
+										>
+											<ActionIcon kind="copy" />
+										</button>
 									</div>
 								{/each}
 							</div>
@@ -5772,6 +5790,15 @@ import { isPromptIdle } from "$lib/chrome";
 									<div class="review-head">
 										<span class="review-num">{n + 1}.</span>
 										<span class="review-quote">“{ann.quote}”</span>
+										<button
+											type="button"
+											class="review-copy"
+											title="Copy annotation"
+											aria-label="Copy annotation {n + 1}"
+											onclick={() => copyAnnotation(ann.quote, ann.comment)}
+										>
+											<ActionIcon kind="copy" />
+										</button>
 										<button
 											type="button"
 											aria-label="Delete annotation {n + 1}"
@@ -8019,6 +8046,26 @@ import { isPromptIdle } from "$lib/chrome";
 		color: #c7c7cc;
 		overflow-wrap: anywhere;
 	}
+	/* Per-annotation copy in the sent-refs card: icon only, no text,
+	pushed to the row's end like the panel's delete button. */
+	.ann-refs-copy {
+		margin-left: auto;
+		flex: none;
+		align-self: center;
+		display: inline-flex;
+		border: 0;
+		background: none;
+		color: #c7c7cc;
+		cursor: pointer;
+		padding: 0.1rem;
+		border-radius: 6px;
+	}
+	.ann-refs-copy :global(.action-glyph) {
+		height: 0.75rem;
+	}
+	.ann-refs-copy:hover {
+		color: #fff;
+	}
 	.attachments {
 		list-style: none;
 		display: flex;
@@ -8586,6 +8633,25 @@ import { isPromptIdle } from "$lib/chrome";
 	}
 	.review-head button.review-pencil :global(.action-glyph) {
 		height: 0.8rem;
+	}
+	/* Per-note copy rides next to the quote in the pencil's style:
+	icon only, no text. margin-left:0 keeps it with the quote while
+	the delete button's auto margin holds the row's right edge. */
+	.review-head button.review-copy {
+		display: inline-flex;
+		align-items: center;
+		margin-left: 0;
+		flex-shrink: 0;
+		color: #6e6e73;
+		padding: 0.15rem;
+		border-radius: 6px;
+	}
+	.review-head button.review-copy :global(.action-glyph) {
+		height: 0.8rem;
+	}
+	.review-head button.review-copy:hover {
+		color: #1c1c1e;
+		color: var(--ink);
 	}
 	/* Hover glows accent-blue instead of going ink: the pencil is small
 	and quiet-gray, so an ink hover read as disappearing. */

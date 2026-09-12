@@ -140,10 +140,16 @@ cut; release chain outcome still unconfirmed (see Now).
   "Copied" (the button tooltip keeps describing the plain-text mode);
   math/code body-copy already toast "Copied" via `onToast`. Locked by
   `actions-reveal.test.ts` + the latex/message-code toast specs.)
-- [ ] Message with ONLY annotations renders as en-dash + annotation marker
+- [x] Message with ONLY annotations renders as en-dash + annotation marker
       above, same font size as text, and stays unfolded. Message copy excludes
       annotations; each annotation copies on left-click in either overlay
       (icon-only button, no text).
+  (Done Sep 2026 on work/stream-annotation2: refs-only rendering (em-dash
+  + count pill, unfolded) already held; message copy now redacts the baked
+  block via `redactedCopyText` (refs-only falls back to the quotes, never
+  ""); both overlays gained an icon-only copy button (`copyAnnotation`:
+  quote + comment). Unit-locked in `annotations.test.ts`; pinned in
+  `annotations.e2e.ts`.)
 - [ ] Thinking text uses the current chat font size.
 - [ ] Code Run button + model-version bump + Cloudflare-domain hosting (later).
 - [ ] Character components overlay for Han text (offline table already in

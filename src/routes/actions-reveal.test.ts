@@ -79,7 +79,7 @@ describe("hover-only message actions", () => {
 
 	it("confirms message copy with a bare Copied toast", () => {
 		const source = pageSource();
-		expect(source).toContain('copyPlain(plainBody(content, role, sourcesWanted), "Copied")');
+		expect(source).toContain('redactedCopyText(plainBody(content, role, sourcesWanted)), "Copied"');
 		expect(source).not.toContain("Copied as plain text");
 	});
 

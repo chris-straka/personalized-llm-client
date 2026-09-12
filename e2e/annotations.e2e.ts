@@ -638,3 +638,64 @@ test("dragging from the gutter into the chat keeps the highlight", async ({ page
 	expect(await page.evaluate(() => window.getSelection()?.toString() ?? "")).toBe(before);
 	await expect(page.locator(".sel-menu")).toBeVisible();
 });
+
+/** Annotations-only messages render an em-dash at text size with the
+count above, unfolded — never the baked block. */
+test("annotations-only message renders em-dash with count", async ({ page }) => {
+	await seedChat(page, [
+		{ role: "user", content: 'Annotated selections:\n1. "bonjour" — ?' },
+		{ role: "assistant", content: "ok" }
+	]);
+	await page.goto("/");
+	const article = page.locator("article.user");
+	await expect(article.locator(".ann-refs-pill")).toHaveText("1", { timeout: 60_000 });
+	await expect(article.locator(".rendered")).toContainText("—");
+	await expect(article.locator(".rendered")).not.toContainText("Annotated selections");
+	await expect(article.locator(".folded-preview")).toHaveCount(0);
+	const dash = await article
+		.locator(".rendered")
+		.evaluate((el) => getComputedStyle(el as HTMLElement).fontSize);
+	const normal = await page
+		.locator("article.assistant .rendered")
+		.evaluate((el) => getComputedStyle(el as HTMLElement).fontSize);
+	expect(dash).toBe(normal);
+});
+
+/** Message copy excludes the baked annotation block. */
+test("message copy excludes baked annotations", async ({ page }) => {
+	await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+	await seedChat(page, [
+		{ role: "user", content: 'explain this\n\nAnnotated selections:\n1. "bonjour" — ?' }
+	]);
+	await page.goto("/");
+	const row = page.locator("article.user .actions");
+	await row.hover();
+	await page.locator('article.user .actions button[data-tip="Copy as plain text"]').click();
+	await expect(page.locator(".toast")).toHaveText("Copied", { timeout: 10_000 });
+	expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("explain this");
+});
+
+/** Each baked annotation copies from the sent-refs card's icon button. */
+test("sent-refs card copies one annotation", async ({ page }) => {
+	await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+	await seedChat(page, [
+		{ role: "user", content: 'explain this\n\nAnnotated selections:\n1. "bonjour" — greeting?' }
+	]);
+	await page.goto("/");
+	await page.locator(".ann-refs-pill").first().hover();
+	await page.locator(".ann-refs-copy").first().click();
+	await expect(page.locator(".toast")).toHaveText("Copied", { timeout: 10_000 });
+	expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('"bonjour" — greeting?');
+});
+
+/** Each draft annotation copies from the review panel's icon button. */
+test("review panel copies one annotation", async ({ page }) => {
+	await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+	await openAnnotate(page, "確認しました");
+	await page.keyboard.press("Enter");
+	await hoverPromptPill(page);
+	await page.locator(".prompt-tools .review-copy").first().click();
+	await expect(page.locator(".toast")).toHaveText("Copied", { timeout: 10_000 });
+	const pasted = await page.evaluate(() => navigator.clipboard.readText());
+	expect(pasted).toContain("テストを確認しました");
+});
