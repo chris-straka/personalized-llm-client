@@ -16,7 +16,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "tauri": "tauri",
-    "release": "bun scripts/release.ts"
+    "release": "bun scripts/release.ts",
+    "unihan": "bun scripts/unihan-extract.ts"
   },
   "license": "MIT",
   "dependencies": {
