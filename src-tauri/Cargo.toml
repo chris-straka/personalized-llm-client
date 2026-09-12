@@ -22,6 +22,14 @@ tauri-build = { version = "2", features = [] }
 # both crates already sit in Cargo.lock as transitive deps, so no new
 # crate is vendored by enabling them here.
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
+# Triage 2026-09-12 (Dependabot #2, RUSTSEC-2024-0429, medium): the gtk
+# 0.18 stack under tauri/wry pulls glib 0.18, whose VariantStrIter is
+# unsound (fixed only in glib >= 0.20). A solo glib bump is rejected by
+# the solver (gtk ^0.18 needs glib ^0.18) and tauri/wry/webkit2gtk/gtk
+# all resolve "already latest" — upstream hasn't migrated to gtk 0.9,
+# so no safe bump exists yet. Revisit on the Tauri gtk-0.9 migration.
+# No app code touches glib directly, and the crate is Linux-only
+# (never compiled into macOS/Windows builds).
 tauri-plugin-opener = "2"
 tauri-plugin-updater = "2"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
