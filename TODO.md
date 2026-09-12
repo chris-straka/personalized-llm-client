@@ -130,7 +130,10 @@ cut; release chain outcome still unconfirmed (see Now).
   speech starts only from explicit speak buttons; desktop falls through
   to the native menu. Pinned by fold-bar silence specs in `latex.e2e.ts`
   + `message-code.e2e.ts`.)
-- [ ] Right-click (even empty space) must never start audio.
+- [x] Right-click (even empty space) must never start audio.
+  (Done Sep 2026 on work/stream-annotation2: same removal as the folds
+  item — no audio path remains on `contextmenu` or button-2 mouseup;
+  pinned by the empty-space silence spec in `sel-menu.e2e.ts`.)
 - [ ] Copy toasts: latex copy shows toast; wording is "Copied" everywhere
       (not "Copied as plain text").
 - [ ] Message with ONLY annotations renders as en-dash + annotation marker

@@ -58,7 +58,7 @@ test("clicking blank space deselects instead of reopening the menu", async ({ pa
 	await expect(page.locator(".sel-menu")).toHaveCount(0);
 });
 
-/** Right-click reads the highlight aloud but keeps it: the text and
+/** Right-click keeps the highlight without starting audio: the text and
 its highlight stay put (the menu itself may dismiss). */
 test("right-click keeps the highlighted text", async ({ page }) => {
 	const body = page.locator("article .rendered").first();
