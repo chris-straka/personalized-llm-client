@@ -5540,7 +5540,19 @@ import { isPromptIdle } from "$lib/chrome";
 					onmouseenter={() => (hoveredIdx = i)}
 					onmouseleave={(event) => onArticleLeave(event, msg, i)}
 				>
-					{#if sentRefs}
+					{#if msg.attachments && msg.attachments.length > 0}
+					<!-- Sent-message attachment chips: above the message
+					and before (left of) the annotation marker, so files
+					sent with the turn read as its head, not its tail. -->
+					<div class="sent-files">
+						{#each msg.attachments as att (att.id)}
+							<span class="sent-chip" title="{att.name} · ~{att.tokens} tokens">
+								<ActionIcon kind="attach" /> {att.name}
+							</span>
+						{/each}
+					</div>
+				{/if}
+				{#if sentRefs}
 						<!-- Baked annotation block, collapsed above the
 						message: the count stays visible like the composer
 						pill; hovering (or tabbing to) the number itself
@@ -5600,13 +5612,6 @@ import { isPromptIdle } from "$lib/chrome";
 							onAidError={(_id: ChatMsgId, reason?: string) => aidFailed(msg.id, reason)}
 						/>
 					</div>
-					{#if msg.attachments && msg.attachments.length > 0}
-						<div class="sent-files">
-							{#each msg.attachments as att (att.id)}
-								<span title="{att.name} · ~{att.tokens} tokens">📎 {att.name}</span>
-							{/each}
-						</div>
-					{/if}
 					{#if !(streamingThis && msg.content.trim() === "") && !previewing}
 					<div
 						class="actions"
@@ -8205,10 +8210,29 @@ import { isPromptIdle } from "$lib/chrome";
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.4rem;
-		margin-top: 0.35rem;
+		margin-bottom: 0.35rem;
 		font-size: 0.75rem;
 		color: #6e6e73;
 		color: var(--muted);
+	}
+	/* Attachment chips: icon + name in a quiet pill (no emoji — the
+	attach glyph matches the composer's icon-only treatment). */
+	.sent-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		border: 1px solid #c7c7cc;
+		border-color: var(--line);
+		border-radius: 999px;
+		padding: 0.15rem 0.6rem;
+		max-width: 100%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.sent-chip :global(.action-glyph) {
+		height: 0.85em;
+		flex-shrink: 0;
 	}
 	/* Sent-message annotation refs: the baked block collapses to the
 	count (like the composer pill); hover or Tab reveals the saved
