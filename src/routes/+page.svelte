@@ -8404,11 +8404,15 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	article.user .bubble {
 		background: #f1f1f4;
 		background: var(--bg-wash);
-		border-radius: calc(1.75rem * var(--font-scale, 1));
+		/* Radius and padding track the text size only up to 2x: past that
+		the article cap stays fixed while the font keeps growing, so an
+		unbounded scale domes the top corners and squeezes the text into
+		a tall tower with dead gray shoulders. */
+		border-radius: calc(1.75rem * min(var(--font-scale, 1), 2));
 		padding:
-			calc(0.45rem * var(--font-scale, 1))
-			calc(1rem * var(--font-scale, 1))
-			calc(0.55rem * var(--font-scale, 1));
+			calc(0.45rem * min(var(--font-scale, 1), 2))
+			calc(1rem * min(var(--font-scale, 1), 2))
+			calc(0.55rem * min(var(--font-scale, 1), 2));
 		text-align: left;
 		width: fit-content;
 		/* 100%, not 85%: the article already caps at min(85%, chat-width),
