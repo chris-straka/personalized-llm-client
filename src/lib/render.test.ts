@@ -213,6 +213,36 @@ describe("latex math", () => {
 		expect(html).toContain('data-math-index="2"');
 	});
 
+	it("renders single-dollar inline math with the same chrome", () => {
+		const { html, maths } = renderMarkdown("slope $m = \\frac{a}{b}$ here");
+		expect(maths).toEqual([{ kind: "inline", tex: "m = \\frac{a}{b}", raw: "$m = \\frac{a}{b}$" }]);
+		expect(html).toContain("ccez-math-inline");
+		expect(html).toContain('data-math-action="fold"');
+		expect(html).toContain('data-math-action="copy"');
+		expect(html).toContain("katex");
+	});
+
+	it("leaves prices, mid-word joins, and padded dollars literal", () => {
+		const { html, maths } = renderMarkdown("costs $5 and $10, plus a$b and $ x$ done");
+		expect(maths).toEqual([]);
+		expect(html).not.toContain("ccez-math");
+		expect(html).toContain("$5");
+	});
+
+	it("leaves unclosed single dollars literal and skips escaped closers", () => {
+		const { html, maths } = renderMarkdown("halfway $x^2 and done");
+		expect(maths).toEqual([]);
+		expect(html).not.toContain("ccez-math");
+		const escaped = renderMarkdown("price \\$5 and $y$ ok");
+		expect(escaped.maths.map((m) => m.tex)).toEqual(["y"]);
+	});
+
+	it("never renders single-dollar math inside fenced code or code spans", () => {
+		const { html, maths } = renderMarkdown("```\n$x^2$\n```\n\n`$y$` done");
+		expect(maths).toEqual([]);
+		expect(html).not.toContain("ccez-math");
+	});
+
 	it("extracts display math across lines and skips escaped openers", () => {
 		const { stripped, maths } = extractMath("a\n$$\nx\n$$\n\\\\(not math\\\\) and \\(real\\)");
 		expect(maths.map((m) => m.kind)).toEqual(["display", "inline"]);

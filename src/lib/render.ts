@@ -115,8 +115,8 @@ export function renderMessage(markdownText: string, sourcesWanted: boolean): Ren
 
 /**
  * LaTeX math in MAIN CHAT messages only (never the composer prompt, which
- * stays plain CodeMirror text): display `$$…$$` and inline `\(…\)` render
- * via KaTeX (bundled, offline). Unknown/invalid math keeps its plain
+ * stays plain CodeMirror text): display `$$…$$` and inline `\(…\)` / `$…$`
+ * render via KaTeX (bundled, offline). Unknown/invalid math keeps its plain
  * source rendering, never fatal. Unclosed delimiters (mid-stream) stay
  * literal. Fenced code blocks and inline code spans never become math.
  */
@@ -215,6 +215,58 @@ export function extractMath(markdownText: string): { stripped: string; maths: Ma
 			}
 			out += "$$";
 			i += 2;
+			continue;
+		}
+		// Inline math: `$…$`. Guards against the classic false
+		// positives — `$5 and $10` prices, `a$b` mid-word joins, and
+		// `$ x$` padded pairs all stay literal. Escaped `\$` never
+		// reaches here (consumed as a pair above); a `\$` inside the
+		// scan is skipped, never a closer.
+		if (ch === "$") {
+			const prev = i === 0 ? "" : markdownText[i - 1];
+			const next = markdownText[i + 1];
+			if (next !== undefined && !/\s/.test(next) && !/[A-Za-z0-9]/.test(prev ?? "")) {
+				let j = i + 1;
+				let close = -1;
+				while (j < len) {
+					if (markdownText[j] === "\\") {
+						j += 2;
+						continue;
+					}
+					if (markdownText[j] === "$") {
+						// `$$` is display territory, never an inline closer.
+						if (markdownText[j + 1] === "$") {
+							j += 2;
+							continue;
+						}
+						// A closer followed by a letter/digit is a price
+						// join (`a$b`), not an ending.
+						if (
+							!/\s/.test(markdownText[j - 1] ?? " ") &&
+							!/[A-Za-z0-9]/.test(markdownText[j + 1] ?? "")
+						) {
+							close = j;
+							break;
+						}
+					}
+					j++;
+				}
+				if (close !== -1) {
+					const tex = markdownText.slice(i + 1, close);
+					// A bare `$` inside the span means the pairing crossed
+					// prices or joins (`$5 … $10`); real TeX never holds
+					// one. Escaped `\$` is fine — KaTeX renders it.
+					if (!tex.replace(/\\\$/g, "").includes("$")) {
+						const raw = markdownText.slice(i, close + 1);
+						maths.push({ kind: "inline", tex, raw });
+						out += mathPlaceholder(maths.length - 1);
+						i = close + 1;
+						continue;
+					}
+				}
+			}
+			out += "$";
+			i++;
 			continue;
 		}
 		out += ch;

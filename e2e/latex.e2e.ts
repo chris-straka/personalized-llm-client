@@ -64,6 +64,20 @@ test("inline math renders with fold and copy", async ({ page }) => {
 	expect(await inline.locator(".katex").count()).toBeGreaterThan(0);
 });
 
+/** Single-dollar inline math renders with KaTeX; prices stay plain text. */
+test("single-dollar inline math renders, prices stay plain", async ({ page }) => {
+	await seedChat(page, [
+		{ role: "user", content: "quadratic?" },
+		{ role: "assistant", content: "Roots are $x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}$ but it costs $5 and $10." }
+	]);
+	await page.goto("/");
+	const inline = page.locator(".ccez-math-inline").first();
+	await expect(inline).toBeVisible({ timeout: 60_000 });
+	expect(await inline.locator(".katex").count()).toBeGreaterThan(0);
+	await expect(page.locator(".ccez-math-inline")).toHaveCount(1);
+	await expect(page.locator(".rendered").last()).toContainText("$5 and $10");
+});
+
 /** Invalid math and fenced $$ stay plain text, never fatal. */
 test("invalid math and code fences stay plain", async ({ page }) => {
 	const body = page.locator(".rendered").last();

@@ -95,7 +95,13 @@ cut; release chain outcome still unconfirmed (see Now).
   work/stream-rendering: `extractMath` + KaTeX path in `src/lib/render.ts`
   already handles `$$…$$`; `render.test.ts` x32 + all 6 `e2e/latex.e2e.ts`
   pass unmodified. No code change needed.)
-- [ ] Inline `$math$` rendering (display fences already work).
+- [x] Inline `$math$` rendering (display fences already work).
+  (Done Sep 2026 on work/stream-rendering: `extractMath` in
+  `src/lib/render.ts` now pairs single `$…$` with price/join guards —
+  opener needs non-space after + non-alnum before, closer needs non-space
+  before + non-alnum after, spans containing a bare `$` stay literal,
+  `$$`/fences/code-spans/escapes untouched; same inline chrome + copy
+  path as `\(…\)`, so no `+page.svelte` change needed.)
 - [ ] Math chrome: no fold/copy/math labels; bar-click folds; body-click
   copies + toast; chevron + TeX preview.
 - [ ] AI code fences: no copy/fold buttons; language logos if cheap.
