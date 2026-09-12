@@ -149,8 +149,12 @@ cut; release chain outcome still unconfirmed (see Now).
   (Verified Sep 2026 on work/stream-annotation2: `formatAnnotations` files
   empty comments as `— ?`; unit-locked in `annotations.test.ts`. No code
   change needed.)
-- [ ] Click-hold off-chat then drag into chat must not highlight above the
+- [x] Click-hold off-chat then drag into chat must not highlight above the
       current line; dragging off-screen must not highlight everything above.
+  (Verified Sep 2026 on work/stream-annotation2: `armMessageDrag` arms on
+  off-chat press, `trimMessageDrag` clamps on every selectionchange via
+  `clampDragAnchorToFocusLine`/`lineStartOffset` (unit-locked); wiring
+  locked in `annotations-ux.test.ts`. No code change needed.)
 - [ ] Overlay edit: save button hover-in must animate like hover-out; Enter
       saves (no newline); textarea styling pass (near-black — confirm or fix).
 - [ ] Annotation pencil hover: glow color, not disappear.
