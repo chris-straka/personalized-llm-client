@@ -53,16 +53,15 @@ cut; release chain outcome still unconfirmed (see Now).
 ## Now (in progress)
 
 - [x] Annotation draft restore on return is broken — fix first.
-  Accept: 1 unsent draft (`.prompt-tools .ann-wrap`, see
-  `imgs/annotation_textbox_filled.png`) in chat A survives New chat and is
-  back (exactly 1, not duplicated) on return to A; S4 contract holds
-  (select → comment → wrapped into next query).
+      Accept: 1 unsent draft (`.prompt-tools .ann-wrap`, see
+      `imgs/annotation_textbox_filled.png`) in chat A survives New chat and is
+      back (exactly 1, not duplicated) on return to A; S4 contract holds
+      (select → comment → wrapped into next query).
 - [x] `e2e/annotation-chat-scope.e2e.ts` failing — fix.
-  Accept: `bunx playwright test e2e/annotation-chat-scope.e2e.ts` green —
-  B's composer starts at 0 `.ann-wrap`, A restores to 1.
+      Accept: `bunx playwright test e2e/annotation-chat-scope.e2e.ts` green —
+      B's composer starts at 0 `.ann-wrap`, A restores to 1.
 - [x] Confirm v0.2.5 rename/verify/publish outcome (`gh release view v0.2.5`).
-      (Confirmed Sep 2026: DRAFT by github-actions, all per-arch assets present
-      + latest.json; verify -> publish -> prune -> rename chain NOT run yet.
+      (Confirmed Sep 2026: DRAFT by github-actions, all per-arch assets present + latest.json; verify -> publish -> prune -> rename chain NOT run yet.
       Publish is a deliberate release action — still pending an explicit go.)
 - [x] Review + resolve the moderate Dependabot alert on the default branch
       (flagged at push time, 2026-09-12). (Triaged on work/stream-chrome2:
@@ -122,62 +121,62 @@ cut; release chain outcome still unconfirmed (see Now).
 ## Pile: messages + rendering
 
 - [x] `$$` display math not rendering — fix. (Verified Sep 2026 on
-  work/stream-rendering: `extractMath` + KaTeX path in `src/lib/render.ts`
-  already handles `$$…$$`; `render.test.ts` x32 + all 6 `e2e/latex.e2e.ts`
-  pass unmodified. No code change needed.)
+      work/stream-rendering: `extractMath` + KaTeX path in `src/lib/render.ts`
+      already handles `$$…$$`; `render.test.ts` x32 + all 6 `e2e/latex.e2e.ts`
+      pass unmodified. No code change needed.)
 - [x] Inline `$math$` rendering (display fences already work).
-  (Done Sep 2026 on work/stream-rendering: `extractMath` in
-  `src/lib/render.ts` now pairs single `$…$` with price/join guards —
-  opener needs non-space after + non-alnum before, closer needs non-space
-  before + non-alnum after, spans containing a bare `$` stay literal,
-  `$$`/fences/code-spans/escapes untouched; same inline chrome + copy
-  path as `\(…\)`, so no `+page.svelte` change needed.)
+      (Done Sep 2026 on work/stream-rendering: `extractMath` in
+      `src/lib/render.ts` now pairs single `$…$` with price/join guards —
+      opener needs non-space after + non-alnum before, closer needs non-space
+      before + non-alnum after, spans containing a bare `$` stay literal,
+      `$$`/fences/code-spans/escapes untouched; same inline chrome + copy
+      path as `\(…\)`, so no `+page.svelte` change needed.)
 - [x] Math chrome: no fold/copy/math labels; bar-click folds; body-click
       copies + toast; chevron + TeX preview.
-  (Done Sep 2026 on work/stream-annotation2: display math renders a fold
-  bar (chevron + truncated TeX preview, keyboard-operable button) with no
-  labels; bar-click folds via `data-folded`, body-click copies TeX with a
-  "Copied" toast (skipped while a selection is live); inline math renders
-  bare. Unit-locked in `render.test.ts`; behavior pinned in `latex.e2e.ts`.)
+      (Done Sep 2026 on work/stream-annotation2: display math renders a fold
+      bar (chevron + truncated TeX preview, keyboard-operable button) with no
+      labels; bar-click folds via `data-folded`, body-click copies TeX with a
+      "Copied" toast (skipped while a selection is live); inline math renders
+      bare. Unit-locked in `render.test.ts`; behavior pinned in `latex.e2e.ts`.)
 - [x] AI code fences: no copy/fold buttons; language logos if cheap.
-  (Done Sep 2026 on work/stream-annotation2: code head is a language-label
-  fold bar with no buttons (bar-click folds via `data-folded`, body-click
-  copies code with a "Copied" toast, skipped while selecting); logos
-  dropped as not cheap — no glyph set exists and Shiki already colors
-  blocks apart. Heads strip from quotes like math. Unit-locked in
-  `render.test.ts` + `annotations-dom.test.ts`; behavior pinned in
-  `message-code.e2e.ts`, `textai.e2e.ts` assertion updated.)
+      (Done Sep 2026 on work/stream-annotation2: code head is a language-label
+      fold bar with no buttons (bar-click folds via `data-folded`, body-click
+      copies code with a "Copied" toast, skipped while selecting); logos
+      dropped as not cheap — no glyph set exists and Shiki already colors
+      blocks apart. Heads strip from quotes like math. Unit-locked in
+      `render.test.ts` + `annotations-dom.test.ts`; behavior pinned in
+      `message-code.e2e.ts`, `textai.e2e.ts` assertion updated.)
 - [x] Right-click on latex/code folds must never start TTS.
-  (Done Sep 2026 on work/stream-annotation2: the desktop `contextmenu`
-  speak path (selection + word-under-cursor, web + native) is removed —
-  speech starts only from explicit speak buttons; desktop falls through
-  to the native menu. Pinned by fold-bar silence specs in `latex.e2e.ts`
-  + `message-code.e2e.ts`.)
+      (Done Sep 2026 on work/stream-annotation2: the desktop `contextmenu`
+      speak path (selection + word-under-cursor, web + native) is removed —
+      speech starts only from explicit speak buttons; desktop falls through
+      to the native menu. Pinned by fold-bar silence specs in `latex.e2e.ts`
+  - `message-code.e2e.ts`.)
 - [x] Right-click (even empty space) must never start audio.
-  (Done Sep 2026 on work/stream-annotation2: same removal as the folds
-  item — no audio path remains on `contextmenu` or button-2 mouseup;
-  pinned by the empty-space silence spec in `sel-menu.e2e.ts`.)
+      (Done Sep 2026 on work/stream-annotation2: same removal as the folds
+      item — no audio path remains on `contextmenu` or button-2 mouseup;
+      pinned by the empty-space silence spec in `sel-menu.e2e.ts`.)
 - [x] Copy toasts: latex copy shows toast; wording is "Copied" everywhere
       (not "Copied as plain text").
-  (Done Sep 2026 on work/stream-annotation2: message copy now toasts
-  "Copied" (the button tooltip keeps describing the plain-text mode);
-  math/code body-copy already toast "Copied" via `onToast`. Locked by
-  `actions-reveal.test.ts` + the latex/message-code toast specs.)
+      (Done Sep 2026 on work/stream-annotation2: message copy now toasts
+      "Copied" (the button tooltip keeps describing the plain-text mode);
+      math/code body-copy already toast "Copied" via `onToast`. Locked by
+      `actions-reveal.test.ts` + the latex/message-code toast specs.)
 - [x] Message with ONLY annotations renders as en-dash + annotation marker
       above, same font size as text, and stays unfolded. Message copy excludes
       annotations; each annotation copies on left-click in either overlay
       (icon-only button, no text).
-  (Done Sep 2026 on work/stream-annotation2: refs-only rendering (em-dash
-  + count pill, unfolded) already held; message copy now redacts the baked
-  block via `redactedCopyText` (refs-only falls back to the quotes, never
-  ""); both overlays gained an icon-only copy button (`copyAnnotation`:
-  quote + comment). Unit-locked in `annotations.test.ts`; pinned in
-  `annotations.e2e.ts`.)
+      (Done Sep 2026 on work/stream-annotation2: refs-only rendering (em-dash
+  - count pill, unfolded) already held; message copy now redacts the baked
+    block via `redactedCopyText` (refs-only falls back to the quotes, never
+    ""); both overlays gained an icon-only copy button (`copyAnnotation`:
+    quote + comment). Unit-locked in `annotations.test.ts`; pinned in
+    `annotations.e2e.ts`.)
 - [x] Thinking text uses the current chat font size.
-  (Verified Sep 2026 on work/stream-annotation2: `.ccez-thoughts` reads
-  `calc(0.92rem * var(--font-scale, 1))`, the same size as chat text;
-  pinned by the `thoughts scale with font size` spec in
-  `message-code.e2e.ts`. No code change needed.)
+      (Verified Sep 2026 on work/stream-annotation2: `.ccez-thoughts` reads
+      `calc(0.92rem * var(--font-scale, 1))`, the same size as chat text;
+      pinned by the `thoughts scale with font size` spec in
+      `message-code.e2e.ts`. No code change needed.)
 - [ ] Code Run button + model-version bump + Cloudflare-domain hosting (later).
 - [ ] Character components overlay for Han text (offline table already in
       `src/lib/radicals.ts`): needs a better name than "Radicals"; returns to the
@@ -188,61 +187,61 @@ cut; release chain outcome still unconfirmed (see Now).
 ## Pile: annotation
 
 - [x] Marker must not split words in half for text selection.
-  (Verified Sep 2026 on work/stream-annotation2: `snapSelectionToWordEdges`
-  runs in `onSelectEnd` before the menu reads the quote, CJK exempt;
-  unit-locked in `annotations-dom.test.ts`, e2e `mid-word drags snap out
-  to whole words` in `annotations-ux.e2e.ts`. No code change needed.)
+      (Verified Sep 2026 on work/stream-annotation2: `snapSelectionToWordEdges`
+      runs in `onSelectEnd` before the menu reads the quote, CJK exempt;
+      unit-locked in `annotations-dom.test.ts`, e2e `mid-word drags snap out
+to whole words` in `annotations-ux.e2e.ts`. No code change needed.)
 - [x] Create-annotation textbox centers over the selection when the selection
       is smaller than the box; current position for larger selections. Annotate
       open-button stays at selection end near cursor.
-  (REOPENED Sep 2026: the `annotations-ux.e2e.ts:48` narrow/wide spec fails
-  deterministically on main and predates stream-annotation2 (bisected to
-  before its base) — the earlier "verified" was wrong; needs a real fix.
-  Fixed Sep 2026: `popWidth(fresh)` measures the 19rem fresh card instead
-  of the nominal 384px; `annotations-ux.e2e.ts` 7/7 green.)
+      (REOPENED Sep 2026: the `annotations-ux.e2e.ts:48` narrow/wide spec fails
+      deterministically on main and predates stream-annotation2 (bisected to
+      before its base) — the earlier "verified" was wrong; needs a real fix.
+      Fixed Sep 2026: `popWidth(fresh)` measures the 19rem fresh card instead
+      of the nominal 384px; `annotations-ux.e2e.ts` 7/7 green.)
 - [x] Hovering a previous message's annotation count scales with font size.
-  (Done Sep 2026 on work/stream-annotation2: `.ann-refs-pill` reads
-  `var(--font-scale, 1)` like badges; locked in `annotations-ux.test.ts`.)
+      (Done Sep 2026 on work/stream-annotation2: `.ann-refs-pill` reads
+      `var(--font-scale, 1)` like badges; locked in `annotations-ux.test.ts`.)
 - [x] Empty annotations get "?" inserted so the AI knows I'm confused.
-  (REOPENED Sep 2026: `annotations-ux.e2e.ts:125` fails — after Enter no
-  `article.user` appears; predates stream-annotation2 (bisected to before
-  its base). Unit half holds; the send path needs a real fix.
-  Fixed Sep 2026, two halves: (1) `onSubmit` no longer lets a fading-out
-  (`annPopClosing`) pill own Enter — the 500ms time guard still eats a bare
-  double-Enter; (2) the spec force-hovers the refs pill (the open card
-  covers it by design) and pins the card's opacity transition to prove a
-  genuine open before asserting the baked "?". 7/7 green.)
+      (REOPENED Sep 2026: `annotations-ux.e2e.ts:125` fails — after Enter no
+      `article.user` appears; predates stream-annotation2 (bisected to before
+      its base). Unit half holds; the send path needs a real fix.
+      Fixed Sep 2026, two halves: (1) `onSubmit` no longer lets a fading-out
+      (`annPopClosing`) pill own Enter — the 500ms time guard still eats a bare
+      double-Enter; (2) the spec force-hovers the refs pill (the open card
+      covers it by design) and pins the card's opacity transition to prove a
+      genuine open before asserting the baked "?". 7/7 green.)
 - [x] Click-hold off-chat then drag into chat must not highlight above the
       current line; dragging off-screen must not highlight everything above.
-  (Verified Sep 2026 on work/stream-annotation2: `armMessageDrag` arms on
-  off-chat press, `trimMessageDrag` clamps on every selectionchange via
-  `clampDragAnchorToFocusLine`/`lineStartOffset` (unit-locked); wiring
-  locked in `annotations-ux.test.ts`. No code change needed.)
+      (Verified Sep 2026 on work/stream-annotation2: `armMessageDrag` arms on
+      off-chat press, `trimMessageDrag` clamps on every selectionchange via
+      `clampDragAnchorToFocusLine`/`lineStartOffset` (unit-locked); wiring
+      locked in `annotations-ux.test.ts`. No code change needed.)
 - [x] Overlay edit: save button hover-in must animate like hover-out; Enter
       saves (no newline); textarea styling pass (near-black — confirm or fix).
-  (REOPENED Sep 2026: `annotations-ux.e2e.ts:169` fails deterministically;
-  predates stream-annotation2 (bisected to before its base). Unit half
-  holds; needs a real fix.
-  Fixed Sep 2026: transition symmetry pinned in `annotations-ux.test.ts`,
-  spec measures the dark field while the edit is open; 7/7 green.)
+      (REOPENED Sep 2026: `annotations-ux.e2e.ts:169` fails deterministically;
+      predates stream-annotation2 (bisected to before its base). Unit half
+      holds; needs a real fix.
+      Fixed Sep 2026: transition symmetry pinned in `annotations-ux.test.ts`,
+      spec measures the dark field while the edit is open; 7/7 green.)
 - [x] Annotation pencil hover: glow color, not disappear.
-  (Done Sep 2026 on work/stream-annotation2: `.review-pencil:hover` glows
-  accent-blue with a drop-shadow (symmetric transition on the base rule)
-  instead of going ink; locked in `annotations-ux.test.ts`.)
+      (Done Sep 2026 on work/stream-annotation2: `.review-pencil:hover` glows
+      accent-blue with a drop-shadow (symmetric transition on the base rule)
+      instead of going ink; locked in `annotations-ux.test.ts`.)
 - [x] Math annotation: normalize selection to whole equation; clear stale wash.
-  (Done Sep 2026 on work/stream-annotation2: `currentQuote` expands
-  math-internal picks over the equation body via `equationBodyOf`
-  (both ends must sit in one equation); `quoteFragmentText` drops
-  `.ccez-math-head` chrome; the re-stamp unwraps the stale fragment
-  wash with every other mark. Unit-locked in `annotations-dom.test.ts`.)
+      (Done Sep 2026 on work/stream-annotation2: `currentQuote` expands
+      math-internal picks over the equation body via `equationBodyOf`
+      (both ends must sit in one equation); `quoteFragmentText` drops
+      `.ccez-math-head` chrome; the re-stamp unwraps the stale fragment
+      wash with every other mark. Unit-locked in `annotations-dom.test.ts`.)
 - [x] Undecided: new chats show one past annotation + AI answer (no expletives,
       trash-can delete, disappears after first message, "What can I do for you?"
   - 3s pause). Decide/build or drop.
-  (Decided Sep 2026 on work/stream-annotation2: DROP. A faked past
-  annotation is either real chat content (pollutes provider context and
-  baked-block parsing) or a lying mock; delete + vanish-after-first-message
-  is fiddly one-time state, and the empty hero already teaches the blank
-  slate. Revisit only with a real first-run cue, never a fake history.)
+    (Decided Sep 2026 on work/stream-annotation2: DROP. A faked past
+    annotation is either real chat content (pollutes provider context and
+    baked-block parsing) or a lying mock; delete + vanish-after-first-message
+    is fiddly one-time state, and the empty hero already teaches the blank
+    slate. Revisit only with a real first-run cue, never a fake history.)
 
 ## Pile: reading aids + voice
 
@@ -345,16 +344,16 @@ cut; release chain outcome still unconfirmed (see Now).
       (Done on work/stream-chrome2: "settings show no study-fonts or
       lesson-audio sections" voice-data e2e green.)
 - [ ] Keychain re-prompt: stable self-signed identity for dev rebuilds.
-  (Decision Sep 2026, stream-platform: ad-hoc dev binaries change
-  identity every rebuild, so the Keychain ACL re-prompts. Fix is a
-  persistent local self-signed "Ccez Dev" code-signing cert (Keychain
-  Access -> Certificate Assistant) + `codesign -s` on the dev binary;
-  never commit the identity. Still needs a real Mac rebuild cycle to
-  confirm no re-prompt — unverified.)
+      (Decision Sep 2026, stream-platform: ad-hoc dev binaries change
+      identity every rebuild, so the Keychain ACL re-prompts. Fix is a
+      persistent local self-signed "Ccez Dev" code-signing cert (Keychain
+      Access -> Certificate Assistant) + `codesign -s` on the dev binary;
+      never commit the identity. Still needs a real Mac rebuild cycle to
+      confirm no re-prompt — unverified.)
 - [x] Updater in dev: explain unavailable instead of fetch error.
-  (Done Sep 2026 on work/stream-platform: `updateRouteFor` gains an
-  isDev leg returning a `dev` route; the settings updater path shows a
-  plain explanation in dev shells. `updates.test.ts` x5 pass.)
+      (Done Sep 2026 on work/stream-platform: `updateRouteFor` gains an
+      isDev leg returning a `dev` route; the settings updater path shows a
+      plain explanation in dev shells. `updates.test.ts` x5 pass.)
 
 ## Pile: search + sideview
 
@@ -388,63 +387,83 @@ cut; release chain outcome still unconfirmed (see Now).
 ## Pile: platform + release (needs hardware)
 
 - [ ] Win/Linux/Android device proof for every shipped feature.
-  (Status Sep 2026, stream-platform: unit-tested contracts only —
-  `platform.ts` x31, `updates.ts` x5, `langId.ts` x4 + `langid.rs` x3,
-  `secrets_android` fail-closed/prefs-key, android e2e specs pin the
-  web-reachable end states with device-only halves marked inside.
-  No hardware in this harness: no pass claims, ever.)
+      (Status Sep 2026, stream-platform: unit-tested contracts only —
+      `platform.ts` x31, `updates.ts` x5, `langId.ts` x4 + `langid.rs` x3,
+      `secrets_android` fail-closed/prefs-key, android e2e specs pin the
+      web-reachable end states with device-only halves marked inside.
+      No hardware in this harness: no pass claims, ever.)
 - [ ] Samsung S24 pass (Annotate overflow ordering, tap-to-reveal ghost).
-  (Blocked Sep 2026: no S24 hardware. `android-share`/`android-touch`
-  e2e run under an SM-S921B UA + 412x915 viewport but cover the
-  browser-reachable halves only.)
+      (Blocked Sep 2026: no S24 hardware. `android-share`/`android-touch`
+      e2e run under an SM-S921B UA + 412x915 viewport but cover the
+      browser-reachable halves only.)
 - [ ] System TTS ear-check on real hardware.
-  (Blocked Sep 2026: voice quality needs ears on device. Native
-  inventories ship per platform — `tts.rs` + `tts_android.rs` +
-  `tts_linux.rs` + `tts_windows.rs` — but ranking was never heard.)
+      (Blocked Sep 2026: voice quality needs ears on device. Native
+      inventories ship per platform — `tts.rs` + `tts_android.rs` +
+      `tts_linux.rs` + `tts_windows.rs` — but ranking was never heard.)
 - [ ] Android: signing config / Play-vs-self-sign decision; share intent
       (ACTION_SEND text -> chat draft); Keystore fallback for API keys (keyring
       v3 = in-memory mock on Android, nothing persists). Verify current status.
-  (Status Sep 2026, stream-platform: DECIDED self-sign — `release.yml`
-  header records it (upload-keystore via CI secrets, APK from the
-  Releases page, no Play, no Apple Developer account). Share intent
-  SHIPS (manifest SEND filter + `MainActivity.handleSend` ->
-  `annotate-external` prefill; PROCESS_TEXT alias alongside). Keystore
-  fallback SHIPS (`Secrets.kt` AES/GCM envelope + `secrets_android.rs`,
-  fail-closed without init, unit-tested). Device verify blocked.)
+      (Status Sep 2026, stream-platform: DECIDED self-sign — `release.yml`
+      header records it (upload-keystore via CI secrets, APK from the
+      Releases page, no Play, no Apple Developer account). Share intent
+      SHIPS (manifest SEND filter + `MainActivity.handleSend` ->
+      `annotate-external` prefill; PROCESS_TEXT alias alongside). Keystore
+      fallback SHIPS (`Secrets.kt` AES/GCM envelope + `secrets_android.rs`,
+      fail-closed without init, unit-tested). Device verify blocked.)
 - [ ] On-device Gemma via MediaPipe LLM Inference (sanctioned Kotlin
       exception); provider gating contract already ships + unit-tested.
-  (Report-only Sep 2026, stream-platform — NOT built per DO LAST:
-  `visibleProviderIds` in `platform.ts` lists `local-gemma` only on
-  offline Android and hides it elsewhere; `platform.test.ts` pins all
-  six gating cases. Nothing registers `local: true` yet — no bridge.)
+      (Report-only Sep 2026, stream-platform — NOT built per DO LAST:
+      `visibleProviderIds` in `platform.ts` lists `local-gemma` only on
+      offline Android and hides it elsewhere; `platform.test.ts` pins all
+      six gating cases. Nothing registers `local: true` yet — no bridge.)
 
 ## Pile: input + sidebar + shortcuts + extras (from PROMPT3)
 
 - [x] Remove the Mac menu-bar logo entirely (doesn't look good, not wanted).
       (Done in Wave 0.1 checkpoint: tray builds only on Windows/Linux now;
       the Dock owns Show/Quit on macOS.)
-- [ ] Submit button: drop pinned language buttons from the top bar; replace
+- [x] Submit button: drop pinned language buttons from the top bar; replace
       the submit arrow with the emoji, centered vertically + horizontally.
-- [ ] Own-message background breaks at large font sizes — fix.
-- [ ] Shortcuts modal: first entry is "Shortcuts show/hide" ("Toggle shortcuts
+      (Verified Sep 2026: 📨 emoji send already on main, no pinned lang
+      buttons in the top bar — no change needed.)
+- [x] Own-message background breaks at large font sizes — fix.
+      (Done Sep 2026 on work/pile-submit: radius/padding track
+      `min(var(--font-scale, 1), 2)`; `user-bubble.e2e.ts` green.)
+- [x] Shortcuts modal: first entry is "Shortcuts show/hide" ("Toggle shortcuts
       menu"); fold new keyboard/right-click tricks in pithy, no paren spam.
-- [ ] Middle-click opens the shortcuts modal.
-- [ ] Settings checkboxes: text highlightable without toggling; click still
+      (Done Sep 2026 on work/pile-shortcuts: Send/Focus/New-chat/Edit rows
+      added, stale Speak rows out, parens de-spammed;
+      `shortcuts-modal.e2e.ts` 2/2 green.)
+- [x] Middle-click opens the shortcuts modal.
+      (Verified Sep 2026: `onMiddleClick` + auxclick listener already on
+      main, modal lists it first — no change needed.)
+- [x] Settings checkboxes: text highlightable without toggling; click still
       toggles.
+      (Verified Sep 2026: `keepSelectionWithoutToggle` capture listener in
+      SettingsPanel already implements exactly this — no change needed.)
 - [x] Cmd+F finds text in the current chat, cycling hits like a browser.
       (Done on work/stream-chrome2: "Ctrl+F finds text, Enter cycles hits"
       search e2e green.)
-- [ ] Clicking a chat in the sidebar closes the sidebar. Cmd+Shift+H opens it;
+- [x] Clicking a chat in the sidebar closes the sidebar. Cmd+Shift+H opens it;
       j/k then starts from the current chat, not the top.
-- [ ] Double-tap on non-button chat-sidebar areas closes it. Double-tap on the
+      (Verified Sep 2026: pick closes the list and lands in the prompt,
+      `sideIdx` anchors j/k — already on main, proven by
+      `sidebar-topbar.e2e.ts`; no change needed.)
+- [x] Double-tap on non-button chat-sidebar areas closes it. Double-tap on the
       settings-sidebar top expands the window like the main top bar.
-- [ ] Main chat top shows traffic lights and nothing else; prompt/backdrop must
+      (Verified Sep 2026: aside ondblclick guard + panel-head zoomWindow
+      already on main — no change needed.)
+- [x] Main chat top shows traffic lights and nothing else; prompt/backdrop must
       never cut off top messages (only window bounds clip text).
-- [ ] Settings menu shows the build version (or "dev" in dev).
-  (Status Sep 2026, stream-platform: release builds already stamp
-  `v{version} · build {stamp}` in SettingsPanel; dev hides the stamp
-  deliberately ("dev · live reads as noise" — prior decision). Confirm
-  that stands or restyle; no code changed.)
+      (Done Sep 2026 on work/pile-sidebar: app-title removed, header is an
+      empty drag strip; find bar moved in-flow; chrome + sidebar-topbar
+      16/16 green.)
+- [x] Settings menu shows the build version (or "dev" in dev).
+      (Status Sep 2026, stream-platform: release builds already stamp
+      `v{version} · build {stamp}` in SettingsPanel; dev hides the stamp
+      deliberately ("dev · live reads as noise" — prior decision). Confirm
+      that stands or restyle; no code changed.
+      Confirmed Sep 2026: stamp + dev-hide both present in code — stands.)
 - [x] Annotations are leaking across chats — each chat (incl. its prompt) owns
       its annotations. (Related: annotation-scope e2e under Now.)
       Accept: deleting a background chat leaves the active composer's drafts +
@@ -463,16 +482,16 @@ cut; release chain outcome still unconfirmed (see Now).
 - [x] langid dead code (MIN_WORDS/MIN_SCORE/STOP_WORDS/is_cjk/
       is_latin_word_char/identify_lang_offline): remove or wire up — decide, don't
       carry warnings.
-  (Decided Sep 2026 on work/stream-platform: WIRED UP, kept —
-  `tts_identify_lang` calls it off-Apple, every helper is used; the
-  blanket `allow(dead_code)` narrowed to an Apple-only `cfg_attr` so
-  the module still compiles (and tests) on the dev host.)
+      (Decided Sep 2026 on work/stream-platform: WIRED UP, kept —
+      `tts_identify_lang` calls it off-Apple, every helper is used; the
+      blanket `allow(dead_code)` narrowed to an Apple-only `cfg_attr` so
+      the module still compiles (and tests) on the dev host.)
 - [ ] Android: voices button needs top/bottom spacing; system-voices auto
       element missing at startup; "build release" should read "Version";
       one-finger double-tap opens the sidebar when the chat is empty.
-  (Blocked Sep 2026, stream-platform: all four need a real Android
-  device to see/verify — untouched. Voice/chrome areas belong to
-  sibling streams; coordinate before changing.)
+      (Blocked Sep 2026, stream-platform: all four need a real Android
+      device to see/verify — untouched. Voice/chrome areas belong to
+      sibling streams; coordinate before changing.)
 - [ ] Offline AI fallback — DO LAST: when offline, Gemma becomes its own
       settings option replacing the DeepSeek/Muse bubbles; auto-switch back on
       reconnect. Android via MediaPipe; Mac via the user's existing Ollama (audit
