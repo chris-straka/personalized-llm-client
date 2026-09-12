@@ -51,5 +51,5 @@ test("sanitized render keeps code chrome and data attributes", async ({ page }) 
 	await expect(page.locator(".hero")).toBeHidden({ timeout: 60_000 });
 	const code = page.locator(".ccez-code").first();
 	await expect(code).toBeVisible();
-	await expect(code.locator('[data-code-action="copy"]')).toHaveCount(1);
+	await expect(code.locator("button.ccez-code-head")).toHaveCount(1);
 });

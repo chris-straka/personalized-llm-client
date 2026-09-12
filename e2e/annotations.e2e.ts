@@ -58,7 +58,7 @@ test("clicking blank space deselects instead of reopening the menu", async ({ pa
 	await expect(page.locator(".sel-menu")).toHaveCount(0);
 });
 
-/** Right-click reads the highlight aloud but keeps it: the text and
+/** Right-click keeps the highlight without starting audio: the text and
 its highlight stay put (the menu itself may dismiss). */
 test("right-click keeps the highlighted text", async ({ page }) => {
 	const body = page.locator("article .rendered").first();
@@ -332,7 +332,8 @@ test("review popup uses note labels", async ({ page }) => {
 	await expect(review).not.toContainText("User comment");
 });
 
-/** An annotations-only message renders folded with its quotes previewed. */
+/** An annotations-only message renders unfolded (em-dash plus the count)
+and folds to its quotes previewed on demand. */
 test("annotations-only message renders folded", async ({ page }) => {
 	await seedChat(page, [
 		{
@@ -343,16 +344,17 @@ test("annotations-only message renders folded", async ({ page }) => {
 	await page.reload();
 	const article = page.locator("article.user");
 	await expect(article).toBeVisible();
+	await expect(article.locator(".rendered")).toContainText("—");
+	await expect(article.locator(".ann-refs-pill")).toBeVisible();
+	// Folding previews the quotes; unfolding restores the em-dash body
+	// with the pill above — the baked block never shows.
+	await article.locator('.actions button[aria-label="Fold this message"]').click();
 	const preview = article.locator(".folded-preview");
 	await expect(preview).toContainText("風に舞う");
-	await expect(article.locator(".ann-refs-pill")).toBeVisible();
-	// Unfolding reveals the full block and drops the pill.
 	await article.locator('.actions button[aria-label="Unfold this message"]').click();
-	await expect(article.locator(".rendered")).toContainText("Annotated selections:");
-	await expect(article.locator(".ann-refs-pill")).toHaveCount(0);
-	// Refolding restores the compact view.
-	await article.locator('.actions button[aria-label="Fold this message"]').click();
-	await expect(article.locator(".folded-preview")).toBeVisible();
+	await expect(article.locator(".rendered")).toContainText("—");
+	await expect(article.locator(".rendered")).not.toContainText("Annotated selections:");
+	await expect(article.locator(".ann-refs-pill")).toBeVisible();
 });
 
 /** No message row offers an audio download anymore. */
@@ -637,4 +639,71 @@ test("dragging from the gutter into the chat keeps the highlight", async ({ page
 	await page.mouse.up();
 	expect(await page.evaluate(() => window.getSelection()?.toString() ?? "")).toBe(before);
 	await expect(page.locator(".sel-menu")).toBeVisible();
+});
+
+/** Annotations-only messages render an em-dash at text size with the
+count above, unfolded — never the baked block. */
+test("annotations-only message renders em-dash with count", async ({ page }) => {
+	await seedChat(page, [
+		{ role: "user", content: 'Annotated selections:\n1. "bonjour" — ?' },
+		{ role: "assistant", content: "ok" }
+	]);
+	await page.goto("/");
+	const article = page.locator("article.user");
+	await expect(article.locator(".ann-refs-pill")).toHaveText("1", { timeout: 60_000 });
+	await expect(article.locator(".rendered")).toContainText("—");
+	await expect(article.locator(".rendered")).not.toContainText("Annotated selections");
+	await expect(article.locator(".folded-preview")).toHaveCount(0);
+	const dash = await article
+		.locator(".rendered")
+		.evaluate((el) => getComputedStyle(el as HTMLElement).fontSize);
+	const normal = await page
+		.locator("article.assistant .rendered")
+		.evaluate((el) => getComputedStyle(el as HTMLElement).fontSize);
+	expect(dash).toBe(normal);
+});
+
+/** Message copy excludes the baked annotation block. */
+test("message copy excludes baked annotations", async ({ page }) => {
+	await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+	await seedChat(page, [
+		{ role: "user", content: 'explain this\n\nAnnotated selections:\n1. "bonjour" — ?' }
+	]);
+	await page.goto("/");
+	const row = page.locator("article.user .actions");
+	await row.hover();
+	await page.locator('article.user .actions button[data-tip="Copy as plain text"]').click();
+	await expect(page.locator(".toast")).toHaveText("Copied", { timeout: 10_000 });
+	expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("explain this");
+});
+
+/** Each baked annotation copies from the sent-refs card's icon button. */
+test("sent-refs card copies one annotation", async ({ page }) => {
+	await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+	// A leading assistant message pushes the user article down: the
+	// count pill floats above its message and is unhittable at the
+	// viewport's top edge.
+	await seedChat(page, [
+		{ role: "assistant", content: "noted" },
+		{ role: "user", content: 'explain this\n\nAnnotated selections:\n1. "bonjour" — greeting?' }
+	]);
+	await page.goto("/");
+	// Forced: the card opens overlapping its pill by design, so the
+	// pill itself never stays the hit target once the card is up.
+	await page.locator(".ann-refs-pill").first().hover({ force: true });
+	await page.locator(".ann-refs-copy").first().click();
+	await expect(page.locator(".toast")).toHaveText("Copied", { timeout: 10_000 });
+	expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('"bonjour" — greeting?');
+});
+
+/** Each draft annotation copies from the review panel's icon button. */
+test("review panel copies one annotation", async ({ page }) => {
+	await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+	await openAnnotate(page, "確認しました");
+	await page.keyboard.press("Enter");
+	await hoverPromptPill(page);
+	await page.locator(".prompt-tools .review-copy").first().click();
+	await expect(page.locator(".toast")).toHaveText("Copied", { timeout: 10_000 });
+	const pasted = await page.evaluate(() => navigator.clipboard.readText());
+	expect(pasted).toContain("テストを確認しました");
 });

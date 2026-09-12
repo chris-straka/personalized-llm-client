@@ -70,3 +70,12 @@ test("menu sits down and left of the cursor", async ({ page }) => {
 	expect(menuBox.x).toBeGreaterThanOrEqual(0);
 	expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(geom.viewport);
 });
+
+/** Right-clicking empty space never starts audio: nothing speaks and nothing selects. */
+test("right-click on empty space stays silent", async ({ page }) => {
+	await page.mouse.click(10, 300, { button: "right" });
+	await page.waitForTimeout(500);
+	await expect(page.locator("article.speaking, article.speaking-sel")).toHaveCount(0);
+	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+	expect(selected).toBe("");
+});

@@ -13,7 +13,8 @@ import {
 	htmlToText,
 	highlightRendered,
 	extractMath,
-	mathHtml
+	mathHtml,
+	mathTexPreview
 } from "./render";
 
 describe("thoughts", () => {
@@ -53,14 +54,22 @@ describe("sources stripping", () => {
 });
 
 describe("markdown rendering", () => {
-	it("renders code blocks with language label, fold and copy buttons", () => {
+	it("renders code blocks with a language-label fold bar, no buttons", () => {
 		const { html, codes } = renderMarkdown("```python\nprint(1)\n```");
 		expect(codes).toEqual([{ lang: "python", code: "print(1)" }]);
 		expect(html).toContain("ccez-code-lang");
 		expect(html).toContain("python");
-		expect(html).toContain('data-code-action="fold"');
-		expect(html).toContain('data-code-action="copy"');
+		expect(html).toContain('aria-label="Fold code block"');
+		expect(html).not.toContain("data-code-action");
+		expect(html).not.toContain(">Fold<");
+		expect(html).not.toContain(">Copy<");
 		expect(html).toContain('data-code-index="0"');
+	});
+
+	it("sanitizer keeps fold-bar a11y attributes", () => {
+		const { html } = renderMarkdown("Here:\n\n$$x^2$$\n\ndone");
+		expect(html).toContain('aria-label="Fold equation"');
+		expect(html).toContain('aria-expanded="true"');
 	});
 
 	it("strips scripts and dangerous attributes", () => {
@@ -152,23 +161,26 @@ describe("highlighting", () => {
 });
 
 describe("latex math", () => {
-	it("renders display math with a label head plus fold and copy buttons", () => {
+	it("renders display math with a chevron bar plus TeX preview, no labels or buttons", () => {
 		const { html, maths } = renderMarkdown("Here:\n\n$$x^2 + y^2$$\n\ndone");
 		expect(maths).toEqual([{ kind: "display", tex: "x^2 + y^2", raw: "$$x^2 + y^2$$" }]);
 		expect(html).toContain('data-math-index="0"');
-		expect(html).toContain("ccez-math-lang");
-		expect(html).toContain('data-math-action="fold"');
-		expect(html).toContain('data-math-action="copy"');
+		expect(html).toContain("ccez-math-chev");
+		expect(html).toContain("x^2 + y^2");
+		expect(html).not.toContain("ccez-math-lang");
+		expect(html).not.toContain("data-math-action");
+		expect(html).not.toContain(">Fold<");
+		expect(html).not.toContain(">Copy<");
 		expect(html).toContain("katex");
 	});
 
-	it("renders inline math with fold and copy buttons", () => {
+	it("renders inline math bare, with no chrome at all", () => {
 		const { html, maths } = renderMarkdown("slope \\(m = \\frac{a}{b}\\) here");
 		expect(maths).toHaveLength(1);
 		expect(maths[0]?.kind).toBe("inline");
 		expect(html).toContain("ccez-math-inline");
-		expect(html).toContain('data-math-action="fold"');
-		expect(html).toContain('data-math-action="copy"');
+		expect(html).not.toContain("ccez-math-head");
+		expect(html).not.toContain("data-math-action");
 		expect(html).toContain("katex");
 	});
 
@@ -176,7 +188,15 @@ describe("latex math", () => {
 		const html = mathHtml({ kind: "inline", tex: "m", raw: "\\(m\\)" }, 0);
 		const inner = html.slice(html.indexOf(">") + 1, html.lastIndexOf("<"));
 		expect(inner).not.toContain("<div");
-		expect(html).toContain('<span class="ccez-math-head">');
+		expect(html).not.toContain("ccez-math-head");
+	});
+
+	it("truncates long TeX previews to one line", () => {
+		expect(mathTexPreview("a + b", 48)).toBe("a + b");
+		expect(mathTexPreview("x\n^2", 48)).toBe("x ^2");
+		const long = mathTexPreview("a".repeat(60), 48);
+		expect(long).toHaveLength(49);
+		expect(long.endsWith("…")).toBe(true);
 	});
 
 	it("keeps invalid math as plain text, never fatal", () => {
@@ -213,12 +233,12 @@ describe("latex math", () => {
 		expect(html).toContain('data-math-index="2"');
 	});
 
-	it("renders single-dollar inline math with the same chrome", () => {
+	it("renders single-dollar inline math bare like paren inline math", () => {
 		const { html, maths } = renderMarkdown("slope $m = \\frac{a}{b}$ here");
 		expect(maths).toEqual([{ kind: "inline", tex: "m = \\frac{a}{b}", raw: "$m = \\frac{a}{b}$" }]);
 		expect(html).toContain("ccez-math-inline");
-		expect(html).toContain('data-math-action="fold"');
-		expect(html).toContain('data-math-action="copy"');
+		expect(html).not.toContain("ccez-math-head");
+		expect(html).not.toContain("data-math-action");
 		expect(html).toContain("katex");
 	});
 

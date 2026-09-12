@@ -17,7 +17,8 @@ import {
 	clampDragAnchorToFocusLine,
 	reviewEditKey,
 	REFS_ONLY_BODY,
-	isRefsOnly
+	isRefsOnly,
+	redactedCopyText
 } from "./annotations";
 import { buildTranslateMessages, translateSelection } from "./translate";
 import type { ChatProvider } from "./providers/types";
@@ -306,6 +307,17 @@ describe("refs-only display", () => {
 		expect(isRefsOnly(content)).toBe(true);
 		expect(isRefsOnly(withAnnotations("explain", list))).toBe(false);
 		expect(isRefsOnly("just a prompt")).toBe(false);
+	});
+
+	it("redacts the baked block from message copy", () => {
+		const list = addAnnotation([], "m1" as ChatMsgId, "langue", "meaning?");
+		expect(redactedCopyText(withAnnotations("explain", list))).toBe("explain");
+		expect(redactedCopyText("just a prompt")).toBe("just a prompt");
+	});
+
+	it("copies refs-only quotes instead of an empty string", () => {
+		const list = addAnnotation([], "m1" as ChatMsgId, "langue", "meaning?");
+		expect(redactedCopyText(withAnnotations("", list))).toBe("langue");
 	});
 });
 

@@ -74,6 +74,21 @@ describe("annotations-only messages", () => {
 	});
 });
 
+describe("review pencil hover", () => {
+	it("glows accent-blue instead of going ink", () => {
+		const css = pageStyle();
+		expect(css).toMatch(/button\.review-pencil\s*\{[^}]*transition:/);
+		expect(css).toMatch(/button\.review-pencil:hover\s*\{[^}]*drop-shadow/);
+	});
+});
+
+describe("sent-message annotation count", () => {
+	it("scales the refs count with the message font size", () => {
+		const css = pageStyle();
+		expect(css).toMatch(/\.ann-refs-pill\s*\{[^}]*var\(--font-scale, 1\)/);
+	});
+});
+
 describe("off-chat drag clamp", () => {
 	it("trims selections whose press started off-chat on every change", () => {
 		const source = pageSource();

@@ -351,8 +351,27 @@ export interface AnnotationMark {
  * for 漢字). Only the base text is content.
  */
 export function quoteFragmentText(frag: DocumentFragment): string {
-	frag.querySelectorAll("[data-ann-badge], rt, rp, .frt").forEach((el) => el.remove());
+	frag
+		.querySelectorAll("[data-ann-badge], rt, rp, .frt, .ccez-math-head, .ccez-code-head")
+		.forEach((el) => el.remove());
 	return frag.textContent?.trim() ?? "";
+}
+
+/**
+ * Equation body holding a node, when the node sits inside rendered
+ * math (`[data-math-index]`): display blocks wash/quote their
+ * `.ccez-math-body`, inline math its whole wrapper. Null outside math.
+ * KaTeX splits glyphs across spans, so a partial pick inside an
+ * equation quotes a fragment that never re-matches (and washes a
+ * shard): callers expand the live range over this element first, and
+ * the re-stamp unwraps the stale fragment wash with every other mark.
+ */
+export function equationBodyOf(node: Node | null): Element | null {
+	const element = node instanceof Element ? node : node?.parentElement;
+	const wrap = element?.closest?.("[data-math-index]");
+	if (!(wrap instanceof Element)) return null;
+	const body = wrap.querySelector(".ccez-math-body");
+	return body instanceof Element ? body : wrap;
 }
 
 export function quoteTextNodes(root: Node): Text[] {
@@ -809,8 +828,8 @@ function cleanDraftList(raw: unknown): Annotation[] {
 		if (typeof a.id !== "string" || typeof a.messageId !== "string") continue;
 		if (typeof a.quote !== "string" || typeof a.comment !== "string") continue;
 		out.push({
-			id: a.id as AnnotationId,
-			messageId: a.messageId as ChatMsgId,
+			id: a.id,
+			messageId: a.messageId,
 			quote: a.quote,
 			comment: a.comment,
 			at: typeof a.at === "number" ? a.at : 0
@@ -922,6 +941,20 @@ export function annRefsFor(content: string): { text: string; refs: AnnotationRef
  * unaffected) — only the display collapses to this.
  */
 export const REFS_ONLY_BODY = "—";
+
+/**
+ * Display-copy text for a message body: the baked annotation block is
+ * metadata, never prose, so message copy redacts it. A refs-only body
+ * holds nothing else — copying an empty string would strand the
+ * button, so it falls back to the quotes themselves (the message's
+ * only substance). Pure and unit-tested.
+ */
+export function redactedCopyText(body: string): string {
+	const split = annRefsFor(body);
+	if (!split) return body;
+	if (split.text.trim()) return split.text;
+	return split.refs.map((ref) => ref.quote).join("\n");
+}
 
 /** True when a baked block is the message's whole content (redact to REFS_ONLY_BODY). */
 export function isRefsOnly(content: string): boolean {

@@ -23,44 +23,44 @@ test.beforeEach(async ({ page }) => {
 	await expect(page.locator(".ccez-math").first()).toBeVisible({ timeout: 60_000 });
 });
 
-/** Display math renders KaTeX under a label head with Fold and Copy. */
-test("display block renders with math chrome", async ({ page }) => {
+/** Display math renders KaTeX under a chevron bar with a TeX preview — no labels, no buttons. */
+test("display block renders with buttonless chrome", async ({ page }) => {
 	const block = page.locator(".ccez-math").first();
-	await expect(block.locator(".ccez-math-lang")).toHaveText("math");
-	await expect(block.locator('button[data-math-action="fold"]')).toHaveText("Fold");
-	await expect(block.locator('button[data-math-action="copy"]')).toHaveText("Copy");
+	await expect(block.locator(".ccez-math-chev")).toBeVisible();
+	await expect(block.locator(".ccez-math-tex")).toContainText("E_n");
+	await expect(block.locator(".ccez-math-lang")).toHaveCount(0);
+	await expect(block.locator("button[data-math-action]")).toHaveCount(0);
 	expect(await block.locator(".katex").count()).toBeGreaterThan(0);
 });
 
-/** Fold collapses the rendered math body and unfolds it back. */
-test("fold toggles the math body", async ({ page }) => {
+/** Bar-click folds the rendered math body and unfolds it back. */
+test("bar click folds the math body", async ({ page }) => {
 	const block = page.locator(".ccez-math").first();
-	const fold = block.locator('button[data-math-action="fold"]');
+	const bar = block.locator(".ccez-math-head");
 	const body = block.locator(".ccez-math-body");
 	await expect(body).toBeVisible();
-	await fold.click();
+	await bar.click();
 	await expect(body).toBeHidden();
-	await expect(fold).toHaveText("Unfold");
-	await fold.click();
+	await expect(block).toHaveAttribute("data-folded", "1");
+	await bar.click();
 	await expect(body).toBeVisible();
-	await expect(fold).toHaveText("Fold");
+	await expect(block).not.toHaveAttribute("data-folded", "1");
 });
 
-/** Copy writes the raw TeX (not the delimiters or the rendering). */
-test("copy writes raw tex to the clipboard", async ({ page }) => {
+/** Body-click copies the raw TeX (not the delimiters or the rendering) plus a toast. */
+test("body click copies raw tex with a toast", async ({ page }) => {
 	const block = page.locator(".ccez-math").first();
-	await block.locator('button[data-math-action="copy"]').click();
-	await expect(block.locator('button[data-math-action="copy"]')).toHaveText("Copied", {
-		timeout: 10_000
-	});
+	await block.locator(".ccez-math-body").click();
+	await expect(page.locator(".toast")).toHaveText("Copied", { timeout: 10_000 });
 	expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("E_n");
 });
 
-/** Inline math renders in place with the same buttons. */
-test("inline math renders with fold and copy", async ({ page }) => {
+/** Inline math renders bare with no chrome at all. */
+test("inline math renders with no chrome", async ({ page }) => {
 	const inline = page.locator(".ccez-math-inline").first();
 	await expect(inline).toBeVisible();
-	await expect(inline.locator('button[data-math-action="copy"]')).toBeVisible();
+	await expect(inline.locator(".ccez-math-head")).toHaveCount(0);
+	await expect(inline.locator("button")).toHaveCount(0);
 	expect(await inline.locator(".katex").count()).toBeGreaterThan(0);
 });
 
@@ -95,4 +95,22 @@ test("composer does not render latex", async ({ page }) => {
 	await page.keyboard.type("$$x^2$$");
 	await expect(composer.locator(".ccez-math")).toHaveCount(0);
 	await expect(composer.locator(".ccez-math-inline")).toHaveCount(0);
+});
+
+/** Right-clicking the fold bar never starts audio: nothing speaks and the live highlight keeps. */
+test("right-click on the math fold bar stays silent", async ({ page }) => {
+	const para = page.locator("article .rendered p").first();
+	const box = await para.boundingBox();
+	if (!box) throw new Error("paragraph has no box");
+	const y = box.y + box.height / 2;
+	await page.mouse.move(box.x + 10, y);
+	await page.mouse.down();
+	await page.mouse.move(box.x + 120, y, { steps: 5 });
+	await page.mouse.up();
+	const bar = page.locator(".ccez-math-head").first();
+	await bar.click({ button: "right" });
+	await page.waitForTimeout(500);
+	await expect(page.locator("article.speaking, article.speaking-sel")).toHaveCount(0);
+	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+	expect(selected).not.toBe("");
 });

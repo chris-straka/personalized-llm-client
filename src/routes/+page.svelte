@@ -101,6 +101,8 @@
 		annotationCountLabel,
 		withAnnotations,
 		quoteFragmentText,
+		equationBodyOf,
+		redactedCopyText,
 		newAnnotationId,
 		annRefsFor,
 		lockSelectionToMessage,
@@ -159,8 +161,6 @@
 		LOCAL_AID_ADD_TITLE,
 		MODEL_AIDS,
 		MODEL_AID_FOR_SCRIPT,
-		extractWordAt,
-		speakWord,
 		ttsLangFor,
 		runModelAid,
 		aidTargetLines,
@@ -208,7 +208,6 @@ import { isPromptIdle } from "$lib/chrome";
 	import {
 		speakNative,
 		speakNativeMulti,
-		speakNativeWord,
 		stopNative,
 		friendlyNativeError,
 		nativeTtsSupported,
@@ -1645,7 +1644,15 @@ import { isPromptIdle } from "$lib/chrome";
 	}
 
 	function copyText(content: string, role: string): void {
-		copyPlain(plainBody(content, role, sourcesWanted), "Copied as plain text");
+		// Message copy excludes baked annotations (metadata, not prose);
+		// refs-only messages fall back to their quotes, never "".
+		copyPlain(redactedCopyText(plainBody(content, role, sourcesWanted)), "Copied");
+	}
+
+	/** Copy one annotation (either overlay): quote plus comment, no numbers. */
+	function copyAnnotation(quote: string, comment: string): void {
+		const text = comment.trim() ? `"${quote}" — ${comment.trim()}` : `"${quote}"`;
+		copyPlain(text, "Copied");
 	}
 
 	/**
@@ -1716,6 +1723,20 @@ import { isPromptIdle } from "$lib/chrome";
 			? selection.anchorNode
 			: selection.anchorNode?.parentElement;
 		if (!inRendered?.closest(".rendered")) return null;
+		// Math picks normalize to the whole equation: a partial glyph
+		// pick quotes a shard that never re-matches, so when both ends
+		// sit in one equation the range expands over its body first.
+		const anchorBody = equationBodyOf(selection.anchorNode);
+		if (anchorBody && equationBodyOf(selection.focusNode) === anchorBody) {
+			try {
+				const whole = document.createRange();
+				whole.selectNodeContents(anchorBody);
+				selection.removeAllRanges();
+				selection.addRange(whole);
+			} catch {
+				// A disturbed range keeps the partial pick below.
+			}
+		}
 		// Clone the range and drop badge buttons and ruby readings:
 		// selecting across an existing annotation would otherwise bake
 		// its number into the new quote ("Kyoto1 in two sentences"),
@@ -4810,7 +4831,7 @@ import { isPromptIdle } from "$lib/chrome";
 			if (Date.now() - touchMenuAt < 800) return;
 			// Ignore clicks that start inside the prompt, popups, or buttons —
 			// only freshly selected message text summons the menu.
-			if (event.button === 2) return; // right-click reads aloud instead
+			if (event.button === 2) return; // right-click never summons the menu (or audio)
 			// Non-element targets (synthetic document/window events) carry no
 			// selection UI — real mouse-ups always target an Element.
 			const target = event.target instanceof Element ? event.target : null;
@@ -4855,62 +4876,23 @@ import { isPromptIdle } from "$lib/chrome";
 			}
 			onSelectEnd(event, event.clientX);
 		};
-		// Right-click a word in a message to hear it — even with aids off.
-		// Capture phase + preventDefault pre-empts the native context menu.
+		// Right-click never starts audio: the desktop speak path that
+		// lived here (selection reads aloud, word under cursor) is gone
+		// by decision — speech starts only from explicit speak buttons.
+		// Capture stays registered for the Android long-press branch
+		// below; desktop falls through to the native context menu.
 		const onContextMenu = (event: MouseEvent) => {
 			const target = event.target as HTMLElement | null;
 			// Android long-press fires contextmenu mid-hold, before
 			// touchend: summon the menu off the live selection without
 			// consuming the event, so the native callout (Copy) still
-			// appears. Desktop right-click keeps the speak path below.
+			// appears.
 			if (androidUI && target?.closest(".messages .rendered")) {
 				if (currentQuote()) {
 					placeSelMenu(event.clientX);
 					touchMenuAt = Date.now();
 				}
-				return;
 			}
-			const body = target?.closest(".messages .rendered");
-			if (!body || target?.closest("button, input, textarea, a, summary")) return;
-			// Highlighted text wins over the word under the cursor: a
-			// right-click with a live message selection reads the whole
-			// selection (same per-quote language as the sel-menu button).
-			const quoted = currentQuote();
-			if (quoted) {
-				event.preventDefault();
-				void speakQuote(quoted.quote, quoted.messageId);
-				return;
-			}
-			let range: Range | null = null;
-			try {
-				if (typeof document.caretRangeFromPoint === "function") {
-					range = document.caretRangeFromPoint(event.clientX, event.clientY);
-				}
-			} catch {
-				range = null;
-			}
-			const node = range?.startContainer;
-			if (!node || node.nodeType !== Node.TEXT_NODE || !body.contains(node)) return;
-			const word = extractWordAt(node.textContent ?? "", range?.startOffset ?? 0);
-			if (!word) return;
-			event.preventDefault();
-			const fallbackLang = settings.voiceLang?.trim() || "en-US";
-			const wordLang = effectiveSpeechLang(ttsLangFor(word, fallbackLang), webVoices());
-			if (!speechAttemptable(wordLang)) {
-				setVoiceError("No voice for this language.");
-				return;
-			}
-			if (settings.voiceEngine === "native") {
-				speakNativeWord(
-					word,
-					wordLang,
-					(message) => {
-						flashToast(`${friendlyNativeError(message)} (web voice instead)`);
-						speakWord(word, fallbackLang);
-					},
-					settings.nativeVoiceId
-				);
-			} else speakWord(word, fallbackLang);
 		};
 		// Holding Option morphs the send button into "Add +" (stage).
 		const onAlt = (event: KeyboardEvent) => {
@@ -5353,7 +5335,7 @@ import { isPromptIdle } from "$lib/chrome";
 			{#each viewChat.messages as msg, i (msg.id)}
 				{@const sentRefs = annRefsFor(msg.content)}
 				{@const refsOnly = sentRefs ? sentRefs.text.trim() === "" : false}
-				{@const isFolded = refsOnly ? !foldedIds.has(msg.id) : foldedIds.has(msg.id)}
+				{@const isFolded = foldedIds.has(msg.id)}
 				{@const script = detectScript(sentRefs ? sentRefs.text : msg.content)}
 				{@const aidId = script ? MODEL_AID_FOR_SCRIPT[script] : null}
 				{@const localKinds = offeredLocalAids(sentRefs ? sentRefs.text : msg.content)}
@@ -5405,6 +5387,15 @@ import { isPromptIdle } from "$lib/chrome";
 										{#if ref.comment}
 											<span class="ann-refs-comment">{ref.comment}</span>
 										{/if}
+										<button
+											type="button"
+											class="ann-refs-copy"
+											title="Copy annotation"
+											aria-label="Copy annotation {ref.n}"
+											onclick={() => copyAnnotation(ref.quote, ref.comment)}
+										>
+											<ActionIcon kind="copy" />
+										</button>
 									</div>
 								{/each}
 							</div>
@@ -5421,6 +5412,7 @@ import { isPromptIdle } from "$lib/chrome";
 							washId={annPop?.id ?? editingId ?? hoverBadgeId}
 						onBadgeHover={(id: string | null) => (hoverBadgeId = id)}
 							onBadgeClick={openBadgeClick}
+							onToast={flashToast}
 							onFoldToggle={(index: number) => togglePasteFold(msg, index)}
 							textOverride={aidedTextFor(msg)}
 							contentOverride={sentRefs ? (refsOnly && !isFolded ? REFS_ONLY_BODY : sentRefs.text) : null}
@@ -5796,6 +5788,15 @@ import { isPromptIdle } from "$lib/chrome";
 									<div class="review-head">
 										<span class="review-num">{n + 1}.</span>
 										<span class="review-quote">“{ann.quote}”</span>
+										<button
+											type="button"
+											class="review-copy"
+											title="Copy annotation"
+											aria-label="Copy annotation {n + 1}"
+											onclick={() => copyAnnotation(ann.quote, ann.comment)}
+										>
+											<ActionIcon kind="copy" />
+										</button>
 										<button
 											type="button"
 											aria-label="Delete annotation {n + 1}"
@@ -7974,7 +7975,9 @@ import { isPromptIdle } from "$lib/chrome";
 		border-radius: 0;
 		background: transparent;
 		color: #6e6e73;
-		font-size: 0.72rem;
+		/* The count tracks the chat text size like badges do (dampened:
+		never compounding rem, just the message scale). */
+		font-size: calc(0.72rem * var(--font-scale, 1));
 		font-weight: 650;
 		line-height: 1.4;
 		padding: 0 0.1rem;
@@ -8040,6 +8043,26 @@ import { isPromptIdle } from "$lib/chrome";
 	.ann-refs-comment {
 		color: #c7c7cc;
 		overflow-wrap: anywhere;
+	}
+	/* Per-annotation copy in the sent-refs card: icon only, no text,
+	pushed to the row's end like the panel's delete button. */
+	.ann-refs-copy {
+		margin-left: auto;
+		flex: none;
+		align-self: center;
+		display: inline-flex;
+		border: 0;
+		background: none;
+		color: #c7c7cc;
+		cursor: pointer;
+		padding: 0.1rem;
+		border-radius: 6px;
+	}
+	.ann-refs-copy :global(.action-glyph) {
+		height: 0.75rem;
+	}
+	.ann-refs-copy:hover {
+		color: #fff;
 	}
 	.attachments {
 		list-style: none;
@@ -8600,12 +8623,39 @@ import { isPromptIdle } from "$lib/chrome";
 		color: #6e6e73;
 		padding: 0.15rem;
 		border-radius: 6px;
+		/* On the base (not :hover) so the glow animates symmetrically
+		in and back out, instead of snapping one way. */
+		transition:
+			color 0.15s ease,
+			filter 0.15s ease;
 	}
 	.review-head button.review-pencil :global(.action-glyph) {
 		height: 0.8rem;
 	}
-	.review-head button.review-pencil:hover {
+	/* Per-note copy rides next to the quote in the pencil's style:
+	icon only, no text. margin-left:0 keeps it with the quote while
+	the delete button's auto margin holds the row's right edge. */
+	.review-head button.review-copy {
+		display: inline-flex;
+		align-items: center;
+		margin-left: 0;
+		flex-shrink: 0;
+		color: #6e6e73;
+		padding: 0.15rem;
+		border-radius: 6px;
+	}
+	.review-head button.review-copy :global(.action-glyph) {
+		height: 0.8rem;
+	}
+	.review-head button.review-copy:hover {
 		color: #1c1c1e;
+		color: var(--ink);
+	}
+	/* Hover glows accent-blue instead of going ink: the pencil is small
+	and quiet-gray, so an ink hover read as disappearing. */
+	.review-head button.review-pencil:hover {
+		color: #5a9bf7;
+		filter: drop-shadow(0 0 3px rgba(90, 155, 247, 0.8));
 		text-decoration: none;
 	}
 	/* Annotation popover: collapsed to the pill, expands on hover,
