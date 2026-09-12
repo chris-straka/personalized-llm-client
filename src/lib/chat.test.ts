@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
 	createChatState,
 	activeChat,
+	abortSend,
 	newChat,
 	selectChat,
 	setChatReplyLang,
@@ -26,6 +27,7 @@ import {
 	setPasteFold,
 	buildApiMessages,
 	visibleMessageCount,
+	isSending,
 	type ChatState
 } from "./chat";
 import type { ChatProvider, ChatResult } from "./providers/types";
@@ -286,6 +288,91 @@ describe("chat", () => {
 		// Quiet again: staging works, and the queued text was never lost.
 		stageMessage(state, "staged", [], store);
 		expect(activeChat(state).messages.map((m) => m.content)).toEqual(["first", "reply", "staged"]);
+	});
+
+	it("sends in a fresh chat while another still streams", async () => {
+		const { state, store } = stateWith(freshStore());
+		const resolvers: Array<(result: ChatResult) => void> = [];
+		const gated: ChatProvider = {
+			id: "gated",
+			async chat(): Promise<ChatResult> {
+				throw new Error("unused");
+			},
+			stream(): Promise<ChatResult> {
+				return new Promise<ChatResult>((resolve) => {
+					resolvers.push(resolve);
+				});
+			}
+		};
+		const usage = { prompt: 1, completion: 1, total: 2 };
+		const first = sendMessage(state, gated, "sys", "one", {}, store);
+		await new Promise((r) => setTimeout(r, 20));
+		const originId = state.activeChatId;
+		expect(isSending(state, originId)).toBe(true);
+		// A second send in the same chat still waits for quiet.
+		await sendMessage(state, gated, "sys", "blocked", {}, store);
+		expect(activeChat(state).messages.map((m) => m.content)).toEqual(["one", ""]);
+		// But a fresh chat sends concurrently: both stream at once.
+		newChat(state, store);
+		const awayId = state.activeChatId;
+		const second = sendMessage(state, gated, "sys", "two", {}, store);
+		await new Promise((r) => setTimeout(r, 20));
+		expect(state.sending).toBe(true);
+		expect(state.sendingChatIds).toHaveLength(2);
+		expect(isSending(state, originId)).toBe(true);
+		expect(isSending(state, awayId)).toBe(true);
+		resolvers[0]?.({ content: "r1", usage });
+		await first;
+		// Origin lands with its own reply; the away stream carries on.
+		expect(state.chats.find((c) => c.id === originId)?.messages.map((m) => m.content)).toEqual([
+			"one",
+			"r1"
+		]);
+		expect(isSending(state, originId)).toBe(false);
+		expect(state.sending).toBe(true);
+		expect(state.sendingChatId).toBe(awayId);
+		resolvers[1]?.({ content: "r2", usage });
+		await second;
+		expect(state.sending).toBe(false);
+		expect(state.sendingChatId).toBeNull();
+		expect(state.chats.find((c) => c.id === awayId)?.messages.map((m) => m.content)).toEqual([
+			"two",
+			"r2"
+		]);
+	});
+
+	it("dropping one chat aborts only its own stream", async () => {
+		const { state, store } = stateWith(freshStore());
+		const aborted: string[] = [];
+		const hanging = (tag: string): ChatProvider => ({
+			id: tag,
+			async chat(): Promise<ChatResult> {
+				throw new Error("unused");
+			},
+			stream(_m, _cb, opts): Promise<ChatResult> {
+				return new Promise<ChatResult>((_resolve, reject) => {
+					opts?.signal?.addEventListener("abort", () => {
+						aborted.push(tag);
+						reject(new DOMException("aborted", "AbortError"));
+					});
+				});
+			}
+		});
+		const originId = state.activeChatId;
+		const first = sendMessage(state, hanging("one"), "sys", "one", {}, store);
+		await new Promise((r) => setTimeout(r, 20));
+		newChat(state, store);
+		const awayId = state.activeChatId;
+		const second = sendMessage(state, hanging("two"), "sys", "two", {}, store);
+		await new Promise((r) => setTimeout(r, 20));
+		deleteChat(state, originId, store);
+		await first;
+		expect(aborted).toEqual(["one"]);
+		expect(isSending(state, awayId)).toBe(true);
+		expect(state.sending).toBe(true);
+		abortSend(awayId);
+		await second;
+		expect(state.sending).toBe(false);
 	});
 
 	it("reruns from any user message, deleting everything after it", async () => {

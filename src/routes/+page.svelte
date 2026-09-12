@@ -27,6 +27,7 @@
 		sendMessage,
 		setPasteFold,
 		visibleMessageCount,
+		isSending,
 		type ChatMsg,
 		type ChatId,
 		type ChatMsgId
@@ -777,8 +778,10 @@ import { isPromptIdle } from "$lib/chrome";
 	// and stage — but only after doSend/stage already emptied the
 	// composer. Gating here keeps the button dead AND the draft intact,
 	// so Enter during Thinking is a no-op instead of a lost message.
+	// Per-chat lock: a reply streaming in another chat never deadens
+	// this composer's send — only this chat's own stream gates it.
 	const canSubmit = $derived(
-		!chatState.sending && (hasText || attachments.length > 0 || annotations.length > 0)
+		!isSending(chatState) && (hasText || attachments.length > 0 || annotations.length > 0)
 	);
 
 	function toggleSidebar(): void {
@@ -5778,7 +5781,7 @@ import { isPromptIdle } from "$lib/chrome";
 					{/if}
 				</article>
 			{/each}
-			{#if chatState.sending && chatState.activeChatId === chatState.sendingChatId}
+			{#if isSending(chatState)}
 				<p class="sending" role="status" aria-label="Waiting for a reply">
 					Thinking<span class="tdots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
 				</p>
