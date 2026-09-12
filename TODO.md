@@ -1,235 +1,247 @@
-# Ccez Studio — TODO
+# Ccez Studio — TODO (single source of truth)
 
-Spec: `README.md`. Full plan: `PLAN.md` (`AI.md`/`AI2.md` merged then deleted).
+Merged 2026-09-12 from `PROMPT.md` + `PROMPT2.md` (raw request logs) +
+`PLAN.md` (decisions/stages) + `PLAN2.md` (working pile) + `TODO.md`.
+Those files are deleted; history lives in git. Done items were dropped —
+what's below is all remaining work. Spec is `README.md`; agent handoff
+(commands, gates, architecture) is `AGENTS.md`.
 
-## Amendments (all folded into PLAN.md, kept here for history)
+## Goal + constraints
 
-- **A1.** Reading aids (pinyin / furigana / tashkeel) default OFF (Stage 5).
-- **A2.** Fenced-code input box in the prompt (Stage 2): typing ```lang + Enter
-  opens an inline code editor with auto-closed fence, language label, Collapse +
-  Copy. Run button = stretch goal. Spec: the two `imgs/*shiftenter*.png`.
-- **A3.** All-in on Tauri, no Kotlin, no middle path. Stage 0 starts with `git
-  init` + committing the current tree as insurance (not a git repo yet). No
-  Android target yet — mobile is Tauri too, at its own milestone.
-- **A4.** Voice engines: Web Speech first, then the small AVSpeech Rust
-  bridge (objc2, zero ObjC/Swift — both evaluated and rejected) ships as a
-  macOS-only settings toggle, web stays default/fallback.
-- **A6.** Web SpeechSynthesis voices verified robotic in-browser (Sep 2026).
-  Native AVSpeech bridge (`objc2-avf-audio`, macOS-gated, web stays
-  default/fallback) approved as next voice work. Best quality needs Apple's
-  premium/Siri voices downloaded in System Settings → Accessibility →
-  Read & Speak → System Voice → Manage Voices.
-- **A5.** Voice UX: off by default, read/write normally; toggle on → responses are
-  read aloud while text still streams in; mic input supported but secondary.
+macOS desktop chatbot (BYOK: DeepSeek + Muse Spark): clean chat with
+highlight-to-comment annotation, language-learner reading aids,
+type-then-it-talks voice, vim-flavored prompt editing. Android rides the
+same codebase via the Tauri mobile target.
 
-## Coverage checklist (README bullet → stage)
+- Free forever, offline-first, personal modern devices only, no paid accounts.
+- Every OS supports every feature (macOS/Windows/Linux; Android where mobile).
+- Commit + push when allowed.
 
-### Things I want
+## Standing decisions
 
-- [x] Thinking-level shortcut, hard to hit, default high → S1
-- [x] Model/key shortcut, hard to hit → S1
-- [x] Option-click a message deletes it → S3
-- [x] Code blocks fold, syntax-colored, language label, copy button → S3
-- [x] Whole messages fold → S3
-- [x] Paste >100 chars → `[Pasted content X chars]`; image → `[Pasted an image]` → S3
-- [x] Image compression before send → S3
-- [x] Chinese detect → faint corner hint → shortcut toggles pinyin ruby (OFF default, A1) → S5
-- [x] Japanese furigana, same behavior (OFF default, A1) → S5
-- [x] Arabic tashkeel via keys, same behavior (OFF default, A1) → S5
-- [x] Hover + right-click reads a single word even when aids are off → S5
-- [x] Vim trapped in prompt box; hop out to J/K message scroll → S2
-- [x] Fenced-code input box: Collapse + Copy (Run later, A2) → S2
-- [x] Attachments (images + files) → S3 (with paste-collapse + downscale)
-- [x] Prompt box at bottom → S2
-- [x] Desktop icon → S7
+- OS-native speech/OCR (no paid services). Per-arch DMGs, serialized
+  single-writer release chain (verify -> publish -> prune -> rename).
+- rAF scroll glide; per-chat draft scoping.
+- FTS5 parked (IndexedDB not proven slow). Win/Linux/Android device proof
+  needs real hardware — unit tests + honest unverified notes, never pass claims.
+- P23 (`+page.svelte` component split) stays its own future task.
+- Ghost features: user believes all fixed — verify, then drop this item.
+- Cmd+T tension unresolved: S4 shipped it as translate-lookup (NOT a
+  mini-browser); later requests ask for a single-tab browser window on Cmd+T
+  and renaming research->browser. Decide one direction before building.
 
-### From AI Studio
+## Shipped (condensed — detail in git log)
 
-- [x] Accrued token meter → S2
-- [x] Option+Enter pins prompt to top → S2
-- [x] Cmd+Enter runs prompt + pins → S2
-- [x] Branch from here → S2
-- [x] Copy as markdown / as text → S3
-- [x] Fast delete one/all chats → S2
-- [x] Token estimates for files/images → S3 (needs attachments first)
-- [x] Rerun prompt → S2
-- [x] Error handling with retry → S2
-- [x] Waypoint jump navigation in long chats → S2
-- [x] Thoughts collapsed to faint expandable text, ctrl+O toggle → S3
-- [x] No Sources section / citations unless asked → S3
-- [ ] No app-build/agentic features → non-goal
+S0 scaffold -> S1 providers/keys -> S2 core chat/prompt/vim -> S3 messages/code/
+paste-collapse/thoughts -> S4 annotation/translate -> S5 reading aids (OFF
+default) -> S6 voice (+AVSpeech mac bridge, +Android TTS, +multilingual) ->
+S7 desktop polish/updater/icon/keychain -> R2 chrome -> R3 layout (46rem,
+sidebars) -> R4 behavior (pins->top-posts, header) -> R5 submit -> R6 composer ->
+Batch P (shell detect, traffic geometry, voice bar, readback ranking,
+annotation matching, pills, menus) -> Night3 (tray, langid, scroll glide,
+textai spec, v0.2.2 CI fixes, release pipeline per-arch DMGs). v0.2.5 tag
+cut; release chain outcome still unconfirmed (see Now).
 
-### From ChatGPT desktop app
-- [x] Annotation: select → comment → wrapped into next query (edit/delete), per `imgs/` → S4
-- [x] Voice: type-then-it-talks, streaming word display, on-demand highlight
-  readback, skip midway, clean voice-mode chrome → S6 (download = stretch)
-- [x] Cmd+T translate lookup: cheap helper feeding annotation, NOT a mini-browser → S4
-- [x] Multiple chats, no titles → S2
-- [ ] No cloud sync / sharing / plugins → non-goal
+## Now (in progress)
 
-### Later (not this build)
-- [ ] Cloudflare-domain hosting, model-version bump, code Run button
-- [x] Android phone build (S24): emulator-verified Sep 2026 — `tauri
-  android` debug build, PROCESS_TEXT Annotate alias (cold/warm/in-app
-  verified on Pixel_8a), touch tuning (edge swipes, selection, keyboard
-  reflow). Outstanding on real hardware: signing config, Android
-  Keystore (keyring v3 has no Android backend — in-memory mock only,
-  nothing persists), system TTS inventory, Samsung S24 pass
+- [ ] Annotation draft restore on return is broken — fix first.
+- [ ] `e2e/annotation-chat-scope.e2e.ts` failing — fix.
+- [ ] Confirm v0.2.5 rename/verify/publish outcome (`gh release view v0.2.5`).
 
-### Later: rich rendering, then character components (in this order)
+## Pile: composer
 
-- [ ] LaTeX math rendering in messages (offline, no paid service)
-- [ ] Code rendering in messages (beyond the shipped fold/copy/highlight)
+- [ ] Idle-hide: main prompt hides on inactivity; image bubble must hide too.
+  Click / `i` / Enter / left-click-on-non-button / mobile tap brings it back
+  immediately. Mobile default timeout = never (always visible). Only hide
+  when the prompt (or its backdrop) actually occludes text; the backdrop
+  hiding the text must go away with it.
+- [ ] Composer text overlaps counter pill cluster (padding fix).
+- [ ] Composer code block: typing triple-backtick changes nothing until
+  Shift+Enter commits the block; empty fence assumes text; no nesting;
+  3x Shift+Enter exits. Distinct bg, aligned highlight, lang label
+  left-aligned with text, closer divider. Its copy button fires a toast.
+- [ ] Pasted-text tag: Ctrl+O expands/collapses all text in the tag (Muse
+  Code style) — grey shade, not a code block, no own background.
+- [ ] Image pill <-> `[Pasted image]` tag two-way removal (removing one removes
+  the other).
+- [ ] Paste-image flow: say `[Pasted image]`, no leading newline, cursor one
+  space after.
+- [ ] IMG pill: align with composer, no left/right spill, scroll when many.
+- [ ] Clear attachment pills on send.
+- [ ] Image.png/paperclip icon sizes track font size.
+- [ ] Image cards replace pills: thumbnail preview + footer (tokens,
+  icon copy button, OCR, X).
+- [ ] Icon-only copy buttons everywhere (reuse message-button copy logo).
+- [ ] Sent-message attachment chip above the message, left of annotation marker.
+- [ ] ESC with composer focused unfocuses everything.
+- [ ] Fenced-code input box revival (shelved): fencelang + Shift+Enter
+  auto-close, language bar w/ Collapse/Copy glyphs, per-lang highlight,
+  triple-Shift+Enter exits, Enter inside = newline, Cmd+Enter sends. Parked
+  WebKit/Tauri bugs must be solved first (empty body row has no caret home;
+  block-widget adjacency drops rows).
+## Pile: messages + rendering
+
+- [ ] `$$` display math not rendering — fix.
+- [ ] Inline `$math$` rendering (display fences already work).
+- [ ] Math chrome: no fold/copy/math labels; bar-click folds; body-click
+  copies + toast; chevron + TeX preview.
+- [ ] AI code fences: no copy/fold buttons; language logos if cheap.
+- [ ] Right-click on latex/code folds must never start TTS.
+- [ ] Right-click (even empty space) must never start audio.
+- [ ] Copy toasts: latex copy shows toast; wording is "Copied" everywhere
+  (not "Copied as plain text").
+- [ ] Message with ONLY annotations renders as en-dash + annotation marker
+  above, same font size as text, and stays unfolded. Message copy excludes
+  annotations; each annotation copies on left-click in either overlay
+  (icon-only button, no text).
+- [ ] Thinking text uses the current chat font size.
+- [ ] Code Run button + model-version bump + Cloudflare-domain hosting (later).
 - [ ] Character components overlay for Han text (offline table already in
-  `src/lib/radicals.ts` + unit tests) — returns to the selection menu
-  only after the two above; needs a better name than "Radicals". No UI
-  for it in the release until then (button removed Sep 2026).
+  `src/lib/radicals.ts`): needs a better name than "Radicals"; returns to the
+  selection menu only after LaTeX + code rendering above; no release UI until then.
+  Open question: offline dictionary for radical/stroke/Unihan — what source,
+  how big? (Inspect currently reports unavailable offline.)
 
-## Architecture rules (learned Stage 2)
+## Pile: annotation
 
-- Chat state is a plain object in `$state` with function updates (`src/lib/chat.ts`).
-  Class instances in `$state` never re-rendered — do not use them for UI state.
-- Never mutate a message object in place: Svelte proxy signals capture values on
-  first read, so streaming updates must replace (`map` + local accumulator).
-- Never run `check`/`lint`/`build` during a browser pass: `svelte-kit sync`
-  rewrites watched files and HMR-invalidates the dev session mid-test.
+- [ ] Marker must not split words in half for text selection.
+- [ ] Create-annotation textbox centers over the selection when the selection
+  is smaller than the box; current position for larger selections. Annotate
+  open-button stays at selection end near cursor.
+- [ ] Hovering a previous message's annotation count scales with font size.
+- [ ] Empty annotations get "?" inserted so the AI knows I'm confused.
+- [ ] Click-hold off-chat then drag into chat must not highlight above the
+  current line; dragging off-screen must not highlight everything above.
+- [ ] Overlay edit: save button hover-in must animate like hover-out; Enter
+  saves (no newline); textarea styling pass (near-black — confirm or fix).
+- [ ] Annotation pencil hover: glow color, not disappear.
+- [ ] Math annotation: normalize selection to whole equation; clear stale wash.
+- [ ] Undecided: new chats show one past annotation + AI answer (no expletives,
+  trash-can delete, disappears after first message, "What can I do for you?"
+  + 3s pause). Decide/build or drop.
 
-## Stages
-- [x] S0 clean slate (+A3): git init + insurance commit, wipe, desktop-only
-  Tauri+Svelte+TS scaffold, Vitest, lint/format — all checks green
-- [x] S1 providers (DeepSeek + Muse Spark checkpoint), keys, settings page, shortcuts
-  — Muse verified live (models + chat + SSE); DeepSeek adapter pending a key.
-  Shortcuts move to S2 with the prompt box they operate.
-- [x] S2 core chat + prompt box + fenced-code input (A2) — streaming,
-  rerun/branch/retry, pins, waypoints, vim + J/K, shortcuts, key eject UI.
-  Shortcuts needed capture-phase listener (CodeMirror swallows combos).
-- [x] S3 messages/code rendering, paste collapse, thoughts toggle —
-  markdown + sanitize + Shiki (dual light/dark), code fold/copy/label,
-  message fold, copy MD/text, paste-collapse markers (click to expand),
-  attachments with downscale + token estimates, thoughts details + ctrl+O,
-  Sources stripped unless asked. Paste-marker clicks needed the same
-  mousedown guard as fence bars (vim swallowed every other click).
-- [x] S4 annotation + translate helper — select → Annotate menu (Add to
-  chat removed), cursor-anchored ChatGPT-style pill (Enter saves, Esc
-  cancels, auto-grows, 500ms anti-double-send guard), numbered badges
-  on quotes, review panel (edit/save/delete,
-  delete-all pill), annotations wrap into next query, drafts survive failed
-  sends, Cmd+T lookup feeding annotation, translate-target setting. Badge
-  marks needed a synchronous read in the render effect (async-only reads
-  never subscribe).
-- [x] S5 reading aids (default OFF, A1)
-- [x] S6 voice mode (+A4 bridge policy, +A6 multilingual) — header toggle,
-  auto-read replies with live voice bar + Skip, per-message Speak,
-  highlight-to-speak on demand, guarded mic dictation, voiceLang setting,
-  script-wide TTS locales, tashkeel folded into generic model-aid path
-- [x] S7 desktop polish, updater, icon, keychain keys (cold-start +
-  installer-run stay manual on real hardware)
-- [x] R2 post-install polish: overlay titlebar, minimalist header, clean
-  pills/badges, reply-language menus + clear, real thinking levels,
-  .env prefill, no translate-target, shortcut/vim maps, editor cursor,
-  prompt flash fix
-- [x] R3 layout (DeepSeek-web rhythm): settings moved to right sidebar
-  panel (/settings route deleted), collapsible chat sidebar (persisted),
-  centered 46rem column, composer send button, shortcut-map dark contrast
-  fixed — pixel-verified light+dark at 1600px after the a11y-snapshot miss
-- [x] R4 behavior: cursor root cause fixed, pins → top-posted messages,
-  header rework (new chat/chats/voice), animated zero-space sidebars,
-  Muse default + empty prompt + .env backfill, Fira Code stack
+## Pile: reading aids + voice
 
-## Batch P (Sep 2026): polish + voice + annotations + layout
+- [ ] Pinyin/furigana: script-segment detection (no pinyin on Japanese words).
+- [ ] Pinyin hover flicker: reserve annotation space up front (visibility, not
+  layout); if unfixable, drop the on-hover-show-pinyin tradeoff deliberately.
+- [ ] Furigana offset further left on macOS desktop.
+- [ ] Message-button icons scale with the text-size setting (pill buttons
+  already do; logos/icons don't).
+- [ ] Per-segment TTS voices for mixed-language messages (same-voice fallback
+  today).
+- [ ] Single-kanji inspect: hovering/selecting exactly one CJK char shows an
+  Inspect button -> modal with mdbg-like info (stroke order, radical, unihan;
+  skip Cantonese).
+- [ ] Voice readback: per-chat setting, not global.
+- [ ] Thinking-level change mid-thinking applies to next request (confirm/ensure).
+- [ ] Mic button on macOS: user doesn't care — NO ACTION.
 
-Root causes nailed before implementing: `tauriBackendAvailable()` checks the
-Tauri **v1** global (`__TAURI__`); v2 exposes `__TAURI_INTERNALS__` — so every
-tauri-gated branch (traffic clearance, Keychain note/secrets, shell UI) was
-dead in the real app. Swift probe of `AVSpeechSynthesisVoice.speechVoices()`
-(207 voices on this Mac): qualities are 1/2/3 as mapped; Siri personas
-(`com.apple.eloquence.*`, 112 of them) report quality **1**, so the tier-2/3
-inventory omits them and `pick_voice` ties them with Samantha (registry order
-wins → robotic woman). Streaming render already exists (SSE→tokens→replaceReply
-in `chat.ts`/`openai-compat.ts`, mock streams too); instant-paste complaints
-are tiny mock replies + TTS starting at completion by design.
+## Pile: scroll + navigation + chrome
 
-- [x] P1 shell detect: check `__TAURI_INTERNALS__` (keep `__TAURI__` fallback).
-  Fixes traffic clearance, Keychain branch, all tauri-gated UI at once.
-  Verify: stub the global in Playwright, assert `data-shell="tauri"`.
-- [x] P2 traffic geometry proof (user demand): with stubbed shell, assert the
-  header Chats button starts right of the light zone (x≥80) with the sidebar
-  open AND closed. Native light pos (20,20) stays user-verified.
-- [x] P3 prompt hover: transition the outline on in AND out (border-color
-  transition on `.prompt`, respect reduced-motion).
-- [x] P4 window focus: refocus takes you back to the prompt (pill box if the
-  annotate pill is open, else the editor) — but never steal focus from a field
-  that already holds it. Tab then continues from the prompt.
-- [x] P5 composer landing: empty→first-message animates down (fade+slide
-  keyframe on a wrapper, no editor remount) instead of snapping.
-- [x] P6 voice-bar dark theme: dark bg/border/text + visible Skip (button
-  exists, just invisible). Dismisses on end (already wired — verify live).
-- [x] P7 speaking message icon: pulsing dot on the message being read
-  (`speakingId`), cleared on end/error/stop.
-- [x] P8 selection speak highlight: `speakingSelection` state tints that
-  message's `::selection` amber while talking, restores after. Default
-  `::selection` becomes a pretty indigo in both themes.
-- [x] P9 pick_voice ties defer to the user's System Voice
-  (`voiceWithLanguage`) — quality still wins outright. Swift-replicated
-  ranking verified the tie path picks the system default.
-- [x] P10 Siri inventory tier: `com.apple.eloquence.*` voices listed as Siri
-  (they're quality 1, previously invisible). Note that say-exclusive Siri
-  voices (Aman/Aru) can't appear — AVSpeech doesn't expose them.
-- [x] P11 open_voice_settings Rust command (`open` CLI, macOS-only) replaces
-  the opener-plugin deep-link (scope guessing was the failure); error stays
-  persistent (no 5s clear) so it can be copied. Remove the unused capability
-  scope entry. No user permission needed — opening Settings needs no consent.
-- [x] P12 annotation highlight only while a textbox is open: clear
-  `highlightAnnId` on pill save/cancel + review save/cancel.
-- [x] P13 badge matching across nodes: whitespace-stripped + typographic-fold
-  matcher, multi-node `<mark>` wrap, one badge. Fixes select-all, full-line,
-  and reshaped-text misses. Cross-message selections stay review-only.
-- [x] P14 composer pills: merge count + × into ONE pill; keep attach/mic
-  below the prompt (user unsure — no move).
-- [x] P15 system-voices blurb spacing: vertical margins around the note +
-  disclosure so tiers don't crowd.
-- [x] P16 streaming/voice timing: no change — text already streams for real
-  providers (mock replies are 4 words/60ms, hence instant); TTS starts at
-  completion because it consumes whole sentences. Progressive TTS is future
-  work, not this batch.
-- [x] P17 lang menus open UP over the composer (`bottom: 100%`), not down.
-- [x] P18 settings × + Settings ⌘ hint vertical centering.
-- [x] P19 mic errors mapped to friendly text (service-not-allowed → needs
-  Chrome/Safari, etc.); Mic stays (works in real browsers; user rarely uses).
-- [x] P20 toasts already top-center — no change, tell user.
-- [x] P21 custom-provider form: real `<form>` + `required` (native validation,
-  no sticky errors) + URL-format check that clears on input; spacing below
-  the Add block.
-- [x] P22 rename Browser voices → Web voices everywhere in UI copy.
-- [ ] P23 +page.svelte split into components is still its own future task
-  (AGENTS.md) — not this batch.
+- [ ] j/k hold: smooth scrolling must start immediately, no initial tiny jump
+  (d/u same; d/u scroll faster).
+- [ ] `gg` with nothing selected -> top; `G` (shift+g) with nothing selected
+  -> bottom.
+- [ ] `z` scrolls to top of hovered message; `Z` to bottom.
+- [ ] Shift+Cmd+Plus/Minus adjusts chat width.
+- [ ] Chat width configurable past 80rem.
+- [ ] Own messages stop drifting right past AI width.
+- [ ] Fresh-install defaults: own-message background OFF; message buttons
+  hover-only for both me and AI.
+- [ ] Option for message buttons scaling with font size (verify current state;
+  create-annotation box scaling with font size also unverified — check both).
+- [ ] Sliders: dragging up resets to default — decide keep/fix. Only the
+  inner buttons (100%, 36 rem, 6s) reset — label clicks must not. Inactivity
+  slider tops at 10s; max reads "never" (never hides).
+- [ ] Sidebar: animated slide + opaque background (no see-through).
+- [ ] Header: remove top-right buttons; rebrand Ccez Studio -> Ccez LLM
+  (UI strings only).
+- [ ] Language buttons: nudge down + fade until hover (mac); submenu
+  languages alphabetical; submenus not jammed against the prompt.
+- [ ] Fullscreen ESC: tap blurs/dismisses only; 2s hold exits.
+- [ ] Remove screenshot-to-chat (Shot); keep paste + OCR.
+- [ ] Export: icon-only button per sidebar chat row, left of delete; drop
+  header button.
+- [ ] Idle-hide: skip when chat empty or content shorter than viewport.
+- [ ] Settings checkbox gap inconsistency (find + fix).
+- [ ] Remove CJK font + lesson-audio settings sections (lesson-audio froze app).
+- [ ] Keychain re-prompt: stable self-signed identity for dev rebuilds.
+- [ ] Updater in dev: explain unavailable instead of fetch error.
 
-## Things I'm thinking about but are undecided on
+## Pile: search + sideview
 
-- [ ] For new chats, it'd be cool if it would show me one thing that I have previously annotated and the answer that the AI chatbot gave for it, with the option to delete it and remove it from my history by clicking a trash can icon right beside. After the first msg in a new chat, this should disappear. It should not show me things that contain an expletive. It should say the usual "What can I do for you?" and then after a 3s pause it should 
-- [ ] (moved to ## Shelved: code editor / code blocks in the prompt)
+- [ ] Search palette: DOM focus follows highlight; ESC moves input->list;
+  j/k navigate results.
+- [ ] Cmd+P: native focus order must match highlighted message; Tab/Shift-Tab
+  must match arrow-key target; ESC then j/k/arrows scroll results.
+- [ ] Sideview -> plain Browser: rename research->browser; shortcut-only
+  (drop toggle button); no Google Translate framing anywhere near it; better
+  error handling; edge-drag resize with memorized size; Cmd+T from the prompt
+  unfocuses into the browser search bar; single tab preferred (if tabs, then
+  Shift+Cmd+[ / ] switches; note Shift+Cmd+H/L taken).
 
-## Shelved: code editor / code blocks in the prompt
+## Pile: sending + OCR
 
-Shelved Sep 2026 to keep focus on language learning. The base auto-close +
-language bar were also removed, so ``` in the prompt is plain text again.
-Rendered message code blocks (fold, copy, highlight) are a separate shipped
-feature and stay.
+- [ ] Per-chat concurrent sending (global sending lock -> per-chat) so one
+  thinking chat doesn't block asking in another.
+- [ ] OCR: investigate Chinese-paragraph miss; errors surface as red toasts.
 
-Revival spec for the prompt composer:
+## Pile: platform + release (needs hardware)
 
-- ```lang + Shift+Enter auto-closes the fence.
-- Backticks hidden behind a language bar with Collapse/Copy icon buttons
-  (reuse the message-button glyphs, not text buttons).
-- Per-language syntax highlighting inside the block.
-- Triple-Shift+Enter exits the block; plain Enter inside code is always a
-  newline, never an exit and never a send (⌘+Enter sends from anywhere).
-- Cursor and typed text must stay visible in the block on all engines.
+- [ ] Win/Linux/Android device proof for every shipped feature.
+- [ ] Samsung S24 pass (Annotate overflow ordering, tap-to-reveal ghost).
+- [ ] System TTS ear-check on real hardware.
+- [ ] Android: signing config / Play-vs-self-sign decision; share intent
+  (ACTION_SEND text -> chat draft); Keystore fallback for API keys (keyring
+  v3 = in-memory mock on Android, nothing persists). Verify current status.
+- [ ] On-device Gemma via MediaPipe LLM Inference (sanctioned Kotlin
+  exception); provider gating contract already ships + unit-tested.
 
-Parked bugs (WebKit/Tauri): the empty body row renders no div (caret has
-nowhere to land, cursor invisible, typing unreliable) and block-widget
-adjacency drops rows — the decoration approach needs a rethink before
-revival. Bisect notes: only ONE block widget per fence survives; any
-replace starting where the body mark ends drops the body row; an empty
-line after a bar block renders only when its break carries a decoration
-boundary.
+## Pile: input + sidebar + shortcuts + extras (from PROMPT3)
+
+- [ ] Remove the Mac menu-bar logo entirely (doesn't look good, not wanted).
+- [ ] Submit button: drop pinned language buttons from the top bar; replace
+  the submit arrow with the emoji, centered vertically + horizontally.
+- [ ] Own-message background breaks at large font sizes — fix.
+- [ ] Shortcuts modal: first entry is "Shortcuts show/hide" ("Toggle shortcuts
+  menu"); fold new keyboard/right-click tricks in pithy, no paren spam.
+- [ ] Middle-click opens the shortcuts modal.
+- [ ] Settings checkboxes: text highlightable without toggling; click still
+  toggles.
+- [ ] Cmd+F finds text in the current chat, cycling hits like a browser.
+- [ ] Clicking a chat in the sidebar closes the sidebar. Cmd+Shift+H opens it;
+  j/k then starts from the current chat, not the top.
+- [ ] Double-tap on non-button chat-sidebar areas closes it. Double-tap on the
+  settings-sidebar top expands the window like the main top bar.
+- [ ] Main chat top shows traffic lights and nothing else; prompt/backdrop must
+  never cut off top messages (only window bounds clip text).
+- [ ] Settings menu shows the build version (or "dev" in dev).
+- [ ] Annotations are leaking across chats — each chat (incl. its prompt) owns
+  its annotations. (Related: annotation-scope e2e under Now.)
+- [ ] LaTeX annotation behavior: selecting equations double-highlights and
+  stale highlights persist. Decide the interaction (partial-equation highlight
+  would help) or constrain it deliberately.
+- [ ] Selection: never highlight bullet points (Ctrl+A includes them today;
+  mid-text leftward drags eat text but leave bullets). Lean on native web
+  selection behavior where possible.
+- [ ] langid dead code (MIN_WORDS/MIN_SCORE/STOP_WORDS/is_cjk/
+  is_latin_word_char/identify_lang_offline): remove or wire up — decide, don't
+  carry warnings.
+- [ ] Android: voices button needs top/bottom spacing; system-voices auto
+  element missing at startup; "build release" should read "Version";
+  one-finger double-tap opens the sidebar when the chat is empty.
+- [ ] Offline AI fallback — DO LAST: when offline, Gemma becomes its own
+  settings option replacing the DeepSeek/Muse bubbles; auto-switch back on
+  reconnect. Android via MediaPipe; Mac via the user's existing Ollama (audit
+  installs, pick the right model for an M4 mini, remove cruft, wire in).
+
+## Non-goals
+
+- No app-build/agentic features. No cloud sync / sharing / plugins.
+
+## Verify (per AGENTS.md)
+
+`bun run check` + `bun run test` + `cargo check/test` + focused e2e per area;
+full suite before push. Device-only paths: unit tests + honest unverified
+notes, never pass claims.
