@@ -12,7 +12,31 @@ on:
       - main
   pull_request:
 
+# A newer push to the same ref supersedes the older run: the old jobs
+# are cancelled instead of burning three OS runners on stale code.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Frontend unit gate (colocated Vitest, no Tauri build): fast signal
+  # while the Rust jobs compile. The bun install cache below is keyed by
+  # bun.lock, so dependency-only reruns skip the registry.
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - name: Cache bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - run: bun run test
+
   rust-macos:
     runs-on: macos-latest
     defaults:
@@ -21,6 +45,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
       - run: cargo check --locked
       - run: cargo test --locked
 
@@ -47,6 +74,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
       - run: cargo check --locked --target x86_64-unknown-linux-gnu
 
   rust-windows:
@@ -62,4 +92,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      # Both matrix legs share one cache entry: the target dirs differ
+      # per leg, the registry does not, and separate keys would evict
+      # each other on every other push.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+          shared-key: "windows"
       - run: cargo check --locked --target ${{ matrix.target }}
