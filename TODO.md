@@ -64,8 +64,11 @@ cut; release chain outcome still unconfirmed (see Now).
       (Confirmed Sep 2026: DRAFT by github-actions, all per-arch assets present
       + latest.json; verify -> publish -> prune -> rename chain NOT run yet.
       Publish is a deliberate release action — still pending an explicit go.)
-- [ ] Review + resolve the moderate Dependabot alert on the default branch
-      (flagged at push time, 2026-09-12).
+- [x] Review + resolve the moderate Dependabot alert on the default branch
+      (flagged at push time, 2026-09-12). (Triaged on work/stream-chrome2:
+      glib RUSTSEC-2024-0429 via tauri->gtk 0.18 — no safe solo bump, solver
+      rejects, upstream not on gtk 0.9; documented in Cargo.toml, Linux-only,
+      no app code touches glib. Cargo 59/59 green. Revisit on Tauri gtk-0.9.)
 
 ## Pile: composer
 
@@ -286,33 +289,48 @@ cut; release chain outcome still unconfirmed (see Now).
 
 ## Pile: scroll + navigation + chrome
 
-- [ ] j/k hold: smooth scrolling must start immediately, no initial tiny jump
-      (d/u same; d/u scroll faster).
-- [ ] `gg` with nothing selected -> top; `G` (shift+g) with nothing selected
-      -> bottom.
-- [ ] `z` scrolls to top of hovered message; `Z` to bottom.
-- [ ] Shift+Cmd+Plus/Minus adjusts chat width.
+- [x] j/k hold: smooth scrolling must start immediately, no initial tiny jump
+      (d/u same; d/u scroll faster). (Done on work/stream-chrome2:
+      scrollkeys e2e pins JK/DU glide velocities with no discrete jump.)
+- [x] `gg` with nothing selected -> top; `G` (shift+g) with nothing selected
+      -> bottom. (scrollkeys e2e green.)
+- [x] `z` scrolls to top of hovered message; `Z` to bottom.
+      (scrollkeys e2e green.)
+- [x] Shift+Cmd+Plus/Minus adjusts chat width. ("shift-meta-plus widens
+      the chat column" chrome e2e green.)
 - [ ] Chat width configurable past 80rem.
 - [ ] Own messages stop drifting right past AI width.
 - [ ] Fresh-install defaults: own-message background OFF; message buttons
       hover-only for both me and AI.
 - [ ] Option for message buttons scaling with font size (verify current state;
       create-annotation box scaling with font size also unverified — check both).
-- [ ] Sliders: dragging up resets to default — decide keep/fix. Only the
+- [x] Sliders: dragging up resets to default — decide keep/fix. Only the
       inner buttons (100%, 36 rem, 6s) reset — label clicks must not. Inactivity
       slider tops at 10s; max reads "never" (never hides).
+      (Decided + done on work/stream-chrome2: drag-up resets, label clicks
+      keep ("chat-width label text keeps the value" e2e), idle tops at 10s
+      with "never"; settings-panel e2e green.)
 - [ ] Sidebar: animated slide + opaque background (no see-through).
-- [ ] Header: remove top-right buttons; rebrand Ccez Studio -> Ccez LLM
-      (UI strings only).
-- [ ] Language buttons: nudge down + fade until hover (mac); submenu
+- [x] Header: remove top-right buttons; rebrand Ccez Studio -> Ccez LLM
+      (UI strings only). (Done on work/stream-chrome2; "top bar shows text"
+      chrome e2e green. Residual: one "Ccez Studio" in the sleep-block
+      reason string — system-facing, not UI copy.)
+- [x] Language buttons: nudge down + fade until hover (mac); submenu
       languages alphabetical; submenus not jammed against the prompt.
-- [ ] Fullscreen ESC: tap blurs/dismisses only; 2s hold exits.
-- [ ] Remove screenshot-to-chat (Shot); keep paste + OCR.
-- [ ] Export: icon-only button per sidebar chat row, left of delete; drop
-      header button.
-- [ ] Idle-hide: skip when chat empty or content shorter than viewport.
+      ("empty-state language buttons sit clear of the hero" e2e green.)
+- [x] Fullscreen ESC: tap blurs/dismisses only; 2s hold exits. (Tap + hold
+      dismissal pinned by scrollkeys Escape e2e, green.)
+- [x] Remove screenshot-to-chat (Shot); keep paste + OCR.
+      ("screenshot-to-chat is gone, paste still takes images" e2e green;
+      one history comment still mentions Shot.)
+- [x] Export: icon-only button per sidebar chat row, left of delete; drop
+      header button. ("sidebar row export downloads markdown" e2e green.)
+- [x] Idle-hide: skip when chat empty or content shorter than viewport.
+      ("empty chat never hides" + "short thread keeps the composer" e2e green.)
 - [ ] Settings checkbox gap inconsistency (find + fix).
-- [ ] Remove CJK font + lesson-audio settings sections (lesson-audio froze app).
+- [x] Remove CJK font + lesson-audio settings sections (lesson-audio froze app).
+      (Done on work/stream-chrome2: "settings show no study-fonts or
+      lesson-audio sections" voice-data e2e green.)
 - [ ] Keychain re-prompt: stable self-signed identity for dev rebuilds.
   (Decision Sep 2026, stream-platform: ad-hoc dev binaries change
   identity every rebuild, so the Keychain ACL re-prompts. Fix is a
@@ -327,8 +345,9 @@ cut; release chain outcome still unconfirmed (see Now).
 
 ## Pile: search + sideview
 
-- [ ] Search palette: DOM focus follows highlight; ESC moves input->list;
-      j/k navigate results.
+- [x] Search palette: DOM focus follows highlight; ESC moves input->list;
+      j/k navigate results. (Done on work/stream-chrome2: "ESC moves focus",
+      "j/k walk results", "Enter jumps" search e2e green.)
 - [ ] Cmd+P: native focus order must match highlighted message; Tab/Shift-Tab
       must match arrow-key target; ESC then j/k/arrows scroll results.
 - [x] Sideview -> plain Browser: rename research->browser; shortcut-only
@@ -388,7 +407,9 @@ cut; release chain outcome still unconfirmed (see Now).
 
 ## Pile: input + sidebar + shortcuts + extras (from PROMPT3)
 
-- [ ] Remove the Mac menu-bar logo entirely (doesn't look good, not wanted).
+- [x] Remove the Mac menu-bar logo entirely (doesn't look good, not wanted).
+      (Done in Wave 0.1 checkpoint: tray builds only on Windows/Linux now;
+      the Dock owns Show/Quit on macOS.)
 - [ ] Submit button: drop pinned language buttons from the top bar; replace
       the submit arrow with the emoji, centered vertically + horizontally.
 - [ ] Own-message background breaks at large font sizes — fix.
@@ -397,7 +418,9 @@ cut; release chain outcome still unconfirmed (see Now).
 - [ ] Middle-click opens the shortcuts modal.
 - [ ] Settings checkboxes: text highlightable without toggling; click still
       toggles.
-- [ ] Cmd+F finds text in the current chat, cycling hits like a browser.
+- [x] Cmd+F finds text in the current chat, cycling hits like a browser.
+      (Done on work/stream-chrome2: "Ctrl+F finds text, Enter cycles hits"
+      search e2e green.)
 - [ ] Clicking a chat in the sidebar closes the sidebar. Cmd+Shift+H opens it;
       j/k then starts from the current chat, not the top.
 - [ ] Double-tap on non-button chat-sidebar areas closes it. Double-tap on the
@@ -415,12 +438,15 @@ cut; release chain outcome still unconfirmed (see Now).
       attachments untouched; deleting the active chat lands on its neighbor
       with that neighbor's drafts restored and the deleted id pruned from
       `ccez-studio-annotations-v1`.
-- [ ] LaTeX annotation behavior: selecting equations double-highlights and
+- [x] LaTeX annotation behavior: selecting equations double-highlights and
       stale highlights persist. Decide the interaction (partial-equation highlight
       would help) or constrain it deliberately.
-- [ ] Selection: never highlight bullet points (Ctrl+A includes them today;
+      (Decided on work/stream-chrome2: partial-equation pick snaps to the
+      whole equation ("partial equation pick snaps" latex e2e green).)
+- [x] Selection: never highlight bullet points (Ctrl+A includes them today;
       mid-text leftward drags eat text but leave bullets). Lean on native web
-      selection behavior where possible.
+      selection behavior where possible. (Done on work/stream-chrome2:
+      "list-item selection excludes the bullet marker" sel-menu e2e green.)
 - [x] langid dead code (MIN_WORDS/MIN_SCORE/STOP_WORDS/is_cjk/
       is_latin_word_char/identify_lang_offline): remove or wire up — decide, don't
       carry warnings.
