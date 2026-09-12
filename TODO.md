@@ -124,7 +124,12 @@ cut; release chain outcome still unconfirmed (see Now).
   blocks apart. Heads strip from quotes like math. Unit-locked in
   `render.test.ts` + `annotations-dom.test.ts`; behavior pinned in
   `message-code.e2e.ts`, `textai.e2e.ts` assertion updated.)
-- [ ] Right-click on latex/code folds must never start TTS.
+- [x] Right-click on latex/code folds must never start TTS.
+  (Done Sep 2026 on work/stream-annotation2: the desktop `contextmenu`
+  speak path (selection + word-under-cursor, web + native) is removed —
+  speech starts only from explicit speak buttons; desktop falls through
+  to the native menu. Pinned by fold-bar silence specs in `latex.e2e.ts`
+  + `message-code.e2e.ts`.)
 - [ ] Right-click (even empty space) must never start audio.
 - [ ] Copy toasts: latex copy shows toast; wording is "Copied" everywhere
       (not "Copied as plain text").

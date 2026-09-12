@@ -107,6 +107,14 @@ test("code body click copies with a toast", async ({ page }) => {
 	expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('print("hi")');
 });
 
+/** Right-clicking the code fold bar never starts audio. */
+test("right-click on the code fold bar stays silent", async ({ page }) => {
+	const bar = page.locator(".ccez-code-head").first();
+	await bar.click({ button: "right" });
+	await page.waitForTimeout(500);
+	await expect(page.locator("article.speaking, article.speaking-sel")).toHaveCount(0);
+});
+
 /** Thoughts grow with the message font scale instead of stranding at 0.8rem. */
 test("thoughts scale with font size", async ({ page }) => {
 	const base = await page.evaluate(() =>

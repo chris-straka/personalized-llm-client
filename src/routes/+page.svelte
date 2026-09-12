@@ -160,7 +160,6 @@
 		LOCAL_AID_ADD_TITLE,
 		MODEL_AIDS,
 		MODEL_AID_FOR_SCRIPT,
-		extractWordAt,
 		speakWord,
 		ttsLangFor,
 		runModelAid,
@@ -4825,7 +4824,7 @@ import { isPromptIdle } from "$lib/chrome";
 			if (Date.now() - touchMenuAt < 800) return;
 			// Ignore clicks that start inside the prompt, popups, or buttons —
 			// only freshly selected message text summons the menu.
-			if (event.button === 2) return; // right-click reads aloud instead
+			if (event.button === 2) return; // right-click never summons the menu (or audio)
 			// Non-element targets (synthetic document/window events) carry no
 			// selection UI — real mouse-ups always target an Element.
 			const target = event.target instanceof Element ? event.target : null;
@@ -4870,62 +4869,23 @@ import { isPromptIdle } from "$lib/chrome";
 			}
 			onSelectEnd(event, event.clientX);
 		};
-		// Right-click a word in a message to hear it — even with aids off.
-		// Capture phase + preventDefault pre-empts the native context menu.
+		// Right-click never starts audio: the desktop speak path that
+		// lived here (selection reads aloud, word under cursor) is gone
+		// by decision — speech starts only from explicit speak buttons.
+		// Capture stays registered for the Android long-press branch
+		// below; desktop falls through to the native context menu.
 		const onContextMenu = (event: MouseEvent) => {
 			const target = event.target as HTMLElement | null;
 			// Android long-press fires contextmenu mid-hold, before
 			// touchend: summon the menu off the live selection without
 			// consuming the event, so the native callout (Copy) still
-			// appears. Desktop right-click keeps the speak path below.
+			// appears.
 			if (androidUI && target?.closest(".messages .rendered")) {
 				if (currentQuote()) {
 					placeSelMenu(event.clientX);
 					touchMenuAt = Date.now();
 				}
-				return;
 			}
-			const body = target?.closest(".messages .rendered");
-			if (!body || target?.closest("button, input, textarea, a, summary")) return;
-			// Highlighted text wins over the word under the cursor: a
-			// right-click with a live message selection reads the whole
-			// selection (same per-quote language as the sel-menu button).
-			const quoted = currentQuote();
-			if (quoted) {
-				event.preventDefault();
-				void speakQuote(quoted.quote, quoted.messageId);
-				return;
-			}
-			let range: Range | null = null;
-			try {
-				if (typeof document.caretRangeFromPoint === "function") {
-					range = document.caretRangeFromPoint(event.clientX, event.clientY);
-				}
-			} catch {
-				range = null;
-			}
-			const node = range?.startContainer;
-			if (!node || node.nodeType !== Node.TEXT_NODE || !body.contains(node)) return;
-			const word = extractWordAt(node.textContent ?? "", range?.startOffset ?? 0);
-			if (!word) return;
-			event.preventDefault();
-			const fallbackLang = settings.voiceLang?.trim() || "en-US";
-			const wordLang = effectiveSpeechLang(ttsLangFor(word, fallbackLang), webVoices());
-			if (!speechAttemptable(wordLang)) {
-				setVoiceError("No voice for this language.");
-				return;
-			}
-			if (settings.voiceEngine === "native") {
-				speakNativeWord(
-					word,
-					wordLang,
-					(message) => {
-						flashToast(`${friendlyNativeError(message)} (web voice instead)`);
-						speakWord(word, fallbackLang);
-					},
-					settings.nativeVoiceId
-				);
-			} else speakWord(word, fallbackLang);
 		};
 		// Holding Option morphs the send button into "Add +" (stage).
 		const onAlt = (event: KeyboardEvent) => {

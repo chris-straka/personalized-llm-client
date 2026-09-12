@@ -96,3 +96,21 @@ test("composer does not render latex", async ({ page }) => {
 	await expect(composer.locator(".ccez-math")).toHaveCount(0);
 	await expect(composer.locator(".ccez-math-inline")).toHaveCount(0);
 });
+
+/** Right-clicking the fold bar never starts audio: nothing speaks and the live highlight keeps. */
+test("right-click on the math fold bar stays silent", async ({ page }) => {
+	const para = page.locator("article .rendered p").first();
+	const box = await para.boundingBox();
+	if (!box) throw new Error("paragraph has no box");
+	const y = box.y + box.height / 2;
+	await page.mouse.move(box.x + 10, y);
+	await page.mouse.down();
+	await page.mouse.move(box.x + 120, y, { steps: 5 });
+	await page.mouse.up();
+	const bar = page.locator(".ccez-math-head").first();
+	await bar.click({ button: "right" });
+	await page.waitForTimeout(500);
+	await expect(page.locator("article.speaking, article.speaking-sel")).toHaveCount(0);
+	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+	expect(selected).not.toBe("");
+});
