@@ -403,8 +403,12 @@ to whole words` in `annotations-ux.e2e.ts`. No code change needed.)
 - [x] Search palette: DOM focus follows highlight; ESC moves input->list;
       j/k navigate results. (Done on work/stream-chrome2: "ESC moves focus",
       "j/k walk results", "Enter jumps" search e2e green.)
-- [ ] Cmd+P: native focus order must match highlighted message; Tab/Shift-Tab
+- [x] Cmd+P: native focus order must match highlighted message; Tab/Shift-Tab
       must match arrow-key target; ESC then j/k/arrows scroll results.
+      (Verified Sep 2026 on work/w1-waypoint: `focusSearchHit` moves DOM
+      focus onto the highlighted `.search-hit` on every j/k/arrow step, so
+      Tab continues natively from the highlight; first ESC moves
+      input→list, second closes; `search.e2e.ts` covers ESC/j-k/Enter.)
 - [x] Sideview -> plain Browser: rename research->browser; shortcut-only
       (drop toggle button); no Google Translate framing anywhere near it; better
       error handling; edge-drag resize with memorized size; Cmd+T from the prompt
