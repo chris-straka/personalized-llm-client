@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { OpenAICompatProvider, parseModelIds, readSse } from "./openai-compat";
+import { OpenAICompatProvider, isLoopbackBaseUrl, parseModelIds, readSse } from "./openai-compat";
 import { ProviderError } from "./types";
 
 const CONFIG = { baseUrl: "https://example.test/v1/", apiKey: "k", model: "m" };
@@ -242,5 +242,39 @@ describe("thinking", () => {
 		// Unknown ids resolve to the model's default before sending.
 		const museBogus = await postedBody("muse", "muse-spark-1.3-contributor", "bogus");
 		expect(museBogus).toMatchObject({ reasoning_effort: "medium" });
+	});
+});
+
+describe("loopback failures", () => {
+	function deadFetch(): void {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => {
+				throw new TypeError("fetch failed");
+			})
+		);
+	}
+
+	it("names Ollama for on-device servers, stays generic for remote ones", async () => {
+		deadFetch();
+		const local = new OpenAICompatProvider("local-gemma", {
+			baseUrl: "http://localhost:11434/v1",
+			apiKey: "",
+			model: "gemma4:latest"
+		});
+		await expect(local.chat([{ role: "user", content: "hi" }])).rejects.toThrow(
+			/local-gemma needs Ollama running/
+		);
+		const remote = new OpenAICompatProvider("probe", CONFIG);
+		await expect(remote.chat([{ role: "user", content: "hi" }])).rejects.toThrow(
+			/Network error talking to probe/
+		);
+	});
+
+	it("classifies loopback hosts, never the open net", async () => {
+		expect(isLoopbackBaseUrl("http://localhost:11434/v1")).toBe(true);
+		expect(isLoopbackBaseUrl("http://127.0.0.1:11434/v1")).toBe(true);
+		expect(isLoopbackBaseUrl("https://example.test/v1")).toBe(false);
+		expect(isLoopbackBaseUrl("not a url")).toBe(false);
 	});
 });

@@ -33,6 +33,20 @@ export class OpenAICompatProvider implements ChatProvider {
 		return `${this.config.baseUrl}${path}`;
 	}
 
+	/**
+	 * Fetch-level failure, translated: a dead loopback server names its
+	 * remedy (Ollama isn't running) instead of reading as generic net
+	 * trouble; remote endpoints keep the generic wording.
+	 */
+	private connectionError(error: unknown): ProviderError {
+		if (isLoopbackBaseUrl(this.config.baseUrl)) {
+			return new ProviderError(
+				`${this.id} needs Ollama running on this device (start it with 'ollama serve'): ${messageOf(error)}`
+			);
+		}
+		return new ProviderError(`Network error talking to ${this.id}: ${messageOf(error)}`);
+	}
+
 	private headers(): Record<string, string> {
 		// Keyless on-device servers (Ollama) take no credentials: sending one:
 		// An empty credential header would only confuse request logs.
@@ -62,7 +76,7 @@ export class OpenAICompatProvider implements ChatProvider {
 				signal: opts.signal ?? null
 			});
 		} catch (error) {
-			throw new ProviderError(`Network error talking to ${this.id}: ${messageOf(error)}`);
+			throw this.connectionError(error);
 		}
 		if (!res.ok) {
 			throw new ProviderError(
@@ -100,7 +114,7 @@ export class OpenAICompatProvider implements ChatProvider {
 				signal: opts.signal ?? null
 			});
 		} catch (error) {
-			throw new ProviderError(`Network error talking to ${this.id}: ${messageOf(error)}`);
+			throw this.connectionError(error);
 		}
 		if (!res.ok || !res.body) {
 			throw new ProviderError(
@@ -221,6 +235,19 @@ function toUsage(
 
 function messageOf(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * True for on-device server URLs (Ollama on loopback): a refused
+ * connection there means "not running", not "offline".
+ */
+export function isLoopbackBaseUrl(baseUrl: string): boolean {
+	try {
+		const host = new URL(baseUrl).hostname.toLowerCase();
+		return host === "localhost" || host === "127.0.0.1" || host === "::1";
+	} catch {
+		return false;
+	}
 }
 
 async function safeText(res: Response): Promise<string> {

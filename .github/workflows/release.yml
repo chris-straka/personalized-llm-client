@@ -59,7 +59,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -84,7 +84,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -117,7 +117,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -158,12 +158,17 @@ jobs:
     # windows-11-arm is GA for public repositories; it does NOT work in
     # private repositories -- if this repo ever goes private, drop this
     # job (x64 keeps working).
+    # Watch item: the windows-11-arm label migrates to a VS2026-based
+    # image starting 2026-09-21 (runner-images #14602). This job pins no
+    # VS version (MSVC comes from the image, NSIS from tauri-action), so
+    # there is nothing to pre-pin — but if the first post-migration
+    # release fails here, suspect the image (NSIS/MSVC paths) first.
     needs: [release-windows-x64]
     runs-on: windows-11-arm
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -211,7 +216,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
@@ -261,7 +266,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -309,7 +314,7 @@ jobs:
     steps:
       # gh release download shells out to git; without a checkout the
       # manifest download fails even when every asset is present.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Verify all release assets and updater platforms
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
