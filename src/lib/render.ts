@@ -275,6 +275,15 @@ export function extractMath(markdownText: string): { stripped: string; maths: Ma
 	return { stripped: out, maths };
 }
 
+/**
+ * Short TeX preview for the fold bar (single line, truncated): the bar
+ * carries no "math" label — the preview itself says what the block is.
+ */
+export function mathTexPreview(tex: string, max = 48): string {
+	const flat = tex.replace(/\s+/g, " ").trim();
+	return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+}
+
 /** KaTeX HTML for one math entry, or its escaped plain source on failure. */
 export function mathHtml(entry: MathEntry, index: number): string {
 	let inner: string;
@@ -291,27 +300,25 @@ export function mathHtml(entry: MathEntry, index: number): string {
 		// Unknown/invalid math keeps plain rendering, never fatal.
 		return escapeHtml(entry.raw);
 	}
-	// Same chrome as ccez-code: language/label head with Fold and Copy
-	// buttons per math block (clicks delegate in MessageBody like code).
-	// The inline head is a span: a div inside a paragraph would be
-	// ejected by the HTML parser, stranding the buttons outside the
-	// inline wrapper.
-	const head = (tag: "div" | "span"): string =>
-		`<${tag} class="ccez-math-head">` +
-		`<span class="ccez-math-lang">math</span>` +
-		`<button type="button" data-math-action="fold">Fold</button>` +
-		`<button type="button" data-math-action="copy">Copy</button>` +
-		`</${tag}>`;
+	// Buttonless chrome (clicks delegate in MessageBody): display blocks
+	// get a fold bar — chevron plus TeX preview, no labels — and the
+	// body click copies the TeX. Inline math renders bare (no chrome at
+	// all): a bar mid-sentence would break the line's rhythm, and its
+	// TeX stays one message-copy away. `.ccez-math-body` and
+	// `data-math-index` are the annotation contract (see equationBodyOf)
+	// and stay put.
 	if (entry.kind === "display") {
 		return (
 			`<div class="ccez-math" data-math-index="${index}">` +
-			head("div") +
+			`<button type="button" class="ccez-math-head" aria-label="Fold equation" aria-expanded="true">` +
+			`<span class="ccez-math-chev" aria-hidden="true">▸</span>` +
+			`<code class="ccez-math-tex">${escapeHtml(mathTexPreview(entry.tex))}</code>` +
+			`</button>` +
 			`<div class="ccez-math-body">${inner}</div></div>`
 		);
 	}
 	return (
 		`<span class="ccez-math-inline" data-math-index="${index}">` +
-		head("span") +
 		`<span class="ccez-math-body">${inner}</span></span>`
 	);
 }
@@ -405,10 +412,11 @@ export function sanitize(dirty: string): string {
 			"class",
 			"style",
 			"aria-hidden",
+			"aria-label",
+			"aria-expanded",
 			"data-code-index",
 			"data-code-action",
 			"data-math-index",
-			"data-math-action",
 			"data-paste-fold",
 			"type",
 			"dir"

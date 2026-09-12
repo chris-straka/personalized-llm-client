@@ -43,6 +43,11 @@
 		washId?: string | null;
 		/** Badge click (opens the edit popover at the badge). */
 		onBadgeClick?: (id: AnnotationId, anchor: { x: number; y: number }) => void;
+		/**
+		 * Toast text for chrome feedback the body owns (math/code copy
+		 * outcome): the parent flashes it. Undefined stays silent.
+		 */
+		onToast?: (message: string) => void;
 		/** Paste-fold marker click (parent replaces the message). */
 		onFoldToggle?: (index: number) => void;
 	/** Badge hover (paints the quote wash while pointed at). Null on leave. */
@@ -94,6 +99,7 @@
 		marks = [],
 		washId = null,
 		onBadgeClick,
+		onToast,
 		onFoldToggle,
 		onBadgeHover,
 		textOverride = null,
@@ -310,34 +316,40 @@
 			onFoldToggle?.(Number(fold.dataset.pasteFold ?? -1));
 			return;
 		}
-		const mathButton = (event.target as HTMLElement).closest<HTMLElement>("[data-math-action]");
-		if (mathButton && rendered) {
-			const wrap = mathButton.closest<HTMLElement>("[data-math-index]");
-			const index = Number(wrap?.dataset.mathIndex ?? -1);
+		// Buttonless math chrome: the bar folds, the body copies. Clicks
+		// resolve against the wrapper (the buttons are gone).
+		const mathWrap = (event.target as HTMLElement).closest<HTMLElement>("[data-math-index]");
+		if (mathWrap && rendered) {
+			const index = Number(mathWrap.dataset.mathIndex ?? -1);
 			const entry = rendered.maths[index];
 			if (!entry) return;
-			if (mathButton.dataset.mathAction === "copy") {
-				// Same feedback contract as the code Copy button: the
-				// button itself reports the outcome, restoring its label.
-				const label = mathButton.textContent ?? "Copy";
-				const restore = () => {
-					mathButton.textContent = label;
-				};
-				const report = (ok: boolean) => {
-					mathButton.textContent = ok ? "Copied" : "Copy failed";
-					setTimeout(restore, 1500);
-				};
-				if (!navigator.clipboard) report(false);
-				else void navigator.clipboard.writeText(entry.tex).then(
-					() => report(true),
-					() => report(false)
-				);
-			} else {
-				const body = wrap?.querySelector(".ccez-math-body");
-				if (!body || !(body instanceof HTMLElement)) return;
-				const collapsed = body.style.display !== "none";
-				body.style.display = collapsed ? "none" : "";
-				mathButton.textContent = collapsed ? "Unfold" : "Fold";
+			const bar = (event.target as HTMLElement).closest<HTMLElement>(".ccez-math-head");
+			if (bar) {
+				const folded = mathWrap.dataset.folded === "1";
+				if (folded) {
+					mathWrap.removeAttribute("data-folded");
+					bar.setAttribute("aria-expanded", "true");
+				} else {
+					mathWrap.dataset.folded = "1";
+					bar.setAttribute("aria-expanded", "false");
+				}
+				return;
+			}
+			// Display body click copies the TeX plus a toast. Inline
+			// math stays bare and copies nothing (its TeX is one
+			// message-copy away). A live selection means the click ends
+			// a drag — never clobber the clipboard for it.
+			if (
+				mathWrap.classList.contains("ccez-math") &&
+				(event.target as HTMLElement).closest(".ccez-math-body") &&
+				window.getSelection()?.isCollapsed !== false
+			) {
+				if (!navigator.clipboard) onToast?.("Couldn't copy to the clipboard.");
+				else
+					void navigator.clipboard.writeText(entry.tex).then(
+						() => onToast?.("Copied"),
+						() => onToast?.("Couldn't copy to the clipboard.")
+					);
 			}
 			return;
 		}
@@ -615,8 +627,9 @@
 		border-radius: 0;
 		background: #fff;
 	}
-	/* LaTeX math (main chat only): same chrome as ccez-code — a
-	label head with Fold and Copy buttons per math block. */
+	/* LaTeX math (main chat only): buttonless chrome — display blocks
+	get a fold bar (chevron plus TeX preview, no labels), and clicking
+	the body copies the TeX. Inline math renders bare. */
 	.rendered :global(.ccez-math) {
 		margin: 0.5em 0;
 		border: 1px solid #e5e5ea;
@@ -626,61 +639,61 @@
 		max-width: 100%;
 		min-width: min(12rem, 100%);
 	}
-	.rendered :global(.ccez-math-head) {
+	.rendered :global(button.ccez-math-head) {
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
+		width: 100%;
+		border: 0;
 		padding: 0.25rem 0.6rem;
 		background: #f1f1f4;
 		font-size: 0.75rem;
-	}
-	.rendered :global(.ccez-math-lang) {
-		font-weight: 650;
-	}
-	.rendered :global(.ccez-math-head button) {
-		border: 1px solid #c7c7cc;
-		border-radius: 6px;
-		background: #fff;
+		text-align: left;
 		cursor: pointer;
-		font-size: 0.75rem;
-		padding: 0.05rem 0.5rem;
+		color: inherit;
 	}
-	.rendered :global(.ccez-math-head button:first-of-type) {
-		margin-left: auto;
+	.rendered :global(.ccez-math-chev) {
+		flex: none;
+		color: #6e6e73;
+		transition: transform 0.15s ease;
+	}
+	.rendered :global(.ccez-math[data-folded="1"] .ccez-math-chev) {
+		transform: rotate(90deg);
+	}
+	.rendered :global(.ccez-math-tex) {
+		font-family:
+			ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+		font-size: 0.85em;
+		color: #6e6e73;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		min-width: 0;
 	}
 	.rendered :global(.ccez-math-body) {
 		padding: 0.6rem 0.8rem;
 		background: #fff;
 		overflow-x: auto;
+		cursor: pointer;
 	}
-	/* Inline math keeps the same buttons, sized down so the line keeps
-	its rhythm; KaTeX inherits the message color and scale. */
+	.rendered :global(.ccez-math[data-folded="1"] .ccez-math-body) {
+		display: none;
+	}
+	/* Inline math renders bare — no bar mid-sentence — so the line
+	keeps its rhythm; KaTeX inherits the message color and scale. */
 	.rendered :global(.ccez-math-inline) {
 		display: inline-flex;
 		align-items: baseline;
-		gap: 0.3rem;
 		border: 1px solid #e5e5ea;
 		border-radius: 6px;
 		padding: 0 0.3rem;
 		background: #fff;
 	}
-	.rendered :global(.ccez-math-inline .ccez-math-head) {
-		display: inline-flex;
-		background: none;
-		padding: 0;
-		gap: 0.25rem;
-	}
-	.rendered :global(.ccez-math-inline .ccez-math-lang) {
-		display: none;
-	}
-	.rendered :global(.ccez-math-inline .ccez-math-head button) {
-		font-size: 0.65rem;
-		padding: 0 0.35rem;
-	}
 	.rendered :global(.ccez-math-inline .ccez-math-body) {
 		padding: 0;
 		background: none;
 		overflow: visible;
+		cursor: text;
 	}
 	.rendered :global(.ccez-math .katex),
 	.rendered :global(.ccez-math-inline .katex) {

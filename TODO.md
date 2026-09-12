@@ -109,8 +109,13 @@ cut; release chain outcome still unconfirmed (see Now).
   before + non-alnum after, spans containing a bare `$` stay literal,
   `$$`/fences/code-spans/escapes untouched; same inline chrome + copy
   path as `\(…\)`, so no `+page.svelte` change needed.)
-- [ ] Math chrome: no fold/copy/math labels; bar-click folds; body-click
+- [x] Math chrome: no fold/copy/math labels; bar-click folds; body-click
       copies + toast; chevron + TeX preview.
+  (Done Sep 2026 on work/stream-annotation2: display math renders a fold
+  bar (chevron + truncated TeX preview, keyboard-operable button) with no
+  labels; bar-click folds via `data-folded`, body-click copies TeX with a
+  "Copied" toast (skipped while a selection is live); inline math renders
+  bare. Unit-locked in `render.test.ts`; behavior pinned in `latex.e2e.ts`.)
 - [ ] AI code fences: no copy/fold buttons; language logos if cheap.
 - [ ] Right-click on latex/code folds must never start TTS.
 - [ ] Right-click (even empty space) must never start audio.

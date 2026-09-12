@@ -5436,6 +5436,7 @@ import { isPromptIdle } from "$lib/chrome";
 							washId={annPop?.id ?? editingId ?? hoverBadgeId}
 						onBadgeHover={(id: string | null) => (hoverBadgeId = id)}
 							onBadgeClick={openBadgeClick}
+							onToast={flashToast}
 							onFoldToggle={(index: number) => togglePasteFold(msg, index)}
 							textOverride={aidedTextFor(msg)}
 							contentOverride={sentRefs ? (refsOnly && !isFolded ? REFS_ONLY_BODY : sentRefs.text) : null}
