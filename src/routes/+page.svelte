@@ -1738,7 +1738,11 @@ import { isPromptIdle } from "$lib/chrome";
 		ocrBusyId = att.id;
 		attachError = null;
 		try {
-			const result = await recognizeImageText(att.dataUrl, latinFallback());
+			// No language hint: the backend's learner default covers
+			// English + CJK scripts. Passing the Latin TTS fallback
+			// here restricted Vision to English, so Chinese paragraphs
+			// missed entirely and surfaced as red errors.
+			const result = await recognizeImageText(att.dataUrl, null);
 			const text = result.text.trim();
 			if (!text) {
 				attachError = "No text found in this image.";
