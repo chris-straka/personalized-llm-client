@@ -364,7 +364,10 @@ mod imp {
             };
             let key = NSString::from_str("SpokenContentDefaultVoiceSelectionsByLanguage");
             let Some(all) = defaults.dictionaryForKey(&key) else {
-                eprintln!("[tts] {ctx}: system voice lookup: selections key missing");
+                // Benign by design (see above): no per-language System Voice
+                // configured, so the quality ranking below auto-picks — speech
+                // still goes out, just not via a system entry.
+                eprintln!("[tts] {ctx}: no per-language System Voice set, auto-picking installed voice");
                 return None;
             };
             for candidate in candidates {

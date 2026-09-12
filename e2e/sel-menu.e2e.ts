@@ -42,6 +42,21 @@ test("Annotate opens the pill for the quote", async ({ page }) => {
 	await expect(page.locator(".ann-pop")).toBeVisible();
 });
 
+/** Hovering the menu holds it past the auto-dismiss: moving the mouse
+from the highlight to Annotate never cancels it, and the highlight
+keeps with it. */
+test("hovering the menu holds it past the timer", async ({ page }) => {
+	await selectWord(page);
+	const menu = page.locator(".sel-menu");
+	await expect(menu).toBeVisible();
+	await menu.hover();
+	// Past the 2.5s desktop auto-dismiss the menu still stands.
+	await page.waitForTimeout(3000);
+	await expect(menu).toBeVisible();
+	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+	expect(selected).not.toBe("");
+});
+
 /** The menu floats down and left of the cursor that finished the
 gesture (never under it), still above the highlight and clamped to
 the viewport. */

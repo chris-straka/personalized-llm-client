@@ -167,9 +167,7 @@
 		LOCAL_AID_ADD_TITLE,
 		MODEL_AIDS,
 		MODEL_AID_FOR_SCRIPT,
-		extractWordAt,
 		ttsLangFor,
-		speakWord,
 		runModelAid,
 		aidTargetLines,
 		spliceAidResult,
@@ -213,7 +211,6 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	import {
 		speakNative,
 		speakNativeMulti,
-		speakNativeWord,
 		stopNative,
 		friendlyNativeError,
 		nativeTtsSupported,
@@ -552,8 +549,18 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	 * longer to reach than a cursor.
 	 */
 	let selMenuTimer: ReturnType<typeof setTimeout> | null = null;
+	/**
+	 * True while the pointer hovers the selection menu: the auto-dismiss
+	 * timer stands down, so moving the mouse from the highlight to the
+	 * Annotate button never cancels it. Leaving re-arms the timer.
+	 */
+	let selMenuHover = $state(false);
 	$effect(() => {
-		if (!selMenu) return;
+		if (!selMenu) {
+			selMenuHover = false;
+			return;
+		}
+		if (selMenuHover) return;
 		if (selMenuTimer) clearTimeout(selMenuTimer);
 		// Phones: the dock tracks the native bubble — while a highlight
 		// is live the bubble is up, so hold the dock past the timer
@@ -5390,7 +5397,8 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			}
 			onSelectEnd(event, event.clientX);
 		};
-		// Desktop right-click reads aloud AND opens the native menu:
+		// Desktop right-click reads aloud (the selection, else the whole
+		// message; a playing message stops) AND opens the native menu:
 		// no preventDefault here, so Copy stays available beside speech.
 		// (Android long-press never starts audio — it summons the menu.)
 		const onContextMenu = (event: MouseEvent) => {
@@ -5408,44 +5416,55 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			}
 			if (androidUI) return;
 			const body = target?.closest(".messages .rendered");
-			if (!body || target?.closest("button, input, textarea, a, summary")) return;
-			// Highlighted text wins over the word under the cursor: a
-			// right-click with a live message selection reads the whole
-			// selection (same per-quote language as the sel-menu button).
+			if (!body) return;
+			// Code comes before the control check below on purpose: the
+			// copy icon is a button, but a code block (body or folded
+			// label) toggles its fold here, never speech. Headless
+			// chrome has no fold bar, so the wrapper toggles directly;
+			// the copy icon itself stays silent via the control check.
+			const codeBlock = target?.closest(".ccez-code");
+			if (codeBlock && body.contains(codeBlock) && !target?.closest("[data-code-copy]")) {
+				const el = codeBlock as HTMLElement;
+				if (el.dataset.folded === "1") el.removeAttribute("data-folded");
+				else el.dataset.folded = "1";
+				return;
+			}
+			// Display math toggles the same way. Inline math has no
+			// body chrome, so it falls through to speech below.
+			const mathWrap = target?.closest("[data-math-index]");
+			if (mathWrap && body.contains(mathWrap) && mathWrap.classList.contains("ccez-math")) {
+				const el = mathWrap as HTMLElement;
+				if (el.dataset.folded === "1") el.removeAttribute("data-folded");
+				else el.dataset.folded = "1";
+				return;
+			}
+			// Controls and links inside messages stay silent.
+			if (target?.closest("button, input, textarea, a, summary")) return;
+			// A playing message stops instead of restarting: either its
+			// whole-message readback or a selection read from it.
+			const stopIfPlaying = (id: ChatMsgId): boolean => {
+				if (speakingId === id || speakingSelection === id) {
+					stopVoice();
+					return true;
+				}
+				return false;
+			};
+			// Highlighted text wins: a right-click with a live message
+			// selection reads the whole selection (same per-quote language
+			// as the sel-menu button).
 			const quoted = currentQuote();
 			if (quoted) {
+				if (stopIfPlaying(quoted.messageId)) return;
 				void speakQuote(quoted.quote, quoted.messageId);
 				return;
 			}
-			let range: Range | null = null;
-			try {
-				if (typeof document.caretRangeFromPoint === "function") {
-					range = document.caretRangeFromPoint(event.clientX, event.clientY);
-				}
-			} catch {
-				range = null;
-			}
-			const node = range?.startContainer;
-			if (!node || node.nodeType !== Node.TEXT_NODE || !body.contains(node)) return;
-			const word = extractWordAt(node.textContent ?? "", range?.startOffset ?? 0);
-			if (!word) return;
-			const fallbackLang = settings.voiceLang?.trim() || "en-US";
-			const wordLang = effectiveSpeechLang(ttsLangFor(word, fallbackLang), webVoices());
-			if (!speechAttemptable(wordLang)) {
-				setVoiceError("No voice for this language.");
-				return;
-			}
-			if (settings.voiceEngine === "native") {
-				speakNativeWord(
-					word,
-					wordLang,
-					(message) => {
-						flashToast(`${friendlyNativeError(message)} (web voice instead)`);
-						speakWord(word, fallbackLang);
-					},
-					settings.nativeVoiceId
-				);
-			} else speakWord(word, fallbackLang);
+			// No selection: the whole message reads (the word-under-cursor
+			// path is gone by decision). speakReply gates the voice.
+			const article = body.closest('article[id^="msg-"]');
+			const msg = article ? chat.messages[Number(article.id.slice(4))] : undefined;
+			if (!msg) return;
+			if (stopIfPlaying(msg.id)) return;
+			void speakReply(msg);
 		};
 		// Holding Option morphs the send button into "Add +" (stage).
 		const onAlt = (event: KeyboardEvent) => {
@@ -6625,6 +6644,8 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 						</button>
 						{#if openLangMenu === menu.id}
 							<div class="lang-list" role="menu">
+								<!-- Menu-click clears only languages without a number key
+								(keyed ones clear by repeating the key). -->
 								{#each [...menu.languages].sort((a, b) => a.name.localeCompare(b.name, "en")) as lang (lang.code)}
 									{@const quickKey = quickKeyFor(lang.code)}
 									<button
@@ -6633,7 +6654,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 										class:selected={activeReplyCode === lang.code}
 										title={quickKey ? `${lang.name} (${quickKey})` : lang.name}
 										onclick={() =>
-										activeReplyCode === lang.code ? clearReplyLang() : setReplyLang(lang.code)
+										activeReplyCode === lang.code && !quickKey ? clearReplyLang() : setReplyLang(lang.code)
 									}
 									>
 										<span class="badge" aria-hidden="true">{lang.badge}</span>
@@ -6708,6 +6729,8 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			transition:fade={{ duration: 150 }}
 			onmousedown={noteMenuPress}
 			ontouchstart={noteMenuPress}
+			onmouseenter={() => (selMenuHover = true)}
+			onmouseleave={() => (selMenuHover = false)}
 		>
 			<!-- Desktop only: Annotate floats above the highlight while
 			the OS bubble keeps its own slot. Phones dock it in the
@@ -6903,7 +6926,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 					<div><dt>Translate selection</dt><dd>{isMac ? "⌘T" : "Ctrl+T"} over message text · to English · feeds annotation</dd></div>
 					<div><dt>Browser side panel</dt><dd>{isMac ? "⌘T" : "Ctrl+T"} anywhere · address bar takes focus · Esc closes · one tab</dd></div>
 					<div><dt>Stop voice / close menus</dt><dd>Esc outside the prompt</dd></div>
-					<div><dt>Speak text aloud</dt><dd>Right click a word · select text, then right click</dd></div>
+					<div><dt>Speak text aloud</dt><dd>Right click message or selection · again stops</dd></div>
 					<!-- ⌘D is meta-only (Ctrl+D skips in scroll mode), so Windows names Delete alone. -->
 					<div><dt>Delete a message</dt><dd>{isMac ? "Hover the message, then ⌘D or Delete" : "Hover the message, then Delete"}</dd></div>
 					<div><dt>Fold / unfold message</dt><dd>Hover the message, then F or {isMac ? "Option" : "Alt"}-click</dd></div>

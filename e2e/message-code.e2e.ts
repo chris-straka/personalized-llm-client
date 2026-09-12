@@ -99,20 +99,42 @@ test("code bar click folds the body", async ({ page }) => {
 	await expect(pre).toBeVisible();
 });
 
-/** Body-click copies the code with a toast. */
-test("code body click copies with a toast", async ({ page }) => {
+/** Body clicks select natively and never copy: no toast, clipboard untouched. */
+test("code body click selects without copying", async ({ page }) => {
+	await page.evaluate(() => navigator.clipboard.writeText("SENTINEL"));
 	const block = page.locator(".ccez-code").first();
 	await block.locator("pre").click();
-	await expect(page.locator(".toast")).toHaveText("Copied", { timeout: 10_000 });
-	expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('print("hi")');
+	await page.waitForTimeout(500);
+	await expect(page.locator(".toast", { hasText: "Copied" })).toHaveCount(0);
+	expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("SENTINEL");
+	const pre = block.locator("pre");
+	const box = await pre.boundingBox();
+	if (!box) throw new Error("code pre has no box");
+	await page.mouse.move(box.x + 8, box.y + 8);
+	await page.mouse.down();
+	await page.mouse.move(box.x + box.width * 0.5, box.y + box.height - 8, { steps: 5 });
+	await page.mouse.up();
+	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+	expect(selected).toContain('print("hi")');
+	await expect(page.locator(".toast", { hasText: "Copied" })).toHaveCount(0);
+	expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("SENTINEL");
 });
 
-/** Right-clicking the code fold bar never starts audio. */
-test("right-click on the code fold bar stays silent", async ({ page }) => {
-	const bar = page.locator(".ccez-code-head").first();
+/** Right-clicking the code fold bar toggles the fold and never starts audio. */
+test("right-click on the code fold bar toggles the fold and stays silent", async ({
+	page
+}) => {
+	const block = page.locator(".ccez-code").first();
+	const bar = block.locator(".ccez-code-head");
+	const pre = block.locator("pre");
+	await expect(pre).toBeVisible();
 	await bar.click({ button: "right" });
+	await expect(block).toHaveAttribute("data-folded", "1");
+	await expect(pre).toBeHidden();
 	await page.waitForTimeout(500);
 	await expect(page.locator("article.speaking, article.speaking-sel")).toHaveCount(0);
+	await bar.click({ button: "right" });
+	await expect(pre).toBeVisible();
 });
 
 /** Thoughts grow with the message font scale instead of stranding at 0.8rem. */
