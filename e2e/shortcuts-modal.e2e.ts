@@ -4,7 +4,7 @@ import { seedChat } from "./helpers";
 /**
  * Shortcuts-modal pile: the first entry names the modal toggle
  * ("Shortcuts show/hide" + middle-click), the list stays pithy
- * with no parentheticals and no removed right-click speak rows,
+ * with no parentheticals, right-click speak is listed again,
  * and middle-click anywhere opens the modal.
  */
 test.setTimeout(90_000);
@@ -35,9 +35,8 @@ test("first entry toggles the modal; list is pithy with current keys", async ({ 
 	for (const name of ["Send message", "New chat", "Edit own message", "Focus composer"]) {
 		await expect(keys.locator("div > dt", { hasText: name })).toBeVisible();
 	}
-	// Removed behavior stays out: right-click never starts audio.
-	expect(await keys.locator("div > dt", { hasText: "Speak hovered word" }).count()).toBe(0);
-	expect(await keys.locator("div > dt", { hasText: "Speak highlight" }).count()).toBe(0);
+	// Right-click speak is listed: selection first, word under cursor.
+	await expect(keys.locator("div > dt", { hasText: "Speak text aloud" })).toBeVisible();
 	// No paren spam in the entry copy (each dd reads flat).
 	const details = await keys.locator("dd").allInnerTexts();
 	expect(details.join("\n")).not.toContain("(");

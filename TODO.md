@@ -147,15 +147,15 @@ cut; release chain outcome still unconfirmed (see Now).
       `render.test.ts` + `annotations-dom.test.ts`; behavior pinned in
       `message-code.e2e.ts`, `textai.e2e.ts` assertion updated.)
 - [x] Right-click on latex/code folds must never start TTS.
-      (Done Sep 2026 on work/stream-annotation2: the desktop `contextmenu`
-      speak path (selection + word-under-cursor, web + native) is removed —
-      speech starts only from explicit speak buttons; desktop falls through
-      to the native menu. Pinned by fold-bar silence specs in `latex.e2e.ts`
-  - `message-code.e2e.ts`.)
+      (Fold heads are buttons, so the restored desktop `contextmenu` speak
+      path skips them by its button guard — silence specs in `latex.e2e.ts`
+      + `message-code.e2e.ts` still green after the Sep 2026 restore.)
 - [x] Right-click (even empty space) must never start audio.
-      (Done Sep 2026 on work/stream-annotation2: same removal as the folds
-      item — no audio path remains on `contextmenu` or button-2 mouseup;
-      pinned by the empty-space silence spec in `sel-menu.e2e.ts`.)
+      (Empty space has no `.rendered` ancestor and blank clicks resolve to
+      no word, so both stay silent — `sel-menu.e2e.ts` still green after
+      the Sep 2026 restore. REVERSED in part Sep 2026: right-click on
+      message text speaks again (selection first, else hovered word) with
+      the native menu unblocked — pinned by `right-click-speak.e2e.ts`.)
 - [x] Copy toasts: latex copy shows toast; wording is "Copied" everywhere
       (not "Copied as plain text").
       (Done Sep 2026 on work/stream-annotation2: message copy now toasts

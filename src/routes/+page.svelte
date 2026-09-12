@@ -166,7 +166,9 @@
 		LOCAL_AID_ADD_TITLE,
 		MODEL_AIDS,
 		MODEL_AID_FOR_SCRIPT,
+		extractWordAt,
 		ttsLangFor,
+		speakWord,
 		runModelAid,
 		aidTargetLines,
 		spliceAidResult,
@@ -210,6 +212,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	import {
 		speakNative,
 		speakNativeMulti,
+		speakNativeWord,
 		stopNative,
 		friendlyNativeError,
 		nativeTtsSupported,
@@ -5175,7 +5178,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			if (Date.now() - touchMenuAt < 800) return;
 			// Ignore clicks that start inside the prompt, popups, or buttons —
 			// only freshly selected message text summons the menu.
-			if (event.button === 2) return; // right-click never summons the menu (or audio)
+			if (event.button === 2) return; // right-click speaks via contextmenu, never the menu
 			// Non-element targets (synthetic document/window events) carry no
 			// selection UI — real mouse-ups always target an Element.
 			const target = event.target instanceof Element ? event.target : null;
@@ -5220,11 +5223,9 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			}
 			onSelectEnd(event, event.clientX);
 		};
-		// Right-click never starts audio: the desktop speak path that
-		// lived here (selection reads aloud, word under cursor) is gone
-		// by decision — speech starts only from explicit speak buttons.
-		// Capture stays registered for the Android long-press branch
-		// below; desktop falls through to the native context menu.
+		// Desktop right-click reads aloud AND opens the native menu:
+		// no preventDefault here, so Copy stays available beside speech.
+		// (Android long-press never starts audio — it summons the menu.)
 		const onContextMenu = (event: MouseEvent) => {
 			const target = event.target as HTMLElement | null;
 			// Android long-press fires contextmenu mid-hold, before
@@ -5236,7 +5237,48 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 					placeSelMenu(event.clientX);
 					touchMenuAt = Date.now();
 				}
+				return;
 			}
+			if (androidUI) return;
+			const body = target?.closest(".messages .rendered");
+			if (!body || target?.closest("button, input, textarea, a, summary")) return;
+			// Highlighted text wins over the word under the cursor: a
+			// right-click with a live message selection reads the whole
+			// selection (same per-quote language as the sel-menu button).
+			const quoted = currentQuote();
+			if (quoted) {
+				void speakQuote(quoted.quote, quoted.messageId);
+				return;
+			}
+			let range: Range | null = null;
+			try {
+				if (typeof document.caretRangeFromPoint === "function") {
+					range = document.caretRangeFromPoint(event.clientX, event.clientY);
+				}
+			} catch {
+				range = null;
+			}
+			const node = range?.startContainer;
+			if (!node || node.nodeType !== Node.TEXT_NODE || !body.contains(node)) return;
+			const word = extractWordAt(node.textContent ?? "", range?.startOffset ?? 0);
+			if (!word) return;
+			const fallbackLang = settings.voiceLang?.trim() || "en-US";
+			const wordLang = effectiveSpeechLang(ttsLangFor(word, fallbackLang), webVoices());
+			if (!speechAttemptable(wordLang)) {
+				setVoiceError("No voice for this language.");
+				return;
+			}
+			if (settings.voiceEngine === "native") {
+				speakNativeWord(
+					word,
+					wordLang,
+					(message) => {
+						flashToast(`${friendlyNativeError(message)} (web voice instead)`);
+						speakWord(word, fallbackLang);
+					},
+					settings.nativeVoiceId
+				);
+			} else speakWord(word, fallbackLang);
 		};
 		// Holding Option morphs the send button into "Add +" (stage).
 		const onAlt = (event: KeyboardEvent) => {
@@ -6680,6 +6722,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 					<div><dt>Translate selection</dt><dd>{isMac ? "⌘T" : "Ctrl+T"} over message text · to English · feeds annotation</dd></div>
 					<div><dt>Browser side panel</dt><dd>{isMac ? "⌘T" : "Ctrl+T"} anywhere · address bar takes focus · Esc closes · one tab</dd></div>
 					<div><dt>Stop voice / close menus</dt><dd>Esc outside the prompt</dd></div>
+					<div><dt>Speak text aloud</dt><dd>Right click a word · select text, then right click</dd></div>
 					<!-- ⌘D is meta-only (Ctrl+D skips in scroll mode), so Windows names Delete alone. -->
 					<div><dt>Delete a message</dt><dd>{isMac ? "Hover the message, then ⌘D or Delete" : "Hover the message, then Delete"}</dd></div>
 					<div><dt>Fold / unfold message</dt><dd>Hover the message, then F or {isMac ? "Option" : "Alt"}-click</dd></div>
