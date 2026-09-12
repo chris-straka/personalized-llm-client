@@ -276,12 +276,32 @@ export function extractMath(markdownText: string): { stripped: string; maths: Ma
 }
 
 /**
- * Short TeX preview for the fold bar (single line, truncated): the bar
- * carries no "math" label — the preview itself says what the block is.
+ * Short TeX preview for a collapsed equation label (single line,
+ * truncated). Kept for label use; the render output itself carries no
+ * fold bar — display math is body-only (folding rides `data-folded`,
+ * wired elsewhere).
  */
 export function mathTexPreview(tex: string, max = 48): string {
 	const flat = tex.replace(/\s+/g, " ").trim();
 	return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+}
+
+/**
+ * Collapsed label for a folded code block (`python · 13 LOC`): folding
+ * swaps the pre for this text instead of hiding the block outright, so
+ * the fold still reads as code. Pure and unit-tested.
+ */
+export function foldedCodeLabel(lang: string, loc: number): string {
+	return `${lang} · ${loc} LOC`;
+}
+
+/**
+ * Clipboard text for a math block: the TeX wrapped in its `$$` display
+ * delimiters, so a paste recompiles to the same equation. Pure and
+ * unit-tested.
+ */
+export function mathCopyText(tex: string): string {
+	return `$$${tex}$$`;
 }
 
 /** KaTeX HTML for one math entry, or its escaped plain source on failure. */
@@ -300,20 +320,19 @@ export function mathHtml(entry: MathEntry, index: number): string {
 		// Unknown/invalid math keeps plain rendering, never fatal.
 		return escapeHtml(entry.raw);
 	}
-	// Buttonless chrome (clicks delegate in MessageBody): display blocks
-	// get a fold bar — chevron plus TeX preview, no labels — and the
-	// body click copies the TeX. Inline math renders bare (no chrome at
-	// all): a bar mid-sentence would break the line's rhythm, and its
-	// TeX stays one message-copy away. `.ccez-math-body` and
-	// `data-math-index` are the annotation contract (see equationBodyOf)
-	// and stay put.
+	// Body-only display math (no fold bar, no buttons): the body stays
+	// and remains foldable via `data-folded` (wired elsewhere), while a
+	// body click copies the TeX with its `$$` delimiters (see
+	// mathCopyText). Inline math renders bare (no chrome at all): a bar
+	// mid-sentence would break the line's rhythm, and its TeX stays one
+	// message-copy away. `.ccez-math-body` and `data-math-index` are the
+	// annotation contract (see equationBodyOf) and stay put. KaTeX is
+	// never colorized here — it inherits the theme ink, which keeps
+	// equations readable in both themes without a second palette to
+	// maintain.
 	if (entry.kind === "display") {
 		return (
 			`<div class="ccez-math" data-math-index="${index}">` +
-			`<button type="button" class="ccez-math-head" aria-label="Fold equation" aria-expanded="true">` +
-			`<span class="ccez-math-chev" aria-hidden="true">▸</span>` +
-			`<code class="ccez-math-tex">${escapeHtml(mathTexPreview(entry.tex))}</code>` +
-			`</button>` +
 			`<div class="ccez-math-body">${inner}</div></div>`
 		);
 	}
@@ -335,6 +354,18 @@ export function mathHtml(entry: MathEntry, index: number): string {
  * reorder); thoughts chrome is app UI, not message text.
  */
 const DIR_AUTO_BLOCKS = /<(p|li|h[1-6]|blockquote|td|th)(?=[\s>])/g;
+
+/**
+ * Copy glyph for the in-block code copy button: the same line-icon as
+ * the message-button copy control (1.6px rounded strokes, currentColor),
+ * inlined because render output is a sanitized HTML string, not Svelte.
+ */
+const CODE_COPY_GLYPH =
+	`<svg class="action-glyph" viewBox="0 0 16 16" fill="none" stroke="currentColor" ` +
+	`stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+	`<rect x="6" y="6" width="7" height="7" rx="1.5" />` +
+	`<path d="M9.5 6V4.2A1.2 1.2 0 0 0 8.3 3H4.2A1.2 1.2 0 0 0 3 4.2v4.1a1.2 1.2 0 0 0 1.2 1.2H6" />` +
+	`</svg>`;
 
 function renderInto(
 	markdownText: string,
@@ -375,15 +406,22 @@ function renderInto(
 				const language = (lang ?? "").trim() || "text";
 				const index = codes.length;
 				codes.push({ lang: language, code: text });
-				// Buttonless chrome like math: the head bar (language
-				// label only) folds, the body copies. Per-language logos
-				// stay out: no glyph set exists and Shiki already colors
-				// blocks apart, so artwork per language isn't cheap.
+				// Headless code block: no fold bar, no copy-on-click —
+				// the pre is a native selection surface (user-select and
+				// I-beam come from the stylesheet), so drags never touch
+				// the clipboard. Copy lives on the icon button alone
+				// (clicks delegate in MessageBody); folding swaps the pre
+				// for the collapsed label via `data-folded` (wired
+				// elsewhere). Per-language logos stay out: no glyph set
+				// exists and Shiki already colors blocks apart, so
+				// artwork per language isn't cheap.
+				const loc = text.split("\n").length;
 				return (
 					`<div class="ccez-code" data-code-index="${index}">` +
-					`<button type="button" class="ccez-code-head" aria-label="Fold code block" aria-expanded="true">` +
-					`<span class="ccez-code-lang">${escapeHtml(language)}</span>` +
-					`</button><pre><code data-code-index="${index}">${escapeHtml(text)}</code></pre></div>`
+					`<button type="button" class="ccez-code-copy" data-code-copy="${index}" ` +
+					`aria-label="Copy code block" title="Copy">${CODE_COPY_GLYPH}</button>` +
+					`<span class="ccez-code-foldedlabel">${escapeHtml(foldedCodeLabel(language, loc))}</span>` +
+					`<pre><code data-code-index="${index}">${escapeHtml(text)}</code></pre></div>`
 				);
 			}
 		}
@@ -416,6 +454,7 @@ export function sanitize(dirty: string): string {
 			"aria-hidden",
 			"aria-label",
 			"aria-expanded",
+			"data-code-copy",
 			"data-code-index",
 			"data-math-index",
 			"data-paste-fold",
