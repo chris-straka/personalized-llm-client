@@ -3,11 +3,17 @@ import {
 	ESCAPE_HOLD_MS,
 	GG_WINDOW_MS,
 	HOVER_EDGE_MARGIN_PX,
+	SCROLLKEY_DU_VELOCITY_PX_S,
+	SCROLLKEY_JK_VELOCITY_PX_S,
 	SCROLLKEY_LINE_PX,
+	SCROLL_HOLD_TAP_MS,
 	ggArmed,
 	halfPageDy,
+	holdIsTap,
 	isEscapeHold,
 	messageEdgeScrollTop,
+	scrollHoldVelocity,
+	stepScrollTop,
 	unselectedScrollIntent
 } from "./scrollkeys";
 
@@ -83,5 +89,39 @@ describe("isEscapeHold", () => {
 
 	it("never fires without a tracked keydown", () => {
 		expect(isEscapeHold(0, 60_000)).toBe(false);
+	});
+});
+
+describe("scrollHoldVelocity", () => {
+	it("glides j/k at line speed and d/u much faster", () => {
+		expect(scrollHoldVelocity("j")).toBe(SCROLLKEY_JK_VELOCITY_PX_S);
+		expect(scrollHoldVelocity("k")).toBe(-SCROLLKEY_JK_VELOCITY_PX_S);
+		expect(scrollHoldVelocity("d")).toBe(SCROLLKEY_DU_VELOCITY_PX_S);
+		expect(scrollHoldVelocity("u")).toBe(-SCROLLKEY_DU_VELOCITY_PX_S);
+		expect(SCROLLKEY_DU_VELOCITY_PX_S).toBeGreaterThan(SCROLLKEY_JK_VELOCITY_PX_S);
+	});
+
+	it("leaves discrete keys alone", () => {
+		for (const key of ["g", "G", "z", "Z", " ", "Enter", "ArrowDown"]) {
+			expect(scrollHoldVelocity(key), key).toBeNull();
+		}
+	});
+});
+
+describe("stepScrollTop", () => {
+	it("advances proportionally to frame time", () => {
+		expect(stepScrollTop(100, 720, 16)).toBeCloseTo(111.52, 2);
+		expect(stepScrollTop(100, -720, 16)).toBeCloseTo(88.48, 2);
+		expect(stepScrollTop(100, 720, 0)).toBe(100);
+		expect(stepScrollTop(100, 720, -5)).toBe(100);
+	});
+});
+
+describe("holdIsTap", () => {
+	it("calls quick holds taps and longer holds glides", () => {
+		expect(holdIsTap(1000, 1050)).toBe(true);
+		expect(holdIsTap(1000, 1000 + SCROLL_HOLD_TAP_MS)).toBe(false);
+		expect(holdIsTap(1000, 1500)).toBe(false);
+		expect(holdIsTap(0, 50)).toBe(false);
 	});
 });

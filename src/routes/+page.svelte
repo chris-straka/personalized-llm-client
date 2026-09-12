@@ -68,10 +68,14 @@
 	} from "$lib/editor";
 	import { createTextareaEditor } from "$lib/textarea-editor";
 	import {
+		SCROLLKEY_LINE_PX,
 		ggArmed,
 		halfPageDy,
+		holdIsTap,
 		isEscapeHold,
 		messageEdgeScrollTop,
+		scrollHoldVelocity,
+		stepScrollTop,
 		unselectedScrollIntent
 	} from "$lib/scrollkeys";
 	import { isEjected } from "$lib/session";
@@ -449,6 +453,8 @@ import { isPromptIdle } from "$lib/chrome";
 	let sideSearchEl: HTMLInputElement | undefined = $state();
 	/** Last lone "g" timestamp (gg hops to the top of history). */
 	let lastGAt = 0;
+	/** Held scroll key (j/k/d/u glide): pacing state, null when idle. */
+	let scrollHold: { key: string; velocity: number; downAt: number; lastT: number; raf: number } | null = null;
 	/**
 	 * Escape keydown timestamp for the fullscreen hold: releasing
 	 * after ESCAPE_HOLD_MS exits fullscreen, a quicker tap keeps the
@@ -1043,7 +1049,17 @@ import { isPromptIdle } from "$lib/chrome";
 	/** Chat switching wrapped in a View Transition where supported
 	 * (instant cut elsewhere) — identical end state either way. */
 	function transitionToChat(id: Parameters<typeof selectChat>[1]): void {
-		void switchChatWithTransition(() => selectChat(chatState, id));
+		const from = chatState.activeChatId;
+		void switchChatWithTransition(() => {
+			// Draft annotations belong to one chat: file the leaving
+			// chat's away, then restore the entering chat's. Doing both
+			// inside the transition keeps the autosave effect (which
+			// also keys on activeChatId) from ever filing one chat's
+			// drafts under another's id.
+			saveDraftAnnotations(from, annotations, chatState.chats.map((c) => c.id));
+			selectChat(chatState, id);
+			annotations = loadDraftAnnotations(id);
+		});
 	}
 
 	/** Jump to a palette hit: its chat, scrolled to its message. */
@@ -3064,6 +3080,42 @@ import { isPromptIdle } from "$lib/chrome";
 	function scrollChatBy(dy: number): void {
 		scrollBox?.scrollBy({ top: dy, behavior: "smooth" });
 	}
+	/**
+	 * Start a frame-paced glide: pixels accrue per rAF tick from the first
+	 * frame, so holding never fires the cancel-and-restart stutter that
+	 * per-keydown smooth scrollBy calls produce under key repeat.
+	 */
+	function startScrollHold(key: string, velocity: number): void {
+		stopScrollHold();
+		if (!scrollBox) return;
+		const hold = { key, velocity, downAt: Date.now(), lastT: performance.now(), raf: 0 };
+		scrollHold = hold;
+		const tick = (t: number) => {
+			if (scrollHold !== hold || !scrollBox) return;
+			scrollBox.scrollTop = stepScrollTop(scrollBox.scrollTop, hold.velocity, t - hold.lastT);
+			hold.lastT = t;
+			hold.raf = requestAnimationFrame(tick);
+		};
+		hold.raf = requestAnimationFrame(tick);
+	}
+	/** Release a held key: quick taps land one discrete step, holds just stop. */
+	function releaseScrollHold(event: KeyboardEvent): void {
+		const hold = scrollHold;
+		if (!hold || event.key !== hold.key) return;
+		cancelAnimationFrame(hold.raf);
+		scrollHold = null;
+		if (holdIsTap(hold.downAt, Date.now()) && scrollBox) {
+			scrollChatBy(
+				hold.key === "d" || hold.key === "u"
+					? halfPageDy(scrollBox.clientHeight, hold.velocity > 0 ? 1 : -1)
+					: Math.sign(hold.velocity) * SCROLLKEY_LINE_PX
+			);
+		}
+	}
+	function stopScrollHold(): void {
+		if (scrollHold) cancelAnimationFrame(scrollHold.raf);
+		scrollHold = null;
+	}
 	function scrollChatTop(): void {
 		scrollBox?.scrollTo({ top: 0, behavior: "smooth" });
 	}
@@ -3341,7 +3393,9 @@ import { isPromptIdle } from "$lib/chrome";
 				}
 				const exists = chatState.chats.some((c) => c.id === link.chatId);
 				if (!exists) return;
+				saveDraftAnnotations(chatState.activeChatId, annotations, chatState.chats.map((c) => c.id));
 				selectChat(chatState, link.chatId as ChatId);
+				annotations = loadDraftAnnotations(link.chatId);
 				enterEditMode();
 			});
 		} catch (error) {
@@ -4433,9 +4487,15 @@ import { isPromptIdle } from "$lib/chrome";
 							lastGAt = Date.now();
 						} else {
 							lastGAt = 0;
-							if (intent.kind === "line") scrollChatBy(intent.dy);
-							else if (intent.kind === "half-page" && scrollBox) {
-								scrollChatBy(halfPageDy(scrollBox.clientHeight, intent.dir));
+							if (intent.kind === "line" || intent.kind === "half-page") {
+								// Held keys glide via the rAF loop (no restart
+								// stutter); the loop owns repeats until keyup.
+								// Other line sources (arrows) keep stepping.
+								const velocity = scrollBox ? scrollHoldVelocity(event.key) : null;
+								if (velocity !== null) {
+									if (!event.repeat) startScrollHold(event.key, velocity);
+								} else if (intent.kind === "line") scrollChatBy(intent.dy);
+								else if (scrollBox) scrollChatBy(halfPageDy(scrollBox.clientHeight, intent.dir));
 							} else if (intent.kind === "top") scrollChatTop();
 							else if (intent.kind === "bottom") scrollChatBottom();
 							else if (intent.kind === "hovered-edge" && hoveredIdx >= 0) {
@@ -4811,6 +4871,7 @@ import { isPromptIdle } from "$lib/chrome";
 		const onBlur = () => {
 			altHeld = false;
 			escDownAt = 0;
+			stopScrollHold();
 		};
 		// Coming back to the window lands you in the prompt (pill box when
 		// annotating), so Tab continues from there. Never yank focus out of
@@ -4903,6 +4964,7 @@ import { isPromptIdle } from "$lib/chrome";
 		window.addEventListener("keydown", onAlt);
 		window.addEventListener("keyup", onAlt);
 		window.addEventListener("keyup", onEscapeUp);
+		window.addEventListener("keyup", releaseScrollHold);
 		window.addEventListener("blur", onBlur);
 		window.addEventListener("focusin", onFocusIn);
 		window.addEventListener("mousedown", onBadgePress, true);
@@ -4942,6 +5004,7 @@ import { isPromptIdle } from "$lib/chrome";
 			window.removeEventListener("keydown", onAlt);
 			window.removeEventListener("keyup", onAlt);
 			window.removeEventListener("keyup", onEscapeUp);
+		window.removeEventListener("keyup", releaseScrollHold);
 			window.removeEventListener("blur", onBlur);
 			window.removeEventListener("focusin", onFocusIn);
 			window.removeEventListener("mousedown", onBadgePress, true);

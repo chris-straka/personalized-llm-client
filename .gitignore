@@ -13,3 +13,7 @@ vite.config.ts.timestamp-*
 .screenshots/
 test-results/
 test-results/*
+
+# Local pnpm runs regenerate this; the committed lockfile is bun.lock.
+# (A committed pnpm-lock.yaml breaks Cloudflare Pages frozen installs.)
+pnpm-lock.yaml

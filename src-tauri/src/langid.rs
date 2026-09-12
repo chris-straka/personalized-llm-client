@@ -11,6 +11,8 @@
 //!
 //! Pure and unit-tested on any host.
 
+#![allow(dead_code)] // Non-Apple shim: compiled everywhere, called off macOS/iOS.
+
 /// Minimum Latin tokens before a sample counts as classifiable.
 pub const MIN_WORDS: usize = 10;
 /// Minimum winning stop-word hits before a sample counts as identified.

@@ -99,3 +99,41 @@ export function messageEdgeScrollTop(args: {
 export function isEscapeHold(downAt: number, now: number, thresholdMs = ESCAPE_HOLD_MS): boolean {
 	return downAt > 0 && now - downAt >= thresholdMs;
 }
+
+/** Hold-to-glide velocity for j/k: continuous pixels per second. */
+export const SCROLLKEY_JK_VELOCITY_PX_S = 720;
+
+/** Hold-to-glide velocity for d/u: deliberately faster than j/k. */
+export const SCROLLKEY_DU_VELOCITY_PX_S = 2520;
+
+/** A hold shorter than this is a tap: it lands one discrete step. */
+export const SCROLL_HOLD_TAP_MS = 150;
+
+/**
+ * Glide velocity for a held scroll key, or null for keys that do not
+ * glide (gg/G/z/Z and everything else keep their discrete behavior).
+ */
+export function scrollHoldVelocity(key: string): number | null {
+	switch (key) {
+		case "j":
+			return SCROLLKEY_JK_VELOCITY_PX_S;
+		case "k":
+			return -SCROLLKEY_JK_VELOCITY_PX_S;
+		case "d":
+			return SCROLLKEY_DU_VELOCITY_PX_S;
+		case "u":
+			return -SCROLLKEY_DU_VELOCITY_PX_S;
+		default:
+			return null;
+	}
+}
+
+/** Advance a glide by one frame: pure so tests can pin the pacing. */
+export function stepScrollTop(current: number, velocityPxS: number, dtMs: number): number {
+	return current + (velocityPxS * Math.max(0, dtMs)) / 1000;
+}
+
+/** True when a key hold was really a tap (lands one discrete step). */
+export function holdIsTap(downAt: number, upAt: number, tapMs = SCROLL_HOLD_TAP_MS): boolean {
+	return downAt > 0 && upAt - downAt < tapMs;
+}

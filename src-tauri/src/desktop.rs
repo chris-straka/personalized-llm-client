@@ -2,7 +2,9 @@
 //!
 //! Covers the desktop-only runtime pieces the web layer cannot reach:
 //! a summon/hide affordance (OS-global hotkey on macOS, in-app chord in
-//! the frontend), a system tray with Show/Quit, single-instance focus
+//! the frontend), a system tray with Show/Quit on Windows/Linux only
+//! (macOS shows no menu-bar icon — the Dock owns Show/Quit there),
+//! single-instance focus
 //! (a second launch focuses the running app instead of opening a new
 //! window), `ccez://` deep links into a chat, sleep prevention while
 //! speech or a reply streams, and study-sheet export (native share-out
@@ -25,6 +27,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 /// In-app/OS summon chord shown in help copy. The native macOS monitor
 /// watches this exact combo (space keyCode + Command + Shift); the
 /// frontend owns the same chord while its window is focused.
+#[cfg(all(desktop, not(target_os = "macos")))]
 pub const SUMMON_SHORTCUT: &str = "CmdOrCtrl+Shift+Space";
 /// macOS virtual keyCode for space (the summon key).
 pub const SUMMON_KEY_CODE: u16 = 49;
@@ -36,11 +39,14 @@ pub const DEEP_LINK_EVENT: &str = "deep-link";
 /// Loopback port for the single-instance handoff. First launch binds
 /// it; a second launch connects, forwards focus/URL, and exits.
 pub const SINGLETON_PORT: u16 = 47471;
-/// Tray icon id (single tray per app).
+/// Tray icon id (single tray per app; Windows/Linux only).
+#[cfg(all(desktop, not(target_os = "macos")))]
 pub const TRAY_ID: &str = "ccez-tray";
-/// Tray menu item: show + focus the main window.
+/// Tray menu item: show + focus the main window (Windows/Linux only).
+#[cfg(all(desktop, not(target_os = "macos")))]
 pub const TRAY_SHOW_ID: &str = "tray-show";
-/// Tray menu item: quit the app.
+/// Tray menu item: quit the app (Windows/Linux only).
+#[cfg(all(desktop, not(target_os = "macos")))]
 pub const TRAY_QUIT_ID: &str = "tray-quit";
 /// Cap for an exported study sheet: a foreign chat id or a giant
 /// history must not flood the temp dir.
@@ -544,15 +550,18 @@ fn focus_main<R: Runtime>(app: &AppHandle<R>) {
 #[cfg(desktop)]
 pub fn wire(app: &AppHandle) -> tauri::Result<()> {
     ensure_single_instance(app);
+    // No menu-bar icon on macOS (owner request): the Dock owns Show/Quit.
+    // Windows/Linux keep the tray — quitting needs it there.
+    #[cfg(not(target_os = "macos"))]
     build_tray(app)?;
     install_summon_hotkey(app);
     handle_startup_args(app);
     Ok(())
 }
 
-/// System tray: Show focuses the window, Quit exits. Left-click shows
-/// too (the menu stays the discoverable path).
-#[cfg(desktop)]
+/// System tray (Windows/Linux only): Show focuses the window, Quit
+/// exits. Left-click shows too (the menu stays the discoverable path).
+#[cfg(all(desktop, not(target_os = "macos")))]
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem};
     use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
