@@ -60,7 +60,10 @@ cut; release chain outcome still unconfirmed (see Now).
 - [x] `e2e/annotation-chat-scope.e2e.ts` failing — fix.
   Accept: `bunx playwright test e2e/annotation-chat-scope.e2e.ts` green —
   B's composer starts at 0 `.ann-wrap`, A restores to 1.
-- [ ] Confirm v0.2.5 rename/verify/publish outcome (`gh release view v0.2.5`).
+- [x] Confirm v0.2.5 rename/verify/publish outcome (`gh release view v0.2.5`).
+      (Confirmed Sep 2026: DRAFT by github-actions, all per-arch assets present
+      + latest.json; verify -> publish -> prune -> rename chain NOT run yet.
+      Publish is a deliberate release action — still pending an explicit go.)
 - [ ] Review + resolve the moderate Dependabot alert on the default branch
       (flagged at push time, 2026-09-12).
 
