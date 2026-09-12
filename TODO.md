@@ -66,7 +66,7 @@ cut; release chain outcome still unconfirmed (see Now).
 
 ## Pile: composer
 
-- [ ] Idle-hide: main prompt hides on inactivity; image bubble must hide too.
+- [x] Idle-hide: main prompt hides on inactivity; image bubble must hide too.
       Click / `i` / Enter / left-click-on-non-button / mobile tap brings it back
       immediately. Mobile default timeout = never (always visible). Only hide
       when the prompt (or its backdrop) actually occludes text; the backdrop

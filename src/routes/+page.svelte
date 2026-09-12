@@ -1178,11 +1178,32 @@ import { isPromptIdle } from "$lib/chrome";
 	}
 
 	/**
+	 * Whether the user picked their own idle timeout: captured once at
+	 * startup, before the autosave effect can backfill defaults into
+	 * storage (any settings change persists the whole object, so a
+	 * later read cannot tell default from deliberate). Phones default
+	 * to never hiding until the user chooses a timeout.
+	 * (Mirrors the private storage key in settings.ts.)
+	 */
+	const idleTimeoutCustomized: boolean = (() => {
+		try {
+			const raw = window.localStorage.getItem("ccez-studio-settings-v1");
+			if (!raw) return false;
+			return typeof (JSON.parse(raw) as { promptIdleSec?: unknown }).promptIdleSec === "number";
+		} catch {
+			return false;
+		}
+	})();
+	/**
 	 * Idle-hide for the main prompt: any mouse, keyboard, touch, or
 	 * wheel input stamps lastInputAt and shows the composer instantly;
-	 * a 500ms ticker hides it (slides down out of view) once
-	 * settings.promptIdleSec elapses with no input. The timeout read
-	 * subscribes the effect, so a settings change re-arms the ticker.
+	 * a 500ms ticker hides it (slides down out of view) once the
+	 * effective timeout elapses with no input. The timeout and mobile
+	 * reads subscribe the effect, so a settings change or the phone
+	 * detection landing re-arms the ticker. An empty chat never hides:
+	 * with no text to uncover, the prompt and its attachment strip
+	 * stay put. (Skipping short-but-nonempty threads too is the chrome
+	 * pile's idle-hide checkbox, with its own contract test.)
 	 */
 	let lastInputAt = $state(Date.now());
 	let promptIdle = $state(false);
@@ -1191,7 +1212,8 @@ import { isPromptIdle } from "$lib/chrome";
 		promptIdle = false;
 	}
 	$effect(() => {
-		const idleSec = settings.promptIdleSec ?? 6;
+		const setting = settings.promptIdleSec ?? 6;
+		const idleSec = !androidUI ? setting : idleTimeoutCustomized ? setting : 0;
 		const on = (): void => noteInput();
 		window.addEventListener("pointermove", on, { passive: true });
 		window.addEventListener("pointerdown", on, { passive: true });
@@ -1199,7 +1221,9 @@ import { isPromptIdle } from "$lib/chrome";
 		window.addEventListener("wheel", on, { passive: true });
 		window.addEventListener("touchstart", on, { passive: true });
 		const timer = window.setInterval(() => {
-			if (isPromptIdle(lastInputAt, Date.now(), idleSec)) promptIdle = true;
+			if (!isPromptIdle(lastInputAt, Date.now(), idleSec)) return;
+			if (viewChat.messages.length === 0) return;
+			promptIdle = true;
 		}, 500);
 		return () => {
 			window.removeEventListener("pointermove", on);
@@ -5620,7 +5644,7 @@ import { isPromptIdle } from "$lib/chrome";
 		{/if}
 
 		{#if attachments.length > 0 || attachError}
-			<ul class="attachments">
+			<ul class="attachments" class:composer-idle={promptIdle}>
 				{#each attachments as att (att.id)}
 					<li>
 						{#if att.kind === "image"}
@@ -5657,12 +5681,12 @@ import { isPromptIdle } from "$lib/chrome";
 			{#if previewId}
 				{#each attachments.filter((a) => a.id === previewId) as att (att.id)}
 					{#if att.dataUrl}
-						<img class="preview" src={att.dataUrl} alt={att.name} />
+						<img class="preview" class:composer-idle={promptIdle} src={att.dataUrl} alt={att.name} />
 					{/if}
 				{/each}
 			{/if}
 			{#if attachError}
-				<p class="error" role="alert">{attachError}</p>
+				<p class="error attach-error" class:composer-idle={promptIdle} role="alert">{attachError}</p>
 			{/if}
 		{/if}
 
@@ -9099,6 +9123,28 @@ import { isPromptIdle } from "$lib/chrome";
 			transform 0.35s ease,
 			opacity 0.35s ease,
 			visibility 0s;
+	}
+	/* Idle-hide covers the attachment strip too (pills, preview
+	image, error): it rides the same slide/fade as the prompt so no
+	image bubble lingers over the chat, and restores with it on the
+	next input (the class drops together with prompt-idle). */
+	.attachments,
+	.preview,
+	.attach-error {
+		transition:
+			transform 0.35s ease,
+			opacity 0.35s ease,
+			visibility 0s;
+	}
+	:is(.attachments, .preview, .attach-error).composer-idle {
+		transform: translateY(calc(100% + 2rem));
+		opacity: 0;
+		visibility: hidden;
+		pointer-events: none;
+		transition:
+			transform 0.35s ease,
+			opacity 0.35s ease,
+			visibility 0s linear 0.35s;
 	}
 	/* No entrance animation on the composer: it used to glide down on the
 	first message, exactly while the first tokens streamed in — on a slow
