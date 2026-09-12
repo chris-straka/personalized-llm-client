@@ -828,8 +828,8 @@ function cleanDraftList(raw: unknown): Annotation[] {
 		if (typeof a.id !== "string" || typeof a.messageId !== "string") continue;
 		if (typeof a.quote !== "string" || typeof a.comment !== "string") continue;
 		out.push({
-			id: a.id as AnnotationId,
-			messageId: a.messageId as ChatMsgId,
+			id: a.id,
+			messageId: a.messageId,
 			quote: a.quote,
 			comment: a.comment,
 			at: typeof a.at === "number" ? a.at : 0

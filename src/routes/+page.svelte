@@ -161,7 +161,6 @@
 		LOCAL_AID_ADD_TITLE,
 		MODEL_AIDS,
 		MODEL_AID_FOR_SCRIPT,
-		speakWord,
 		ttsLangFor,
 		runModelAid,
 		aidTargetLines,
@@ -209,7 +208,6 @@ import { isPromptIdle } from "$lib/chrome";
 	import {
 		speakNative,
 		speakNativeMulti,
-		speakNativeWord,
 		stopNative,
 		friendlyNativeError,
 		nativeTtsSupported,

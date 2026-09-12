@@ -91,7 +91,7 @@ describe("equationBodyOf", () => {
 
 	it("returns null outside math", () => {
 		const root = mathDoc();
-		expect(equationBodyOf(root.querySelector("p")!)).toBeNull();
+		expect(equationBodyOf(root.querySelector("p"))).toBeNull();
 		expect(equationBodyOf(null)).toBeNull();
 		root.remove();
 	});
