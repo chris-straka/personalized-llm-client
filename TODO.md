@@ -160,7 +160,11 @@ cut; release chain outcome still unconfirmed (see Now).
       (`isFuriganaCached` gate, never fetch on hover).
       Accept: furigana-hover e2e (hover fetches nothing, boxes stable) +
       furigana pin bbox e2e green.
-- [ ] Furigana offset further left on macOS desktop.
+- [x] Furigana offset further left on macOS desktop. `data-mac` (already on
+      `.app`) scopes `.frt` to the iOS pull (-8px): Range-ink measurement on
+      macOS showed readings ~5px right of their kanji at -2px, ~0.6px at -8px.
+      Accept: ruby-wrap wrap test measures ink (<2px) on mac, boxes (<4px)
+      elsewhere — 6/6 green.
 - [ ] Message-button icons scale with the text-size setting (pill buttons
       already do; logos/icons don't).
 - [ ] Per-segment TTS voices for mixed-language messages (same-voice fallback

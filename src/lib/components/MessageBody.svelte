@@ -518,6 +518,14 @@
 	:global(.app[data-android]:not([data-ios])) .rendered :global(.frt) {
 		margin-left: -8px;
 	}
+	/* Same pull on macOS desktop: its kana also renders in Hiragino
+	with the same left bearing (Range-ink measurement: readings sit
+	~5px right of their kanji at the default -2px, so -8px centers
+	them like iOS). data-mac is also set on iPads in desktop mode —
+	iOS keeps its own line above. */
+	:global(.app[data-mac]:not([data-ios])) .rendered :global(.frt) {
+		margin-left: -8px;
+	}
 	@keyframes frt-in {
 		from {
 			opacity: 0;
