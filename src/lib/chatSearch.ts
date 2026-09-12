@@ -81,6 +81,21 @@ function scoreDoc(tokens: string[], queryTokens: string[]): number {
 	return score;
 }
 
+/**
+ * Message indices containing the query (case-insensitive substring):
+ * the in-chat find bar cycles these browser-style. Pure over plain
+ * message text (not rendered HTML) so Vitest runs it in node.
+ */
+export function findMessageIndices(contents: string[], query: string): number[] {
+	const q = query.trim().toLowerCase();
+	if (!q) return [];
+	const out: number[] = [];
+	contents.forEach((content, index) => {
+		if (content.toLowerCase().includes(q)) out.push(index);
+	});
+	return out;
+}
+
 /** Rank documents against a raw query string (AND semantics). */
 export function querySearch(docs: SearchDoc[], query: string, limit = 30): SearchHit[] {
 	const queryTokens = tokenizeText(query);

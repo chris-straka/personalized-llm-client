@@ -114,7 +114,7 @@ export function studySheetMarkdown(title: string, messages: StudyLine[]): string
 		const heading = message.role === "user" ? "You" : message.role === "assistant" ? "Ccez" : message.role;
 		kept.push({ heading, text });
 	}
-	let out = `# ${cleanTitle}\n\n*Ccez Studio study sheet — ${kept.length} message${kept.length === 1 ? "" : "s"}.*\n`;
+	let out = `# ${cleanTitle}\n\n*Ccez LLM study sheet — ${kept.length} message${kept.length === 1 ? "" : "s"}.*\n`;
 	for (const { heading, text } of kept) {
 		out += `\n---\n\n## ${heading}\n\n${text}\n`;
 	}

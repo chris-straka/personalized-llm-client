@@ -7,11 +7,16 @@
 		CHAT_WIDTH_MAX,
 		CHAT_WIDTH_MIN,
 		PROMPT_IDLE_DEFAULT,
-		PROMPT_IDLE_MAX,
 		PROMPT_IDLE_MIN,
 		type AppSettings
 	} from "$lib/settings";
-	import { draggedSliderPastTop } from "$lib/chrome";
+	import {
+		draggedSliderPastTop,
+		formatIdleTimeout,
+		IDLE_SLIDER_TOP,
+		idleSettingToSlider,
+		idleSliderToSetting
+	} from "$lib/chrome";
 	import { thinkingFor, resolveThinkingId } from "$lib/providers/thinking";
 	import { ejectProvider, restoreProvider } from "$lib/session";
 	import { hydrateSecrets, tauriBackendAvailable } from "$lib/secrets";
@@ -23,17 +28,9 @@
 		nativeTtsLastError,
 		friendlyNativeError,
 		nativeVoices,
-		openVoiceSettings,
-		saveNativeSpeech
+		openVoiceSettings
 	} from "$lib/nativeTts";
 	import { voicesForLang, allVoicesForLang, autoVoiceForLang } from "$lib/voiceTiers";
-	import {
-		probeFontCoverage,
-		fontNudgeFor as fontNudgeText,
-		CJK_LABEL,
-		type CjkScript,
-		type FontStatus
-	} from "$lib/fontCoverage";
 	import { currentPlatform } from "$lib/platform";
 	import type { NativeVoice } from "$lib/nativeTts";
 	import { onMount } from "svelte";
@@ -49,6 +46,9 @@
 		tokensTitle?: string | null;
 		/** Phone UI: hover doesn't exist, so the hover toggles read as a note. */
 		androidUI?: boolean;
+		/** Double-tap the settings top: expand the window like the main
+		top bar (the page owns the shell zoom). */
+		onExpand?: (event: MouseEvent) => void;
 		/** Update results ride the page toast (auto-dismiss, no layout
 		shift) instead of an inline popup. Falls back to inline text
 		when the page passes none. */
@@ -62,7 +62,8 @@
 		tokensLabel = null,
 		tokensTitle = null,
 		androidUI = false,
-		onToast
+		onToast,
+		onExpand
 	}: Props = $props();
 	let updateStatus = $state("");
 	let checkingUpdate = $state(false);
@@ -79,11 +80,10 @@
 	const showStamp = !import.meta.env.DEV;
 
 	/**
-	 * Slider reset gestures (text size, chat width, idle timeout):
-	 * dragging upward past the slider's top edge restores the default,
-	 * and so does clicking the label text or the empty area beside the
-	 * slider. Clicks that land on the slider, its readout, or the
-	 * explicit reset button keep their own behavior.
+	 * Slider reset gestures (text size, chat width, idle timeout): only
+	 * the inner reset buttons and an upward drag past the slider's top
+	 * edge restore the default — label clicks never reset (they fight
+	 * text selection and misfire on touch).
 	 */
 	let sliderPressY: number | null = null;
 	function noteSliderPress(event: PointerEvent): void {
@@ -93,11 +93,6 @@
 		const startY = sliderPressY;
 		sliderPressY = null;
 		if (startY != null && draggedSliderPastTop(startY, event.clientY)) reset();
-	}
-	function labelAreaReset(event: MouseEvent, reset: () => void): void {
-		const target = event.target;
-		if (target instanceof HTMLElement && target.closest("input, output, button")) return;
-		reset();
 	}
 	/**
 	 * Pull the provider's `/models` list into the Model picker's datalist.
@@ -157,40 +152,8 @@
 	/* No appended category: Apple's registry names already carry it
 	("Ava (Premium)"), and Siri's have none to repeat. */
 	const autoLabel = $derived(autoVoice ? `Auto - ${autoVoice.name}` : "Auto");
-	/**
-	 * CJK font-coverage inventory (same pattern as the voice-tier
-	 * inventory above): probe once at open, re-probe from the button.
-	 * `document.fonts` exists in the browser preview too, so this
-	 * section is always visible.
-	 */
-	const fontScripts: CjkScript[] = ["zh", "ja", "ko"];
-	let fontStatus = $state<Record<CjkScript, FontStatus>>(
-		probeFontCoverage(fontScripts)
-	);
-	const fontNudge = $derived(fontNudgeText(fontStatus));
-	function checkFonts(): void {
-		fontStatus = probeFontCoverage(fontScripts);
-	}
-	/** Lesson-audio export (macOS file render, Android synthesizeToFile). */
-	let savingAudio = $state(false);
-	let audioSaveMessage = $state("");
-	async function saveSampleAudio(): Promise<void> {
-		audioSaveMessage = "";
-		savingAudio = true;
-		try {
-			const path = await saveNativeSpeech(
-				"Lesson audio test. This is how your study voice sounds.",
-				voiceLangTag,
-				settings.nativeVoiceId
-			);
-			audioSaveMessage = `Saved to ${path}`;
-		} catch (error) {
-			audioSaveMessage =
-				error instanceof Error ? error.message : String(error);
-		} finally {
-			savingAudio = false;
-		}
-	}
+	/* Study-fonts and lesson-audio sections were removed (lesson-audio
+	froze the app): no per-script state lives here anymore. */
 	// A picked voice never reads another language: when the tag moves on
 	// from the saved pick, fall back to Auto instead of a blank field.
 	$effect(() => {
@@ -309,6 +272,22 @@
 			isLinuxShell = false;
 		}
 		void loadVoices();
+		// Checkbox labels toggle on click — except when the click ends a
+		// text selection: highlighting label text must not flip the box
+		// (a plain click still toggles, including clicks straight on the
+		// box itself, which never extend a selection). A vanilla capture
+		// listener, so no per-label Svelte handler is needed.
+		const keepSelectionWithoutToggle = (event: MouseEvent): void => {
+			const target = event.target;
+			if (!(target instanceof HTMLElement)) return;
+			if (!target.closest(".settings-panel label.check")) return;
+			const selection = window.getSelection();
+			if (selection && !selection.isCollapsed) event.preventDefault();
+		};
+		document.addEventListener("click", keepSelectionWithoutToggle, true);
+		return () => {
+			document.removeEventListener("click", keepSelectionWithoutToggle, true);
+		};
 	});
 
 	/**
@@ -462,11 +441,26 @@
 			);
 		}
 	}
+	let headCloseTimer: ReturnType<typeof setTimeout> | null = null;
 	function closeFromHead(event: MouseEvent): void {
 		const down = headDown;
 		headDown = null;
 		if (down && Math.hypot(event.screenX - down.x, event.screenY - down.y) > 5) return;
-		onClose();
+		// Single click closes on a short fuse: a double-tap cancels the
+		// close and expands instead (same gesture split the main top bar
+		// uses between click-drag and double-click zoom).
+		if (headCloseTimer) clearTimeout(headCloseTimer);
+		headCloseTimer = setTimeout(() => {
+			headCloseTimer = null;
+			onClose();
+		}, 220);
+	}
+	function expandFromHead(event: MouseEvent): void {
+		if (headCloseTimer) {
+			clearTimeout(headCloseTimer);
+			headCloseTimer = null;
+		}
+		onExpand?.(event);
 	}
 </script>
 
@@ -479,6 +473,7 @@
 	title="Close settings"
 	onmousedown={dragHead}
 	onclick={closeFromHead}
+	ondblclick={expandFromHead}
 	onkeydown={(e) => {
 		if (e.key === "Enter" || e.key === " ") {
 			e.preventDefault();
@@ -857,43 +852,10 @@
 			</fieldset>
 	{/if}
 
-	<!-- Plain div + aria, not a <label>: label clicks yank focus into the
-		field, which fights selecting this text. -->
-	<fieldset>
-		<legend>Study fonts</legend>
-		<p class="note">
-			{#each fontScripts as script (script)}
-				<span>{CJK_LABEL[script]}: {fontStatus[script]} </span>
-			{/each}
-		</p>
-		{#if fontNudge}
-			<p class="note" role="alert">{fontNudge}</p>
-		{/if}
-		<button type="button" class="linklike" onclick={checkFonts}>
-			Check fonts again
-		</button>
-	</fieldset>
-	{#if nativeVoice && inShell}
-		<fieldset>
-			<legend>Lesson audio</legend>
-			<p class="note">
-				Render a sample of the {voiceLangTag} study voice to an audio
-				file for spaced-repetition decks. Uses the same voice pick as
-				read-aloud.
-			</p>
-			<button
-				type="button"
-				class="linklike"
-				onclick={() => void saveSampleAudio()}
-				disabled={savingAudio}
-			>
-				{savingAudio ? "Rendering…" : "Save sample audio"}
-			</button>
-			{#if audioSaveMessage}
-				<p class="note">{audioSaveMessage}</p>
-			{/if}
-		</fieldset>
-	{/if}
+	<!-- Study-fonts and lesson-audio sections removed (lesson-audio
+	froze the app): the inventory helpers stay in
+	fontCoverage.ts and nativeTts.ts for their remaining callers. -->
+
 	<div class="field">
 		<span id="voice-lang-label">Voice language</span>
 		<input
@@ -909,8 +871,7 @@
 			}}
 		/>
 	</div>
-	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-	<label onclick={(e) => labelAreaReset(e, () => (settings.fontScale = 1))}>
+	<label>
 		Text Size
 		<button
 			type="button"
@@ -936,8 +897,7 @@
 		</span>
 	</label>
 	{#if !androidUI}
-		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-	<label onclick={(e) => labelAreaReset(e, () => (settings.chatWidth = CHAT_WIDTH_DEFAULT))}>
+		<label>
 			Chat width
 			<button
 				type="button"
@@ -964,8 +924,7 @@
 			</span>
 		</label>
 	{/if}
-	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-	<label onclick={(e) => labelAreaReset(e, () => (settings.promptIdleSec = PROMPT_IDLE_DEFAULT))}>
+	<label>
 		Hide prompt after idle
 		<button
 			type="button"
@@ -978,17 +937,17 @@
 			<input
 				type="range"
 				min={PROMPT_IDLE_MIN}
-				max={PROMPT_IDLE_MAX}
+				max={IDLE_SLIDER_TOP}
 				step="1"
-				value={settings.promptIdleSec ?? PROMPT_IDLE_DEFAULT}
-				aria-label="Idle seconds before the prompt hides"
+				value={idleSettingToSlider(settings.promptIdleSec ?? PROMPT_IDLE_DEFAULT)}
+				aria-label="Idle seconds before the prompt hides (top is never)"
 				onpointerdown={noteSliderPress}
 				onpointerup={(e) => sliderRelease(e, () => (settings.promptIdleSec = PROMPT_IDLE_DEFAULT))}
 				oninput={(e) => {
-					settings.promptIdleSec = Number(e.currentTarget.value);
+					settings.promptIdleSec = idleSliderToSetting(Number(e.currentTarget.value));
 				}}
 			/>
-			<output style="min-width: 3.6rem;">{settings.promptIdleSec ?? PROMPT_IDLE_DEFAULT} s</output>
+			<output style="min-width: 3.6rem;">{formatIdleTimeout(settings.promptIdleSec ?? PROMPT_IDLE_DEFAULT)}</output>
 		</span>
 	</label>
 </section>
@@ -1461,6 +1420,22 @@
 		gap: 0.5rem;
 		font-weight: 400;
 		cursor: pointer;
+	}
+	/* Stacked checkboxes share one vertical rhythm whether they sit
+	in a fieldset or straight in the section: the box-to-text gap
+	above stays 0.5rem everywhere. */
+	.check + .check {
+		margin-top: 0.55rem;
+	}
+	/* The hover toggles really share one row (the legend names the
+	behavior once); the stacked rhythm above stays out of the row. */
+	fieldset.hover-row {
+		display: flex;
+		gap: 1.25rem;
+		align-items: center;
+	}
+	fieldset.hover-row .check + .check {
+		margin-top: 0;
 	}
 	.reset-width {
 		background: none;

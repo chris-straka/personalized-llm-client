@@ -114,3 +114,31 @@ test("right-click on the math fold bar stays silent", async ({ page }) => {
 	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
 	expect(selected).not.toBe("");
 });
+
+/** Equation granularity decision: a partial pick inside one equation
+snaps to the whole equation (a glyph shard never re-matches, so the
+entry point expands the range before quoting). Stale-highlight and
+double-highlight rendering stay with the annotation/render lanes. */
+test("partial equation pick snaps to the whole equation", async ({ page }) => {
+	const body = page.locator(".ccez-math-body").first();
+	const box = await body.boundingBox();
+	if (!box) throw new Error("math body has no box");
+	const y = box.y + box.height / 2;
+	// A short drag covering only the left part of the equation.
+	await page.mouse.move(box.x + 8, y);
+	await page.mouse.down();
+	await page.mouse.move(box.x + box.width * 0.4, y, { steps: 5 });
+	await page.mouse.up();
+	const full = await body.evaluate((el) => el.textContent ?? "");
+	expect(full.trim().length).toBeGreaterThan(0);
+	// KaTeX splits glyphs across layout spans, so raw strings differ
+	// in whitespace — compare whitespace-stripped: the snap must have
+	// expanded the partial drag over the whole body.
+	const flat = (s: string) => s.replace(/\s+/g, "");
+	await expect
+		.poll(
+			() => page.evaluate(() => window.getSelection()?.toString() ?? "").then((s) => flat(s)),
+			{ timeout: 8000 }
+		)
+		.toBe(flat(full));
+});

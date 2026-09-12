@@ -70,15 +70,19 @@ test("chat width slider narrows the column and persists", async ({ page }) => {
 	await expect(slider).toBeVisible();
 	await expect(slider).toHaveAttribute("min", "28");
 	await expect(slider).toHaveAttribute("max", "120");
-	const rootPx = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
-	// The composer shares the column cap (own articles shrink-wrap, so
-	// their computed max stays a min() expression — the prompt resolves).
-	const promptMax = () =>
-		page.locator(".prompt").evaluate((el) => getComputedStyle(el).maxWidth);
-	expect(await promptMax()).toBe(`${46 * rootPx}px`);
+	// The composer pins to min(chat-width, 36rem) while articles ride
+	// the raw column var — assert the var, which is what the slider
+	// drives (the 46rem default predates both the cap and 36rem).
+	const chatVar = () =>
+		page.evaluate(() =>
+			getComputedStyle(document.querySelector(".app") as Element)
+				.getPropertyValue("--chat-width")
+				.trim()
+		);
+	expect(await chatVar()).toBe("36");
 	await slider.fill("32");
 	await expect(slider).toHaveValue("32");
-	expect(await promptMax()).toBe(`${32 * rootPx}px`);
+	expect(await chatVar()).toBe("32");
 	// Persisted to storage (the seeded init script rewrites settings on
 	// every navigation, so reload-round-trip is covered by the unit
 	// test's loadSettings clamp instead).
@@ -102,9 +106,12 @@ test("gutter double-click recomputes from the live width", async ({ page }) => {
 	await page.keyboard.press("Meta+,");
 	const slider = page.locator('.settings-panel input[aria-label="Chat width in rem"]');
 	const sidebar = page.locator("aside:not(.settings-panel)");
-	const promptMax = () =>
-		page.locator(".prompt").evaluate((el) => getComputedStyle(el).maxWidth);
-	const rootPx = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
+	const chatVar = () =>
+		page.evaluate(() =>
+			getComputedStyle(document.querySelector(".app") as Element)
+				.getPropertyValue("--chat-width")
+				.trim()
+		);
 	// Closing the panel pulses root pointer-events (cursor re-hit-test);
 	// wait for the restore so the gutter clicks below genuinely land.
 	const waitHitTestable = () =>
@@ -112,18 +119,22 @@ test("gutter double-click recomputes from the live width", async ({ page }) => {
 			.poll(() => page.evaluate(() => document.documentElement.style.pointerEvents))
 			.toBe("");
 	await expect(sidebar).toHaveClass(/collapsed/);
-	// Full-bleed column: x=100 lands inside it (the 19px messages
-	// padding stays gutter), so nothing opens.
+	// Wide column: a point just inside its live left edge is content,
+	// not gutter (articles cap at 85%, so a fixed x can't prove this).
 	await slider.fill("80");
-	expect(await promptMax()).toBe(`${80 * rootPx}px`);
+	expect(await chatVar()).toBe("80");
+	const leftEdge = await page
+		.locator("article.assistant")
+		.first()
+		.evaluate((el) => el.getBoundingClientRect().left);
 	await page.locator(".settings-panel .panel-head").click();
 	await waitHitTestable();
-	await page.mouse.dblclick(100, 400);
+	await page.mouse.dblclick(leftEdge + 20, 400);
 	await expect(sidebar).toHaveClass(/collapsed/);
 	// Narrow column: x=100 is gutter, so the chats list opens.
 	await page.keyboard.press("Meta+,");
 	await page.locator('.settings-panel input[aria-label="Chat width in rem"]').fill("28");
-	expect(await promptMax()).toBe(`${28 * rootPx}px`);
+	expect(await chatVar()).toBe("28");
 	await page.locator(".settings-panel .panel-head").click();
 	await waitHitTestable();
 	await page.mouse.dblclick(100, 400);
@@ -151,14 +162,13 @@ test("shortcuts entry is a one-line button, chord lives in the modal", async ({ 
 	await expect(modal).toHaveCount(0);
 });
 
-/** Bubble background is decor only: turning it off never changes the
-message alignment (left, right-docked, both ways). */
-test("own-bubble off keeps left alignment, drops background", async ({ page }) => {
+/** Bubble background is decor only: the switch never moves message
+alignment (left, right-docked, both ways). Plain text is the default. */
+test("own-bubble switch keeps left alignment, background follows", async ({ page }) => {
 	const bubble = page.locator("article.user .bubble");
-	await expect(bubble).toHaveCSS("background-color", "rgb(241, 241, 244)");
+	await expect(bubble).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 	await expect(bubble).toHaveCSS("text-align", "left");
 	await page.locator(".settings-panel").getByText("Enable background on my messages").click();
+	await expect(bubble).toHaveCSS("background-color", "rgb(241, 241, 244)");
 	await expect(bubble).toHaveCSS("text-align", "left");
-	const bg = await bubble.evaluate((el) => getComputedStyle(el).backgroundColor);
-	expect(bg).toBe("rgba(0, 0, 0, 0)");
 });

@@ -28,6 +28,7 @@
 		setPasteFold,
 		visibleMessageCount,
 		isSending,
+		type Chat,
 		type ChatMsg,
 		type ChatId,
 		type ChatMsgId
@@ -172,7 +173,7 @@
 		type LocalAid
 	} from "$lib/reading";
 	import { isFuriganaCached } from "$lib/furigana";
-	import { buildSearchDocs, chatMatchesQuery, type SearchHit } from "$lib/chatSearch";
+	import { buildSearchDocs, chatMatchesQuery, findMessageIndices, type SearchHit } from "$lib/chatSearch";
 	import { ChatSearchStore, createSearchWorker } from "$lib/chatSearchStore";
 	import {
 		clipboardReadAvailable,
@@ -180,22 +181,19 @@
 		type ClipboardItemLike
 	} from "$lib/touchPaste";
 	import {
-		captureScreenToFile,
 		consumeLaunchFiles,
 		downloadMarkdownFile,
 		dropFilesFromDataTransfer,
 		exportChatMarkdown,
 		fileSaveAccessAvailable,
-		grabVideoFrame,
 		isPermissionDismissal,
-		screenshotCaptureAvailable,
 		splitLaunchFiles,
 		type LaunchQueueLike,
 		type SaveHandleLike,
 		type SavePickerOptions
 	} from "$lib/intake";
 	import { isKeyboardOpen, keyboardOverlapPx } from "$lib/viewportReflow";
-import { isPromptIdle } from "$lib/chrome";
+import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	import {
 		speakText,
 		speakMultilingual,
@@ -473,6 +471,7 @@ import { isPromptIdle } from "$lib/chrome";
 	let searchBusy = $state(false);
 	let searchCursor = $state(0);
 	let searchInputEl: HTMLInputElement | undefined = $state();
+	let searchResultsEl: HTMLElement | undefined = $state();
 	/** Search documents snapshot (Worker + IndexedDB, in-memory fallback). */
 	let searchStore: ChatSearchStore | null = null;
 	let searchIndexTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1129,11 +1128,17 @@ import { isPromptIdle } from "$lib/chrome";
 		if (hit.doc.msgId) {
 			const index = chat.messages.findIndex((m) => m.id === hit.doc.msgId);
 			if (index >= 0) {
+				// Native focus order matches the highlighted message:
+				// scroll mode owns j/k/arrows from here and Tab walks
+				// the same message order.
+				enterScrollMode();
+				selectedIdx = index;
 				requestAnimationFrame(() => {
-					document
-						.getElementById(`msg-${index}`)
-						?.scrollIntoView({ block: "center", behavior: "smooth" });
+					const el = document.getElementById(`msg-${index}`);
+					el?.scrollIntoView({ block: "center", behavior: "smooth" });
+					el?.focus({ preventScroll: true });
 				});
+				return;
 			}
 		}
 		editor?.focus();
@@ -1143,6 +1148,64 @@ import { isPromptIdle } from "$lib/chrome";
 		if (searchHits.length === 0) return;
 		searchCursor =
 			((searchCursor + delta) % searchHits.length + searchHits.length) % searchHits.length;
+	}
+
+	/**
+	 * DOM focus follows the palette highlight: the highlighted option
+	 * becomes the focused element, so Tab/Shift-Tab continue from the
+	 * highlighted result and screen readers track the cursor.
+	 */
+	function focusSearchHit(cursor: number): void {
+		searchResultsEl
+			?.querySelectorAll<HTMLButtonElement>(".search-hit")
+			[cursor]?.focus();
+	}
+
+	/**
+	 * In-chat find (Cmd/Ctrl+F): message-level cycling browser-style.
+	 * Matches come from findMessageIndices over the visible chat's
+	 * plain text; each stop selects + centers its message. DOM focus
+	 * stays in the find field while cycling (the scroll-mode arrow
+	 * branch stands down inside .find-bar — see inFind below).
+	 */
+	let findOpen = $state(false);
+	let findQuery = $state("");
+	let findCursor = $state(0);
+	let findInputEl: HTMLInputElement | undefined = $state();
+	function currentFindHits(): number[] {
+		return findOpen ? findMessageIndices(viewChat.messages.map((m) => m.content), findQuery) : [];
+	}
+	function landFindHit(): void {
+		const index = currentFindHits()[findCursor];
+		if (index === undefined) return;
+		enterScrollMode();
+		selectedIdx = index;
+		requestAnimationFrame(() => {
+			document
+				.getElementById(`msg-${index}`)
+				?.scrollIntoView({ block: "center", behavior: "smooth" });
+		});
+	}
+	function stepFind(delta: 1 | -1): void {
+		const hits = currentFindHits();
+		if (hits.length === 0) return;
+		findCursor =
+			((findCursor + delta) % hits.length + hits.length) % hits.length;
+		landFindHit();
+	}
+	function openFind(): void {
+		findOpen = true;
+		findCursor = 0;
+		requestAnimationFrame(() => {
+			findInputEl?.focus();
+			findInputEl?.select();
+		});
+	}
+	function closeFind(): void {
+		findOpen = false;
+		findQuery = "";
+		findCursor = 0;
+		editor?.focus();
 	}
 
 	/**
@@ -1166,47 +1229,18 @@ import { isPromptIdle } from "$lib/chrome";
 	}
 
 	/**
-	 * Screenshot-to-chat: one getDisplayMedia frame straight into the
-	 * existing attachments path (same marker line as pasted images, so
-	 * send strips it and the image travels as an attachment). The
-	 * button only renders where getDisplayMedia exists; a dismissed
-	 * picker stays silent, real failures land in attachError.
-	 */
-	let screenshotting = $state(false);
-
-	async function captureScreenshot(): Promise<void> {
-		if (screenshotting) return;
-		screenshotting = true;
-		try {
-			const file = await captureScreenToFile(
-				(options) => navigator.mediaDevices.getDisplayMedia(options),
-				grabVideoFrame
-			);
-			const images = file.type.startsWith("image/") ? 1 : 0;
-			await addFiles([file]);
-			insertImageMarkers(images);
-		} catch (error) {
-			if (!isPermissionDismissal(error)) {
-				attachError = error instanceof Error ? error.message : String(error);
-			}
-		} finally {
-			screenshotting = false;
-		}
-	}
-
-	/**
-	 * Export the active chat as Markdown: File System Access picker
+	 * Export one sidebar chat as Markdown: File System Access picker
 	 * where available, download blob fallback otherwise. A dismissed
 	 * picker stays silent.
 	 */
-	async function exportCurrentChat(): Promise<void> {
+	async function exportOneChat(target: Chat): Promise<void> {
 		try {
 			const picker = fileSaveAccessAvailable()
 				? ((window as unknown as {
 						showSaveFilePicker?: (options: SavePickerOptions) => Promise<SaveHandleLike>;
 					}).showSaveFilePicker?.bind(window) ?? null)
 				: null;
-			const how = await exportChatMarkdown(chat, {
+			const how = await exportChatMarkdown(target, {
 				picker,
 				download: downloadMarkdownFile
 			});
@@ -1256,10 +1290,10 @@ import { isPromptIdle } from "$lib/chrome";
 	 * a 500ms ticker hides it (slides down out of view) once the
 	 * effective timeout elapses with no input. The timeout and mobile
 	 * reads subscribe the effect, so a settings change or the phone
-	 * detection landing re-arms the ticker. An empty chat never hides:
-	 * with no text to uncover, the prompt and its attachment strip
-	 * stay put. (Skipping short-but-nonempty threads too is the chrome
-	 * pile's idle-hide checkbox, with its own contract test.)
+	 * detection landing re-arms the ticker. An empty chat never hides,
+	 * and neither does a thread shorter than the viewport
+	 * (contentFitsViewport, contract-tested in chrome.test.ts): with
+	 * nothing to uncover, the prompt and its attachment strip stay put.
 	 */
 	let lastInputAt = $state(Date.now());
 	let promptIdle = $state(false);
@@ -1279,6 +1313,10 @@ import { isPromptIdle } from "$lib/chrome";
 		const timer = window.setInterval(() => {
 			if (!isPromptIdle(lastInputAt, Date.now(), idleSec)) return;
 			if (viewChat.messages.length === 0) return;
+			// Short threads never hide: with nothing to uncover, the
+			// prompt only strands itself (see contentFitsViewport).
+			const box = scrollBox;
+			if (box && contentFitsViewport(box.scrollHeight, box.clientHeight)) return;
 			promptIdle = true;
 		}, 500);
 		return () => {
@@ -1467,9 +1505,14 @@ import { isPromptIdle } from "$lib/chrome";
 		el.scrollIntoView({ block: "nearest", behavior: "smooth" });
 	}
 
-	/** Opening lands keyboard users on the first chat (renders async). */
-	function focusFirstSideChat(): void {
-		requestAnimationFrame(() => focusSideChat(0));
+	/**
+	 * Opening lands keyboard users on the current chat (renders async),
+	 * so j/k starts there instead of the top. Falls back to the top
+	 * row when a search filter hides the active chat.
+	 */
+	function focusActiveSideChat(): void {
+		const at = sideVisibleChats().findIndex((c) => c.id === chatState.activeChatId);
+		requestAnimationFrame(() => focusSideChat(at < 0 ? 0 : at));
 	}
 
 	/**
@@ -3307,6 +3350,10 @@ import { isPromptIdle } from "$lib/chrome";
 	function startScrollHold(key: string, velocity: number): void {
 		stopScrollHold();
 		if (!scrollBox) return;
+		// The .messages column eases programmatic jumps (scroll-behavior:
+		// smooth); per-frame glide sets need instant application, or the
+		// box chases a moving target and lags several-fold behind.
+		scrollBox.style.scrollBehavior = "auto";
 		const hold = { key, velocity, downAt: Date.now(), lastT: performance.now(), raf: 0 };
 		scrollHold = hold;
 		const tick = (t: number) => {
@@ -3323,6 +3370,7 @@ import { isPromptIdle } from "$lib/chrome";
 		if (!hold || event.key !== hold.key) return;
 		cancelAnimationFrame(hold.raf);
 		scrollHold = null;
+		scrollBox?.style.removeProperty("scroll-behavior");
 		if (holdIsTap(hold.downAt, Date.now()) && scrollBox) {
 			scrollChatBy(
 				hold.key === "d" || hold.key === "u"
@@ -3334,6 +3382,7 @@ import { isPromptIdle } from "$lib/chrome";
 	function stopScrollHold(): void {
 		if (scrollHold) cancelAnimationFrame(scrollHold.raf);
 		scrollHold = null;
+		scrollBox?.style.removeProperty("scroll-behavior");
 	}
 	function scrollChatTop(): void {
 		scrollBox?.scrollTo({ top: 0, behavior: "smooth" });
@@ -3615,7 +3664,7 @@ import { isPromptIdle } from "$lib/chrome";
 					editor?.focus();
 				} else if (action === "toggle-sidebar") {
 					toggleSidebar();
-					if (!settings.sidebarCollapsed) focusFirstSideChat();
+					if (!settings.sidebarCollapsed) focusActiveSideChat();
 				} else if (action === "next-chat") {
 					stepChat(1);
 				} else if (action === "prev-chat") {
@@ -4299,11 +4348,23 @@ import { isPromptIdle } from "$lib/chrome";
 			}
 			if (event.key === "Escape" && searchOpen) {
 				// The search palette wins Esc next, even from its input.
+				// A first ESC moves DOM focus input -> list (the query
+				// stays, the highlight is already tracked); a second
+				// ESC — or one with no results — closes.
 				event.preventDefault();
 				event.stopPropagation();
-				closeSearch();
+				if (document.activeElement === searchInputEl && searchHits.length > 0) {
+					focusSearchHit(searchCursor);
+				} else closeSearch();
 				return;
 			}
+				if (event.key === "Escape" && findOpen) {
+					// The find bar closes from anywhere (its input included).
+					event.preventDefault();
+					event.stopPropagation();
+					closeFind();
+					return;
+				}
 			if (event.key === "Escape" && sideviewOpen) {
 				// The docked browser panel closes next, from
 				// anywhere (it has no text worth cancelling).
@@ -4327,6 +4388,22 @@ import { isPromptIdle } from "$lib/chrome";
 				else openSearch();
 				return;
 			}
+				if (
+					(event.metaKey || event.ctrlKey) &&
+					!event.altKey &&
+					!event.shiftKey &&
+					event.code === "KeyF"
+				) {
+					// In-chat find across the visible messages, cycling hits.
+					event.preventDefault();
+					event.stopPropagation();
+					if (!findOpen) openFind();
+					else {
+						findInputEl?.focus();
+						findInputEl?.select();
+					}
+					return;
+				}
 			if (isSummonHotkey(event) && !inEditor) {
 			// Summon chord (Cmd/Ctrl+Shift+Space): focus the composer
 			// from anywhere outside it. Inside the editor the chord
@@ -4465,7 +4542,7 @@ import { isPromptIdle } from "$lib/chrome";
 					event.preventDefault();
 					event.stopPropagation();
 					toggleSidebar();
-					if (!settings.sidebarCollapsed) focusFirstSideChat();
+					if (!settings.sidebarCollapsed) focusActiveSideChat();
 					return;
 				}
 				if (event.code === "BracketRight") {
@@ -4485,7 +4562,7 @@ import { isPromptIdle } from "$lib/chrome";
 						return;
 					}
 					toggleSidebar();
-					if (!settings.sidebarCollapsed) focusFirstSideChat();
+					if (!settings.sidebarCollapsed) focusActiveSideChat();
 					return;
 				}
 				if (event.code === "KeyL") {
@@ -4555,7 +4632,7 @@ import { isPromptIdle } from "$lib/chrome";
 					event.preventDefault();
 					event.stopPropagation();
 					toggleSidebar();
-					if (!settings.sidebarCollapsed) focusFirstSideChat();
+					if (!settings.sidebarCollapsed) focusActiveSideChat();
 					return;
 				}
 				if (event.key === ".") {
@@ -4785,7 +4862,9 @@ import { isPromptIdle } from "$lib/chrome";
 					lastGAt = 0;
 				}
 			}
-			if (focusMode !== "scroll" || inEditor) return;
+			const inFind =
+				(event.target as HTMLElement | null)?.closest(".find-bar") !== null;
+			if (focusMode !== "scroll" || inEditor || inFind) return;
 			if (event.key === "j" || event.key === "ArrowDown") {
 				event.preventDefault();
 				lastGAt = 0;
@@ -4885,6 +4964,15 @@ import { isPromptIdle } from "$lib/chrome";
 				return false;
 			}
 			return true;
+		};
+		/**
+		 * Middle-click opens the shortcuts modal from anywhere (links
+		 * included — the app has no external links worth a new tab).
+		 */
+		const onMiddleClick = (event: MouseEvent) => {
+			if (event.button !== 1) return;
+			event.preventDefault();
+			shortcutsOpen = true;
 		};
 		const onDoubleClick = (event: MouseEvent) => {
 			if (!clickGuardsPass(event)) return;
@@ -5232,6 +5320,8 @@ import { isPromptIdle } from "$lib/chrome";
 		window.addEventListener("scroll", onFadeScroll, true);
 		window.addEventListener("mouseup", onMouseUp);
 		window.addEventListener("dblclick", onDoubleClick);
+		// Middle-click anywhere opens the shortcuts modal (no autoscroll).
+		window.addEventListener("auxclick", onMiddleClick);
 		window.addEventListener("contextmenu", onContextMenu, true);
 		return () => {
 			window.visualViewport?.removeEventListener("resize", onViewportResize);
@@ -5254,6 +5344,7 @@ import { isPromptIdle } from "$lib/chrome";
 			window.removeEventListener("scroll", onFadeScroll, true);
 			window.removeEventListener("mouseup", onMouseUp);
 			window.removeEventListener("dblclick", onDoubleClick);
+			window.removeEventListener("auxclick", onMiddleClick);
 			window.removeEventListener("contextmenu", onContextMenu, true);
 			window.clearTimeout(scrollIdleTimer);
 			stopSpeaking();
@@ -5280,7 +5371,13 @@ import { isPromptIdle } from "$lib/chrome";
 	style="--font-scale: {androidUI ? Math.min(4, settings.fontScale) : settings.fontScale}; --chat-width: {androidUI ? 46 : (settings.chatWidth ?? 36)}"
 	data-mac={isMac && !androidUI || null}
 >
-	<aside class:collapsed={settings.sidebarCollapsed} inert={settings.sidebarCollapsed} data-fade-scroll>
+	<aside class:collapsed={settings.sidebarCollapsed} inert={settings.sidebarCollapsed} data-fade-scroll
+		ondblclick={(event) => {
+			const target = event.target;
+			if (target instanceof HTMLElement && target.closest("button, input, select, textarea, a")) return;
+			settings.sidebarCollapsed = true;
+			persistSettings();
+		}}>
 		<div class="side-head" data-tauri-drag-region aria-hidden="true" onmousedown={dragWindow} ondblclick={zoomWindow}>
 		</div>
 		<!-- Sidebar search: a swipe left-to-right opens the list on this
@@ -5326,9 +5423,23 @@ import { isPromptIdle } from "$lib/chrome";
 							previewChatId = null;
 							sideIdx = chatState.chats.findIndex((c) => c.id === item.id);
 							transitionToChat(item.id);
+							// A picked chat closes the list and lands in its prompt,
+							// like keyboard Enter (enterSideChat) already does.
+							settings.sidebarCollapsed = true;
+							persistSettings();
+							enterEditMode();
 						}}
 					>
 						{chatLabel(item.createdAt, visibleMessageCount(chatState, item))}
+					</button>
+					<button
+						type="button"
+						class="exp"
+						title="Export chat as Markdown"
+						aria-label="Export chat as Markdown"
+						onclick={() => void exportOneChat(item)}
+					>
+						<ActionIcon kind="export" />
 					</button>
 					<button
 						type="button"
@@ -5375,7 +5486,7 @@ import { isPromptIdle } from "$lib/chrome";
 		anchor (token count lives in the settings panel now, and
 		Settings itself moved to the menu bar). Double-click zooms. -->
 		<header role="toolbar" aria-label="App" tabindex="-1" onmousedown={dragWindow} ondblclick={zoomWindow}>
-			<span class="app-title">Ccez Studio</span>
+			<span class="app-title">Ccez LLM</span>
 			<span class="tokens-wrap">
 				{#if activeReplyLang}
 					<span class="lang-chip-float" transition:fade={{ duration: 90 }}>
@@ -5417,17 +5528,43 @@ import { isPromptIdle } from "$lib/chrome";
 						<button type="submit" aria-label="Go to address">Go</button>
 					</form>
 				{/if}
-				<button
-					type="button"
-					class="export-btn"
-					title="Export chat as Markdown"
-					aria-label="Export chat as Markdown"
-					onclick={() => void exportCurrentChat()}
-				>
-					Export
-				</button>
 			</span>
 		</header>
+
+		<!-- In-chat find (Cmd/Ctrl+F): message-level cycling browser-style. -->
+		{#if findOpen && !androidUI}
+			<div class="find-bar" role="search" aria-label="Find in chat">
+				<input
+					type="search"
+					bind:this={findInputEl}
+					bind:value={findQuery}
+					oninput={() => {
+						findCursor = 0;
+						landFindHit();
+					}}
+					onkeydown={(e) => {
+						if (e.key === "Enter") {
+							e.preventDefault();
+							stepFind(e.shiftKey ? -1 : 1);
+						}
+					}}
+					placeholder="Find in chat"
+					aria-label="Find in chat"
+					autocomplete="off"
+					spellcheck={false}
+				/>
+				<span class="find-count" aria-live="polite">
+					{currentFindHits().length === 0
+						? findQuery.trim()
+							? "No matches"
+							: ""
+						: `${Math.min(findCursor + 1, currentFindHits().length)}/${currentFindHits().length}`}
+				</span>
+				<button type="button" aria-label="Previous match" title="Previous (Shift+Enter)" onclick={() => stepFind(-1)}>↑</button>
+				<button type="button" aria-label="Next match" title="Next (Enter)" onclick={() => stepFind(1)}>↓</button>
+				<button type="button" aria-label="Close find" title="Close (Esc)" onclick={closeFind}>×</button>
+			</div>
+		{/if}
 
 		{#if points.length > 3 && !settingsOpen && !previewing}
 			<nav aria-label="Waypoints">
@@ -5538,6 +5675,7 @@ import { isPromptIdle } from "$lib/chrome";
 				<!-- Option-click is mouse-only by design; keyboard users get the Fold button below. -->
 				<article
 					id="msg-{i}"
+					tabindex="-1"
 					class:user={msg.role === "user"}
 					class:assistant={msg.role === "assistant"}
 					class:selected={focusMode === "scroll" && selectedIdx === i}
@@ -6108,21 +6246,6 @@ import { isPromptIdle } from "$lib/chrome";
 						<ActionIcon kind="paste" />
 					</button>
 				{/if}
-				{#if screenshotCaptureAvailable()}
-					<!-- Screenshot-to-chat: one screen frame into the
-					attachments path. Hidden where getDisplayMedia is
-					missing (plain contexts without capture support). -->
-					<button
-						type="button"
-						class="shot-btn"
-						title="Capture a screenshot into the chat"
-						aria-label="Capture a screenshot into the chat"
-						disabled={screenshotting}
-						onclick={() => void captureScreenshot()}
-					>
-						Shot
-					</button>
-				{/if}
 				{#if canMic && settings.micEnabled}
 					<button
 						type="button"
@@ -6157,7 +6280,7 @@ import { isPromptIdle } from "$lib/chrome";
 				aria-label={altHeld ? "Stage" : "Send"}
 				onclick={(event) => onSubmit(altHeld || event.altKey ? "stage" : "send")}
 			>
-				{altHeld ? "Add +" : "↑"}
+				{altHeld ? "Add +" : "📨"}
 			</button>
 		</div>
 		{#if vocalizeError}
@@ -6217,7 +6340,7 @@ import { isPromptIdle } from "$lib/chrome";
 						</button>
 						{#if openLangMenu === menu.id}
 							<div class="lang-list" role="menu">
-								{#each menu.languages as lang (lang.code)}
+								{#each [...menu.languages].sort((a, b) => a.name.localeCompare(b.name, "en")) as lang (lang.code)}
 									{@const quickKey = quickKeyFor(lang.code)}
 									<button
 										type="button"
@@ -6429,6 +6552,7 @@ import { isPromptIdle } from "$lib/chrome";
 			pulseCursor();
 		}}
 			onShortcuts={() => (shortcutsOpen = true)}
+			onExpand={zoomWindow}
 			tokensLabel="{formatTokens(split.prompt)} in / {formatTokens(split.completion)} out"
 			tokensTitle="{total} tokens total this chat"
 			androidUI={androidUI}
@@ -6470,16 +6594,18 @@ import { isPromptIdle } from "$lib/chrome";
 					</dl>
 				{:else}
 				<dl class="keys">
+					<div><dt>Shortcuts show/hide</dt><dd>{isMac ? "⇧⌘/" : "Ctrl+Shift+/"} · middle-click</dd></div>
 					<div><dt>New line</dt><dd>Shift+Enter</dd></div>
 					<div><dt>Stage message</dt><dd>{altm}+Enter</dd></div>
-					<div><dt>Shortcuts show/hide</dt><dd>{isMac ? "⇧⌘/" : "Ctrl+Shift+/"}</dd></div>
 					<div><dt>Switch model / key</dt><dd>Ctrl+{altm}+← / →</dd></div>
 					<div><dt>Thinking level</dt><dd>Ctrl+{altm}+↓ / ↑ (cycles levels)</dd></div>
 					<div><dt>Scroll messages</dt><dd>J / K · gg top · G bottom · Ctrl+U / Ctrl+D skip</dd></div>
-					<div><dt>Scroll chat (nothing selected)</dt><dd>J / K · D / U fast · gg top · G bottom · z / Z hovered top / bottom</dd></div>
+					<div><dt>Scroll chat (nothing selected)</dt><dd>J / K glide on hold · D / U fast · gg top · G bottom · z / Z hovered top / bottom</dd></div>
 					<div><dt>Exit fullscreen</dt><dd>Hold Esc (a tap still closes menus)</dd></div>
-					<div><dt>Chat list</dt><dd>{isMac ? "⌘B" : "Ctrl+B"}, then J / K · Space or L enters its prompt</dd></div>
-					<div><dt>Search chats</dt><dd>{isMac ? "⌘P" : "Ctrl+P"}</dd></div>
+					<div><dt>Chat list</dt><dd>{isMac ? "⌘B or ⇧⌘H" : "Ctrl+B or Ctrl+Shift+H"} · opens on the current chat · J / K walk · Space enters</dd></div>
+					<div><dt>Export chat</dt><dd>Chats-list row icon, left of ×</dd></div>
+					<div><dt>Search chats</dt><dd>{isMac ? "⌘P" : "Ctrl+P"} · J / K move · Esc to list · Enter jumps</dd></div>
+					<div><dt>Find in chat</dt><dd>{isMac ? "⌘F" : "Ctrl+F"} · Enter cycles hits</dd></div>
 					<div><dt>Newer / older chat</dt><dd>{isMac ? "⇧⌘J / ⇧⌘K" : "Ctrl+Shift+J / Ctrl+Shift+K"} (J mints one past the newest)</dd></div>
 					<div><dt>Voice readback on/off</dt><dd>Ctrl+{altm}+S</dd></div>
 					<div><dt>Speak hovered word</dt><dd>Right click word</dd></div>
@@ -6544,7 +6670,13 @@ import { isPromptIdle } from "$lib/chrome";
 						×
 					</button>
 				</div>
-				<div class="search-results" data-fade-scroll role="listbox" aria-label="Search results">
+				<div
+					class="search-results"
+					bind:this={searchResultsEl}
+					data-fade-scroll
+					role="listbox"
+					aria-label="Search results"
+				>
 					{#if searchBusy}
 						<p class="search-status" role="status">Searching…</p>
 					{:else if searchQuery.trim() && searchHits.length === 0}
@@ -6559,6 +6691,17 @@ import { isPromptIdle } from "$lib/chrome";
 								class:cursor={n === searchCursor}
 								onmouseenter={() => (searchCursor = n)}
 								onclick={() => enterSearchHit(hit)}
+								onkeydown={(e) => {
+									if (e.key === "j" || e.key === "ArrowDown") {
+										e.preventDefault();
+										moveSearchCursor(1);
+										focusSearchHit(searchCursor);
+									} else if (e.key === "k" || e.key === "ArrowUp") {
+										e.preventDefault();
+										moveSearchCursor(-1);
+										focusSearchHit(searchCursor);
+									}
+								}}
 							>
 								<span class="search-kind">{hit.doc.kind}</span>
 								<span class="search-snippet">{hit.snippet}</span>
@@ -6638,7 +6781,7 @@ import { isPromptIdle } from "$lib/chrome";
 	artifact, not a theme snapshot. -->
 	<section id="study-sheet-print" aria-hidden="true">
 		<h1>{sheetTitle(chat.messages)}</h1>
-		<p class="sheet-sub">Ccez Studio study sheet — {chat.messages.length} message{chat.messages.length === 1 ? "" : "s"}.</p>
+		<p class="sheet-sub">Ccez LLM study sheet — {chat.messages.length} message{chat.messages.length === 1 ? "" : "s"}.</p>
 		{#each chat.messages as msg (msg.id)}
 			<h2>{msg.role === "user" ? "You" : "Ccez"}</h2>
 			<p>{msg.content}</p>
@@ -6806,8 +6949,36 @@ import { isPromptIdle } from "$lib/chrome";
 		opacity: 1;
 		pointer-events: auto;
 	}
+	/* Per-row export: icon-only, parked left of the delete x on the
+	same overlay contract (pill keeps full width; keyboard focus
+	brings it back; touch keeps it in flow like the x). */
+	aside li .exp {
+		position: absolute;
+		right: 1.55rem;
+		top: 50%;
+		transform: translateY(-50%);
+		opacity: 0;
+		pointer-events: none;
+		border: 0;
+		background: none;
+		cursor: pointer;
+		color: #6e6e73;
+		color: var(--muted);
+		padding: 0.15rem;
+		line-height: 0;
+	}
+	aside li:hover .exp,
+	aside li:focus-within .exp {
+		opacity: 1;
+		pointer-events: auto;
+	}
+	aside li .exp:hover {
+		color: #1c1c1e;
+		color: var(--ink);
+	}
 	@media (hover: none) {
-		aside li .del {
+		aside li .del,
+		aside li .exp {
 			position: static;
 			transform: none;
 			opacity: 1;
@@ -7341,6 +7512,54 @@ import { isPromptIdle } from "$lib/chrome";
 		align-items: center;
 		gap: 0.35rem;
 	}
+	.find-bar {
+		position: fixed;
+		top: 2.6rem;
+		left: 50%;
+		transform: translateX(-50%);
+		z-index: 58;
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.35rem 0.5rem;
+		border: 1px solid #c7c7cc;
+		border-color: var(--line);
+		border-radius: 10px;
+		background: #fff;
+		background: var(--bg-raised);
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+	}
+	.find-bar input[type="search"] {
+		font: inherit;
+		font-size: 0.85rem;
+		color: inherit;
+		background: none;
+		border: 0;
+		outline: none;
+		width: 12rem;
+	}
+	.find-count {
+		font-size: 0.75rem;
+		color: #6e6e73;
+		color: var(--muted);
+		min-width: 3.2rem;
+		text-align: right;
+		white-space: nowrap;
+	}
+	.find-bar button {
+		font: inherit;
+		font-size: 0.85rem;
+		border: 0;
+		border-radius: 6px;
+		background: none;
+		cursor: pointer;
+		color: inherit;
+		padding: 0.1rem 0.35rem;
+		line-height: 1.2;
+	}
+	.find-bar button:hover {
+		background: rgba(120, 120, 128, 0.18);
+	}
 	.browser-address input {
 		font: inherit;
 		font-size: 0.78rem;
@@ -7373,30 +7592,6 @@ import { isPromptIdle } from "$lib/chrome";
 	}
 	.browser-address button:hover,
 	.browser-address button:focus-visible {
-		opacity: 1;
-	}
-	.export-btn {
-		font: inherit;
-		/* The open strip is a fixed drawer (z-index 55) covering the
-		top bar: without its own stacking the toggle sinks under it
-		and can never be clicked shut. */
-		position: relative;
-		z-index: 56;
-		font-size: 0.78rem;
-		color: #1c1c1e;
-		color: var(--ink);
-		border: 1px solid #1c1c1e;
-		border-color: var(--strong);
-		border-radius: 999px;
-		background: none;
-		cursor: pointer;
-		padding: 0.2rem 0.7rem;
-		white-space: nowrap;
-		opacity: 0.55;
-		transition: opacity 0.18s ease;
-	}
-	.export-btn:hover,
-	.export-btn:focus-visible {
 		opacity: 1;
 	}
 	/* Fallback strip (browser dev, no shell webview): docks right
@@ -7992,14 +8187,20 @@ import { isPromptIdle } from "$lib/chrome";
 	}
 	main.empty .lang-menus {
 		justify-content: center;
-		padding: 0.55rem 1.2rem 0;
+		padding: 0.55rem 1.2rem 0.6rem;
 	}
-	/* Mac desktop only: lift the language buttons clear of the
-	composer (the default gap reads stranded under macOS chrome).
-	A pure visual shift — layout never moves, so nothing overlaps.
-	Eyeball the exact offset on a Mac; touch layouts are untouched. */
+	/* Mac desktop only: nudge the language row down toward the
+	composer and fade it until hover — quiet chrome on an empty chat.
+	A pure visual shift (layout never moves, so nothing overlaps);
+	keyboard focus brings it back like hover. Touch layouts untouched. */
 	.app[data-mac] main.empty .lang-menus {
-		transform: translateY(-1.5rem);
+		transform: translateY(0.35rem);
+		opacity: 0.55;
+		transition: opacity 0.18s ease;
+	}
+	.app[data-mac] main.empty .lang-menus:hover,
+	.app[data-mac] main.empty .lang-menus:focus-within {
+		opacity: 1;
 	}
 	.lang-menu {
 		position: relative;
@@ -8153,10 +8354,12 @@ import { isPromptIdle } from "$lib/chrome";
 		align-self: flex-end;
 		/* Shrink-wrap so short prompts don't stretch into empty space.
 		Beats the centered-column rule's width:100% on specificity;
-		margin-right keeps the right edge on the chat-width column. */
+		margin-right docks the right edge to the assistant column
+		(centered min(85%, chat-width)), so own messages never drift
+		right past AI width on narrow windows. */
 		width: fit-content;
 		max-width: min(85%, calc(var(--chat-width, 36) * 1rem));
-		margin-right: max(0rem, calc((100% - var(--chat-width, 36) * 1rem) / 2));
+		margin-right: max(0rem, calc((100% - min(85%, var(--chat-width, 36) * 1rem)) / 2));
 		/* No background or padding here: the bubble wraps the text only,
 		so the action row below sits outside it. */
 		padding: 0;
@@ -8170,8 +8373,11 @@ import { isPromptIdle } from "$lib/chrome";
 	article.user .bubble {
 		background: #f1f1f4;
 		background: var(--bg-wash);
-		border-radius: 1.75rem;
-		padding: 0.45rem 1rem 0.55rem;
+		border-radius: calc(1.75rem * var(--font-scale, 1));
+		padding:
+			calc(0.45rem * var(--font-scale, 1))
+			calc(1rem * var(--font-scale, 1))
+			calc(0.55rem * var(--font-scale, 1));
 		text-align: left;
 		width: fit-content;
 		/* 100%, not 85%: the article already caps at min(85%, chat-width),
@@ -8212,6 +8418,17 @@ import { isPromptIdle } from "$lib/chrome";
 		margin-left: auto;
 	}
 	article.selected {
+		outline: 2px solid #3a3a3c;
+		outline-color: var(--focus);
+		outline-offset: 2px;
+	}
+	/* Palette jumps land DOM focus on the article itself (tabindex -1
+	for programmatic focus only, never in the Tab order): .selected
+	carries the keyboard indicator, so focus adds no second ring. */
+	article:focus {
+		outline: none;
+	}
+	article.selected:focus {
 		outline: 2px solid #3a3a3c;
 		outline-color: var(--focus);
 		outline-offset: 2px;
@@ -9581,9 +9798,12 @@ import { isPromptIdle } from "$lib/chrome";
 		font-weight: 700;
 		line-height: 1;
 		cursor: pointer;
-		/* The arrow glyph sits high and thin at normal weight: bold
-		adds the missing stroke, top padding walks it down to center. */
-		padding: 0.12rem 0 0;
+		/* Emoji bearings differ from the old arrow's: flex centers the
+		glyph both ways instead of the arrow's padding walk. */
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0;
 	}
 	.send-btn:hover:not(:disabled) {
 		opacity: 0.8;
@@ -9638,27 +9858,6 @@ import { isPromptIdle } from "$lib/chrome";
 		height: 1.05em;
 	}
 	.paste-btn:disabled {
-		opacity: 0.4;
-		cursor: default;
-	}
-	/* Screenshot-to-chat: text treatment in the tools rhythm, muted
-	until hover like the icon buttons around it. */
-	.shot-btn {
-		border: 0;
-		background: none;
-		cursor: pointer;
-		font-size: 0.85rem;
-		font-weight: 600;
-		color: #6e6e73;
-		color: var(--muted);
-		padding: 0.2rem 0.35rem;
-		white-space: nowrap;
-	}
-	.shot-btn:hover {
-		color: #1c1c1e;
-		color: var(--ink);
-	}
-	.shot-btn:disabled {
 		opacity: 0.4;
 		cursor: default;
 	}

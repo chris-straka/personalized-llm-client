@@ -284,7 +284,7 @@ pub fn study_sheet_markdown(title: &str, messages: &[StudyLine]) -> String {
         .filter(|(_, text)| !text.is_empty())
         .collect();
     let mut out = format!(
-        "# {title}\n\n*Ccez Studio study sheet — {} message{}.*\n",
+        "# {title}\n\n*Ccez LLM study sheet — {} message{}.*\n",
         kept.len(),
         if kept.len() == 1 { "" } else { "s" }
     );

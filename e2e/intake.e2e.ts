@@ -67,9 +67,16 @@ test("composer accepts dropped files into the attachments path", async ({ page }
 	});
 });
 
-test("export button downloads the chat as markdown", async ({ page }) => {
+test("sidebar row export button downloads the chat as markdown", async ({ page }) => {
+	// Export lives per sidebar row now (icon-only, left of delete);
+	// the header button is gone.
+	await expect(page.locator('header button[aria-label="Export chat as Markdown"]')).toHaveCount(0);
+	await page.keyboard.press("Meta+b");
+	const row = page.locator("aside li").first();
+	await expect(row).toBeVisible();
+	await row.hover();
 	const downloadPromise = page.waitForEvent("download", { timeout: 15_000 });
-	await page.locator('header button[aria-label="Export chat as Markdown"]').click();
+	await row.locator('button[aria-label="Export chat as Markdown"]').click();
 	const download = await downloadPromise;
 	expect(download.suggestedFilename()).toMatch(/^chat-\d{4}-\d{2}-\d{2}\.md$/);
 	const path = await download.path();
@@ -112,19 +119,13 @@ test("deleting the tag drops the pill", async ({ page }) => {
 	await expect(card).toHaveCount(0);
 	await expect(page.locator(".cm-content")).toContainText("hello");
 });
-
-test("screenshot button renders where screen capture is supported", async ({ page }) => {
-	const supported = await page.evaluate(
-		() => typeof navigator.mediaDevices?.getDisplayMedia === "function"
-	);
-	const shot = page.locator('.prompt-tools button[aria-label="Capture a screenshot into the chat"]');
-	if (supported) {
-		// Present and idle: clicking opens the OS picker, which e2e
-		// cannot drive, so presence plus the labelled control is the
-		// assertion. Dismissing the picker must not error.
-		await expect(shot).toBeVisible();
-	} else {
-		// Permission-gated: no capture API, no button, no dead control.
-		await expect(shot).toHaveCount(0);
-	}
+test("screenshot-to-chat is gone, paste still takes images", async ({ page }) => {
+	// Shot was removed (paste + OCR remain the image paths): no Shot
+	// control even where screen capture is supported.
+	await expect(
+		page.locator('.prompt-tools button[aria-label="Capture a screenshot into the chat"]')
+	).toHaveCount(0);
+	await expect(
+		page.locator('.prompt-tools button[aria-label="Attach images or text files"]')
+	).toBeVisible();
 });

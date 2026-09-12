@@ -169,10 +169,13 @@ export const SIDEVIEW_WIDTH_DEFAULT = 420;
 export const SIDEVIEW_WIDTH_MIN = 280;
 export const SIDEVIEW_WIDTH_MAX = 720;
 
-/** Prompt idle-hide timeout in seconds: 6s default, 2–60s configurable. */
+/** Prompt idle-hide timeout in seconds: 6s default, 2–10s configurable,
+ * plus the top slider tick ("never", stored as 0 = hiding disabled). */
 export const PROMPT_IDLE_DEFAULT = 6;
 export const PROMPT_IDLE_MIN = 2;
-export const PROMPT_IDLE_MAX = 60;
+export const PROMPT_IDLE_MAX = 10;
+/** Stored idle-hide value meaning "never hide" (see `isPromptIdle`). */
+export const PROMPT_IDLE_NEVER = 0;
 
 /**
  * Dev-time `.env` prefill (Vite bakes these into dev/preview builds only —
@@ -379,12 +382,14 @@ export function loadSettings(store?: KeyValueStore): AppSettings {
 		if (merged.theme !== "light" && merged.theme !== "dark" && merged.theme !== "system") {
 			merged.theme = "system";
 		}
-		// Clamp the prompt idle-hide timeout (older saves predate it).
+		// Clamp the prompt idle-hide timeout (older saves predate it;
+		// 0 = "never hide" is a legal stored value, everything else
+		// outside 2–10s falls back to the default).
 		if (
 			typeof merged.promptIdleSec !== "number" ||
 			Number.isNaN(merged.promptIdleSec) ||
-			merged.promptIdleSec < PROMPT_IDLE_MIN ||
-			merged.promptIdleSec > PROMPT_IDLE_MAX
+			(merged.promptIdleSec !== PROMPT_IDLE_NEVER &&
+				(merged.promptIdleSec < PROMPT_IDLE_MIN || merged.promptIdleSec > PROMPT_IDLE_MAX))
 		) {
 			merged.promptIdleSec = PROMPT_IDLE_DEFAULT;
 		}
