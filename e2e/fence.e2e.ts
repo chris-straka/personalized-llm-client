@@ -80,6 +80,45 @@ test("shift-enter on an empty body exits the block", async ({ page }) => {
 	expect(outside).toBe(true);
 });
 
+/** An empty fence assumes text: bare ``` still builds the block. */
+test("empty fence assumes text", async ({ page }) => {
+	await page.keyboard.type("```");
+	await page.keyboard.press("Shift+Enter");
+	const bar = page.locator(".cm-fence-bar");
+	await expect(bar).toBeVisible();
+	await expect(bar.locator(".cm-fence-lang")).toHaveText("text");
+	// Closer divider renders behind the body.
+	await expect(page.locator(".cm-fence-end")).toBeVisible();
+});
+
+/** Backticks inside a body never nest: a lang-tagged inner fence stays
+body text — one bar, no second block. */
+test("inner backticks never nest", async ({ page }) => {
+	await page.keyboard.type("```python");
+	await page.keyboard.press("Shift+Enter");
+	await expect(page.locator(".cm-fence-bar")).toBeVisible();
+	await page.keyboard.type("x = 1");
+	await page.keyboard.press("Shift+Enter");
+	// Typed, never committed: inner backticks change nothing.
+	await page.keyboard.type("```note");
+	expect(await page.locator(".cm-fence-bar").count()).toBe(1);
+	await expect(page.locator(".cm-content")).toContainText("```note");
+});
+
+/** Bar buttons are icon-only: glyphs, no text. */
+test("fence buttons are icon-only", async ({ page }) => {
+	await page.keyboard.type("```js");
+	await page.keyboard.press("Shift+Enter");
+	const bar = page.locator(".cm-fence-bar");
+	await expect(bar).toBeVisible();
+	for (const label of ["Collapse code block", "Copy code block"]) {
+		const button = bar.locator(`button[aria-label="${label}"]`);
+		await expect(button).toBeVisible();
+		expect(((await button.innerText()) ?? "").trim()).toBe("");
+		expect(await button.locator("svg").count()).toBe(1);
+	}
+});
+
 /** Copy writes the fence body to the clipboard. */
 test("fence copy writes the body", async ({ page, context }) => {
 	await context.grantPermissions(["clipboard-read", "clipboard-write"]);
