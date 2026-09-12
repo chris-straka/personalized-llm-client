@@ -63,6 +63,92 @@ test.describe("search palette", () => {
 	});
 });
 
+test.describe("palette focus order", () => {
+	async function seedMiso(page: Page): Promise<void> {
+		await page.addInitScript(() => {
+			window.localStorage.setItem("ccez-mock-provider", "1");
+			window.localStorage.setItem("ccez-studio-settings-v1", JSON.stringify({}));
+			const msg = (id: string, content: string) => ({
+				id,
+				role: "assistant",
+				content,
+				usage: null,
+				error: null
+			});
+			window.localStorage.setItem(
+				"ccez-studio-chats-v1",
+				JSON.stringify([
+					{ id: "chat-a", createdAt: 1, replyLang: null, messages: [msg("a1", "miso ramen broth"), msg("a2", "miso tare seasoning")] },
+					{ id: "chat-b", createdAt: 2, replyLang: null, messages: [msg("b1", "miso soup breakfast")] }
+				])
+			);
+		});
+		await page.goto("/");
+		await expect(page.locator("article .rendered").first()).toBeVisible();
+	}
+
+	test("ESC moves input focus to the list, second ESC closes", async ({ page }) => {
+		await seedMiso(page);
+		await page.keyboard.press("Control+p");
+		const box = page.getByLabel("Search chats and annotations");
+		await box.fill("miso");
+		await expect(page.locator(".search-hit")).toHaveCount(3, { timeout: 8000 });
+		// First ESC: palette stays, DOM focus lands on the highlight.
+		await page.keyboard.press("Escape");
+		await expect(page.getByRole("dialog", { name: "Search chats" })).toBeVisible();
+		const focused = await page.evaluate(() => ({
+			tag: document.activeElement?.tagName,
+			cls: (document.activeElement as HTMLElement | null)?.className
+		}));
+		expect(focused.tag).toBe("BUTTON");
+		expect(String(focused.cls)).toContain("search-hit");
+		// Second ESC: closes.
+		await page.keyboard.press("Escape");
+		await expect(page.getByRole("dialog", { name: "Search chats" })).toBeHidden();
+	});
+
+	test("j/k walk results with DOM focus following the highlight", async ({ page }) => {
+		await seedMiso(page);
+		await page.keyboard.press("Control+p");
+		await page.getByLabel("Search chats and annotations").fill("miso");
+		await expect(page.locator(".search-hit")).toHaveCount(3, { timeout: 8000 });
+		await page.keyboard.press("Escape");
+		const first = await page.evaluate(() => document.activeElement?.textContent);
+		await page.keyboard.press("j");
+		const second = await page.evaluate(() => ({
+			text: document.activeElement?.textContent,
+			selected: (document.activeElement as HTMLElement | null)?.getAttribute("aria-selected")
+		}));
+		expect(second.text).not.toBe(first);
+		expect(second.selected).toBe("true");
+		await page.keyboard.press("k");
+		const back = await page.evaluate(() => document.activeElement?.textContent);
+		expect(back).toBe(first);
+	});
+
+	test("Enter jumps with the message selected and focused", async ({ page }) => {
+		await seedMiso(page);
+		await page.keyboard.press("Control+p");
+		const box = page.getByLabel("Search chats and annotations");
+		await box.fill("ramen");
+		await expect(page.locator(".search-hit").first()).toContainText("ramen", { timeout: 8000 });
+		await box.press("Enter");
+		// Native focus order matches the highlighted message: the
+		// article carries .selected and DOM focus.
+		const landed = await page.evaluate(() => ({
+			tag: document.activeElement?.tagName,
+			id: (document.activeElement as HTMLElement | null)?.id,
+			selected: (document.activeElement as HTMLElement | null)?.classList.contains("selected")
+		}));
+		expect(landed.tag).toBe("ARTICLE");
+		expect(landed.selected).toBe(true);
+		// j from the highlight walks to the next message.
+		const targetId = landed.id === "msg-0" ? "msg-1" : "msg-0";
+		await page.keyboard.press("j");
+		await expect(page.locator(`article#${targetId}.selected`)).toBeVisible({ timeout: 8000 });
+	});
+});
+
 test.describe("sidebar search", () => {
 	test("typing in the sidebar box filters the chat list", async ({ page }) => {
 		await seedThreeChats(page);

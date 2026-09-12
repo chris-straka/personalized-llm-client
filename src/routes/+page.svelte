@@ -28,6 +28,7 @@
 		setPasteFold,
 		visibleMessageCount,
 		isSending,
+		type Chat,
 		type ChatMsg,
 		type ChatId,
 		type ChatMsgId
@@ -180,15 +181,12 @@
 		type ClipboardItemLike
 	} from "$lib/touchPaste";
 	import {
-		captureScreenToFile,
 		consumeLaunchFiles,
 		downloadMarkdownFile,
 		dropFilesFromDataTransfer,
 		exportChatMarkdown,
 		fileSaveAccessAvailable,
-		grabVideoFrame,
 		isPermissionDismissal,
-		screenshotCaptureAvailable,
 		splitLaunchFiles,
 		type LaunchQueueLike,
 		type SaveHandleLike,
@@ -473,6 +471,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	let searchBusy = $state(false);
 	let searchCursor = $state(0);
 	let searchInputEl: HTMLInputElement | undefined = $state();
+	let searchResultsEl: HTMLElement | undefined = $state();
 	/** Search documents snapshot (Worker + IndexedDB, in-memory fallback). */
 	let searchStore: ChatSearchStore | null = null;
 	let searchIndexTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1129,11 +1128,17 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		if (hit.doc.msgId) {
 			const index = chat.messages.findIndex((m) => m.id === hit.doc.msgId);
 			if (index >= 0) {
+				// Native focus order matches the highlighted message:
+				// scroll mode owns j/k/arrows from here and Tab walks
+				// the same message order.
+				enterScrollMode();
+				selectedIdx = index;
 				requestAnimationFrame(() => {
-					document
-						.getElementById(`msg-${index}`)
-						?.scrollIntoView({ block: "center", behavior: "smooth" });
+					const el = document.getElementById(`msg-${index}`);
+					el?.scrollIntoView({ block: "center", behavior: "smooth" });
+					(el as HTMLElement | null)?.focus({ preventScroll: true });
 				});
+				return;
 			}
 		}
 		editor?.focus();
@@ -1143,6 +1148,17 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		if (searchHits.length === 0) return;
 		searchCursor =
 			((searchCursor + delta) % searchHits.length + searchHits.length) % searchHits.length;
+	}
+
+	/**
+	 * DOM focus follows the palette highlight: the highlighted option
+	 * becomes the focused element, so Tab/Shift-Tab continue from the
+	 * highlighted result and screen readers track the cursor.
+	 */
+	function focusSearchHit(cursor: number): void {
+		searchResultsEl
+			?.querySelectorAll<HTMLButtonElement>(".search-hit")
+			[cursor]?.focus();
 	}
 
 	/**
@@ -1166,47 +1182,18 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	}
 
 	/**
-	 * Screenshot-to-chat: one getDisplayMedia frame straight into the
-	 * existing attachments path (same marker line as pasted images, so
-	 * send strips it and the image travels as an attachment). The
-	 * button only renders where getDisplayMedia exists; a dismissed
-	 * picker stays silent, real failures land in attachError.
-	 */
-	let screenshotting = $state(false);
-
-	async function captureScreenshot(): Promise<void> {
-		if (screenshotting) return;
-		screenshotting = true;
-		try {
-			const file = await captureScreenToFile(
-				(options) => navigator.mediaDevices.getDisplayMedia(options),
-				grabVideoFrame
-			);
-			const images = file.type.startsWith("image/") ? 1 : 0;
-			await addFiles([file]);
-			insertImageMarkers(images);
-		} catch (error) {
-			if (!isPermissionDismissal(error)) {
-				attachError = error instanceof Error ? error.message : String(error);
-			}
-		} finally {
-			screenshotting = false;
-		}
-	}
-
-	/**
-	 * Export the active chat as Markdown: File System Access picker
+	 * Export one sidebar chat as Markdown: File System Access picker
 	 * where available, download blob fallback otherwise. A dismissed
 	 * picker stays silent.
 	 */
-	async function exportCurrentChat(): Promise<void> {
+	async function exportOneChat(target: Chat): Promise<void> {
 		try {
 			const picker = fileSaveAccessAvailable()
 				? ((window as unknown as {
 						showSaveFilePicker?: (options: SavePickerOptions) => Promise<SaveHandleLike>;
 					}).showSaveFilePicker?.bind(window) ?? null)
 				: null;
-			const how = await exportChatMarkdown(chat, {
+			const how = await exportChatMarkdown(target, {
 				picker,
 				download: downloadMarkdownFile
 			});
@@ -4309,9 +4296,14 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			}
 			if (event.key === "Escape" && searchOpen) {
 				// The search palette wins Esc next, even from its input.
+				// A first ESC moves DOM focus input -> list (the query
+				// stays, the highlight is already tracked); a second
+				// ESC — or one with no results — closes.
 				event.preventDefault();
 				event.stopPropagation();
-				closeSearch();
+				if (document.activeElement === searchInputEl && searchHits.length > 0) {
+					focusSearchHit(searchCursor);
+				} else closeSearch();
 				return;
 			}
 			if (event.key === "Escape" && sideviewOpen) {
@@ -5342,6 +5334,15 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 					</button>
 					<button
 						type="button"
+						class="exp"
+						title="Export chat as Markdown"
+						aria-label="Export chat as Markdown"
+						onclick={() => void exportOneChat(item)}
+					>
+						<ActionIcon kind="export" />
+					</button>
+					<button
+						type="button"
 						class="del"
 						aria-label="Delete chat"
 						onclick={() => {
@@ -5385,7 +5386,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		anchor (token count lives in the settings panel now, and
 		Settings itself moved to the menu bar). Double-click zooms. -->
 		<header role="toolbar" aria-label="App" tabindex="-1" onmousedown={dragWindow} ondblclick={zoomWindow}>
-			<span class="app-title">Ccez Studio</span>
+			<span class="app-title">Ccez LLM</span>
 			<span class="tokens-wrap">
 				{#if activeReplyLang}
 					<span class="lang-chip-float" transition:fade={{ duration: 90 }}>
@@ -5427,15 +5428,6 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 						<button type="submit" aria-label="Go to address">Go</button>
 					</form>
 				{/if}
-				<button
-					type="button"
-					class="export-btn"
-					title="Export chat as Markdown"
-					aria-label="Export chat as Markdown"
-					onclick={() => void exportCurrentChat()}
-				>
-					Export
-				</button>
 			</span>
 		</header>
 
@@ -5548,6 +5540,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 				<!-- Option-click is mouse-only by design; keyboard users get the Fold button below. -->
 				<article
 					id="msg-{i}"
+					tabindex="-1"
 					class:user={msg.role === "user"}
 					class:assistant={msg.role === "assistant"}
 					class:selected={focusMode === "scroll" && selectedIdx === i}
@@ -6118,21 +6111,6 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 						<ActionIcon kind="paste" />
 					</button>
 				{/if}
-				{#if screenshotCaptureAvailable()}
-					<!-- Screenshot-to-chat: one screen frame into the
-					attachments path. Hidden where getDisplayMedia is
-					missing (plain contexts without capture support). -->
-					<button
-						type="button"
-						class="shot-btn"
-						title="Capture a screenshot into the chat"
-						aria-label="Capture a screenshot into the chat"
-						disabled={screenshotting}
-						onclick={() => void captureScreenshot()}
-					>
-						Shot
-					</button>
-				{/if}
 				{#if canMic && settings.micEnabled}
 					<button
 						type="button"
@@ -6227,7 +6205,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 						</button>
 						{#if openLangMenu === menu.id}
 							<div class="lang-list" role="menu">
-								{#each menu.languages as lang (lang.code)}
+								{#each [...menu.languages].sort((a, b) => a.name.localeCompare(b.name, "en")) as lang (lang.code)}
 									{@const quickKey = quickKeyFor(lang.code)}
 									<button
 										type="button"
@@ -6554,7 +6532,13 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 						×
 					</button>
 				</div>
-				<div class="search-results" data-fade-scroll role="listbox" aria-label="Search results">
+				<div
+					class="search-results"
+					bind:this={searchResultsEl}
+					data-fade-scroll
+					role="listbox"
+					aria-label="Search results"
+				>
 					{#if searchBusy}
 						<p class="search-status" role="status">Searching…</p>
 					{:else if searchQuery.trim() && searchHits.length === 0}
@@ -6569,6 +6553,17 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 								class:cursor={n === searchCursor}
 								onmouseenter={() => (searchCursor = n)}
 								onclick={() => enterSearchHit(hit)}
+								onkeydown={(e) => {
+									if (e.key === "j" || e.key === "ArrowDown") {
+										e.preventDefault();
+										moveSearchCursor(1);
+										focusSearchHit(searchCursor);
+									} else if (e.key === "k" || e.key === "ArrowUp") {
+										e.preventDefault();
+										moveSearchCursor(-1);
+										focusSearchHit(searchCursor);
+									}
+								}}
 							>
 								<span class="search-kind">{hit.doc.kind}</span>
 								<span class="search-snippet">{hit.snippet}</span>
@@ -6648,7 +6643,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	artifact, not a theme snapshot. -->
 	<section id="study-sheet-print" aria-hidden="true">
 		<h1>{sheetTitle(chat.messages)}</h1>
-		<p class="sheet-sub">Ccez Studio study sheet — {chat.messages.length} message{chat.messages.length === 1 ? "" : "s"}.</p>
+		<p class="sheet-sub">Ccez LLM study sheet — {chat.messages.length} message{chat.messages.length === 1 ? "" : "s"}.</p>
 		{#each chat.messages as msg (msg.id)}
 			<h2>{msg.role === "user" ? "You" : "Ccez"}</h2>
 			<p>{msg.content}</p>
@@ -6816,8 +6811,36 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		opacity: 1;
 		pointer-events: auto;
 	}
+	/* Per-row export: icon-only, parked left of the delete x on the
+	same overlay contract (pill keeps full width; keyboard focus
+	brings it back; touch keeps it in flow like the x). */
+	aside li .exp {
+		position: absolute;
+		right: 1.55rem;
+		top: 50%;
+		transform: translateY(-50%);
+		opacity: 0;
+		pointer-events: none;
+		border: 0;
+		background: none;
+		cursor: pointer;
+		color: #6e6e73;
+		color: var(--muted);
+		padding: 0.15rem;
+		line-height: 0;
+	}
+	aside li:hover .exp,
+	aside li:focus-within .exp {
+		opacity: 1;
+		pointer-events: auto;
+	}
+	aside li .exp:hover {
+		color: #1c1c1e;
+		color: var(--ink);
+	}
 	@media (hover: none) {
-		aside li .del {
+		aside li .del,
+		aside li .exp {
 			position: static;
 			transform: none;
 			opacity: 1;
@@ -7383,30 +7406,6 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	}
 	.browser-address button:hover,
 	.browser-address button:focus-visible {
-		opacity: 1;
-	}
-	.export-btn {
-		font: inherit;
-		/* The open strip is a fixed drawer (z-index 55) covering the
-		top bar: without its own stacking the toggle sinks under it
-		and can never be clicked shut. */
-		position: relative;
-		z-index: 56;
-		font-size: 0.78rem;
-		color: #1c1c1e;
-		color: var(--ink);
-		border: 1px solid #1c1c1e;
-		border-color: var(--strong);
-		border-radius: 999px;
-		background: none;
-		cursor: pointer;
-		padding: 0.2rem 0.7rem;
-		white-space: nowrap;
-		opacity: 0.55;
-		transition: opacity 0.18s ease;
-	}
-	.export-btn:hover,
-	.export-btn:focus-visible {
 		opacity: 1;
 	}
 	/* Fallback strip (browser dev, no shell webview): docks right
@@ -8002,14 +8001,20 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	}
 	main.empty .lang-menus {
 		justify-content: center;
-		padding: 0.55rem 1.2rem 0;
+		padding: 0.55rem 1.2rem 0.6rem;
 	}
-	/* Mac desktop only: lift the language buttons clear of the
-	composer (the default gap reads stranded under macOS chrome).
-	A pure visual shift — layout never moves, so nothing overlaps.
-	Eyeball the exact offset on a Mac; touch layouts are untouched. */
+	/* Mac desktop only: nudge the language row down toward the
+	composer and fade it until hover — quiet chrome on an empty chat.
+	A pure visual shift (layout never moves, so nothing overlaps);
+	keyboard focus brings it back like hover. Touch layouts untouched. */
 	.app[data-mac] main.empty .lang-menus {
-		transform: translateY(-1.5rem);
+		transform: translateY(0.35rem);
+		opacity: 0.55;
+		transition: opacity 0.18s ease;
+	}
+	.app[data-mac] main.empty .lang-menus:hover,
+	.app[data-mac] main.empty .lang-menus:focus-within {
+		opacity: 1;
 	}
 	.lang-menu {
 		position: relative;
@@ -8163,10 +8168,12 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		align-self: flex-end;
 		/* Shrink-wrap so short prompts don't stretch into empty space.
 		Beats the centered-column rule's width:100% on specificity;
-		margin-right keeps the right edge on the chat-width column. */
+		margin-right docks the right edge to the assistant column
+		(centered min(85%, chat-width)), so own messages never drift
+		right past AI width on narrow windows. */
 		width: fit-content;
 		max-width: min(85%, calc(var(--chat-width, 36) * 1rem));
-		margin-right: max(0rem, calc((100% - var(--chat-width, 36) * 1rem) / 2));
+		margin-right: max(0rem, calc((100% - min(85%, var(--chat-width, 36) * 1rem)) / 2));
 		/* No background or padding here: the bubble wraps the text only,
 		so the action row below sits outside it. */
 		padding: 0;
@@ -8180,8 +8187,11 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	article.user .bubble {
 		background: #f1f1f4;
 		background: var(--bg-wash);
-		border-radius: 1.75rem;
-		padding: 0.45rem 1rem 0.55rem;
+		border-radius: calc(1.75rem * var(--font-scale, 1));
+		padding:
+			calc(0.45rem * var(--font-scale, 1))
+			calc(1rem * var(--font-scale, 1))
+			calc(0.55rem * var(--font-scale, 1));
 		text-align: left;
 		width: fit-content;
 		/* 100%, not 85%: the article already caps at min(85%, chat-width),
@@ -8222,6 +8232,17 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		margin-left: auto;
 	}
 	article.selected {
+		outline: 2px solid #3a3a3c;
+		outline-color: var(--focus);
+		outline-offset: 2px;
+	}
+	/* Palette jumps land DOM focus on the article itself (tabindex -1
+	for programmatic focus only, never in the Tab order): .selected
+	carries the keyboard indicator, so focus adds no second ring. */
+	article:focus {
+		outline: none;
+	}
+	article.selected:focus {
 		outline: 2px solid #3a3a3c;
 		outline-color: var(--focus);
 		outline-offset: 2px;
@@ -9648,27 +9669,6 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		height: 1.05em;
 	}
 	.paste-btn:disabled {
-		opacity: 0.4;
-		cursor: default;
-	}
-	/* Screenshot-to-chat: text treatment in the tools rhythm, muted
-	until hover like the icon buttons around it. */
-	.shot-btn {
-		border: 0;
-		background: none;
-		cursor: pointer;
-		font-size: 0.85rem;
-		font-weight: 600;
-		color: #6e6e73;
-		color: var(--muted);
-		padding: 0.2rem 0.35rem;
-		white-space: nowrap;
-	}
-	.shot-btn:hover {
-		color: #1c1c1e;
-		color: var(--ink);
-	}
-	.shot-btn:disabled {
 		opacity: 0.4;
 		cursor: default;
 	}
