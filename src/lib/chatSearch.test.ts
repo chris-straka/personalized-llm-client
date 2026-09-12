@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	buildSearchDocs,
 	chatMatchesQuery,
+	findMessageIndices,
 	querySearch,
 	snippetFor,
 	tokenizeText,
@@ -85,6 +86,14 @@ describe("buildSearchDocs", () => {
 		);
 		expect(docs).toHaveLength(2);
 		expect(docs[1]?.kind).toBe("annotation");
+	});
+});
+
+describe("findMessageIndices", () => {
+	it("lists message indices containing the query, case-insensitive", () => {
+		expect(findMessageIndices(["miso ramen", "sushi rice", "MISO soup"], "miso")).toEqual([0, 2]);
+		expect(findMessageIndices(["aaa", "bbb"], "z")).toEqual([]);
+		expect(findMessageIndices(["aaa"], "  ")).toEqual([]);
 	});
 });
 

@@ -46,6 +46,9 @@
 		tokensTitle?: string | null;
 		/** Phone UI: hover doesn't exist, so the hover toggles read as a note. */
 		androidUI?: boolean;
+		/** Double-tap the settings top: expand the window like the main
+		top bar (the page owns the shell zoom). */
+		onExpand?: (event: MouseEvent) => void;
 		/** Update results ride the page toast (auto-dismiss, no layout
 		shift) instead of an inline popup. Falls back to inline text
 		when the page passes none. */
@@ -59,7 +62,8 @@
 		tokensLabel = null,
 		tokensTitle = null,
 		androidUI = false,
-		onToast
+		onToast,
+		onExpand
 	}: Props = $props();
 	let updateStatus = $state("");
 	let checkingUpdate = $state(false);
@@ -268,6 +272,22 @@
 			isLinuxShell = false;
 		}
 		void loadVoices();
+		// Checkbox labels toggle on click — except when the click ends a
+		// text selection: highlighting label text must not flip the box
+		// (a plain click still toggles, including clicks straight on the
+		// box itself, which never extend a selection). A vanilla capture
+		// listener, so no per-label Svelte handler is needed.
+		const keepSelectionWithoutToggle = (event: MouseEvent): void => {
+			const target = event.target;
+			if (!(target instanceof HTMLElement)) return;
+			if (!target.closest(".settings-panel label.check")) return;
+			const selection = window.getSelection();
+			if (selection && !selection.isCollapsed) event.preventDefault();
+		};
+		document.addEventListener("click", keepSelectionWithoutToggle, true);
+		return () => {
+			document.removeEventListener("click", keepSelectionWithoutToggle, true);
+		};
 	});
 
 	/**
@@ -421,11 +441,26 @@
 			);
 		}
 	}
+	let headCloseTimer: ReturnType<typeof setTimeout> | null = null;
 	function closeFromHead(event: MouseEvent): void {
 		const down = headDown;
 		headDown = null;
 		if (down && Math.hypot(event.screenX - down.x, event.screenY - down.y) > 5) return;
-		onClose();
+		// Single click closes on a short fuse: a double-tap cancels the
+		// close and expands instead (same gesture split the main top bar
+		// uses between click-drag and double-click zoom).
+		if (headCloseTimer) clearTimeout(headCloseTimer);
+		headCloseTimer = setTimeout(() => {
+			headCloseTimer = null;
+			onClose();
+		}, 220);
+	}
+	function expandFromHead(event: MouseEvent): void {
+		if (headCloseTimer) {
+			clearTimeout(headCloseTimer);
+			headCloseTimer = null;
+		}
+		onExpand?.(event);
 	}
 </script>
 
@@ -438,6 +473,7 @@
 	title="Close settings"
 	onmousedown={dragHead}
 	onclick={closeFromHead}
+	ondblclick={expandFromHead}
 	onkeydown={(e) => {
 		if (e.key === "Enter" || e.key === " ") {
 			e.preventDefault();
@@ -835,7 +871,6 @@
 			}}
 		/>
 	</div>
-	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 	<label>
 		Text Size
 		<button
@@ -862,8 +897,7 @@
 		</span>
 	</label>
 	{#if !androidUI}
-		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-	<label>
+		<label>
 			Chat width
 			<button
 				type="button"
@@ -890,7 +924,6 @@
 			</span>
 		</label>
 	{/if}
-	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 	<label>
 		Hide prompt after idle
 		<button

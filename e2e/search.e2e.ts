@@ -149,6 +149,52 @@ test.describe("palette focus order", () => {
 	});
 });
 
+test.describe("find in chat", () => {
+	test("Ctrl+F finds text in the current chat, Enter cycles hits", async ({ page }) => {
+		await page.addInitScript(() => {
+			window.localStorage.setItem("ccez-mock-provider", "1");
+			window.localStorage.setItem("ccez-studio-settings-v1", JSON.stringify({}));
+			const msg = (id: string, content: string) => ({
+				id,
+				role: "assistant",
+				content,
+				usage: null,
+				error: null
+			});
+			window.localStorage.setItem(
+				"ccez-studio-chats-v1",
+				JSON.stringify([
+					{
+						id: "chat-a",
+						createdAt: 1,
+						replyLang: null,
+						messages: [msg("a1", "miso ramen broth"), msg("a2", "sushi rice"), msg("a3", "miso soup breakfast")]
+					}
+				])
+			);
+		});
+		await page.goto("/");
+		await expect(page.locator("article .rendered").first()).toBeVisible();
+		await page.keyboard.press("Control+f");
+		const bar = page.locator(".find-bar");
+		await expect(bar).toBeVisible();
+		const box = bar.getByLabel("Find in chat");
+		await box.fill("miso");
+		await expect(bar.locator(".find-count")).toHaveText("1/2", { timeout: 8000 });
+		await expect(page.locator("article#msg-0.selected")).toBeVisible();
+		// Enter cycles to the second hit, then wraps.
+		await box.press("Enter");
+		await expect(bar.locator(".find-count")).toHaveText("2/2");
+		await expect(page.locator("article#msg-2.selected")).toBeVisible();
+		await box.press("Enter");
+		await expect(bar.locator(".find-count")).toHaveText("1/2");
+		await expect(page.locator("article#msg-0.selected")).toBeVisible();
+		// Escape closes the bar.
+		await page.keyboard.press("Escape");
+		await expect(bar).toBeHidden();
+	});
+});
+
 test.describe("sidebar search", () => {
 	test("typing in the sidebar box filters the chat list", async ({ page }) => {
 		await seedThreeChats(page);
