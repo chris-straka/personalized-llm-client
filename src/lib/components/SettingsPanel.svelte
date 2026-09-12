@@ -1,5 +1,12 @@
 <script lang="ts">
-	import { getProviderDef, listProviders, createProvider } from "$lib/providers/registry";
+	import {
+		asProviderId,
+		builtin,
+		getProviderDef,
+		listProviders,
+		createProvider,
+		type ProviderId
+	} from "$lib/providers/registry";
 	import {
 		maskKey,
 		activeProviderSettings,
@@ -360,7 +367,7 @@
 		}
 	}
 
-	function switchProvider(id: string) {
+	function switchProvider(id: ProviderId) {
 		settings.activeProviderId = id;
 		maybeFetchModels();
 	}
@@ -393,19 +400,19 @@
 				.toLowerCase()
 				.replace(/[^a-z0-9]+/g, "-")
 				.replace(/^-+|-+$/g, "") || "provider";
-		const taken = new Set(allProviders.map((p) => p.id));
+		const taken = new Set<string>(allProviders.map((p) => p.id));
 		let id = `custom-${slug}`;
 		let n = 2;
 		while (taken.has(id)) id = `custom-${slug}-${n++}`;
 		settings.customProviders = [
 			...settings.customProviders,
-			{ id, label, defaultBaseUrl: baseUrl, defaultModel: model, keyHint: "API key" }
+			{ id: asProviderId(id), label, defaultBaseUrl: baseUrl, defaultModel: model, keyHint: "API key" }
 		];
 		settings.providers[id] = { baseUrl, apiKey: "", model, models: [] };
 		customName = "";
 		customBaseUrl = "";
 		customModel = "";
-		switchProvider(id);
+		switchProvider(asProviderId(id));
 	}
 
 	function removeCustomProvider(): void {
@@ -413,7 +420,7 @@
 		if (!settings.customProviders.some((p) => p.id === id)) return;
 		settings.customProviders = settings.customProviders.filter((p) => p.id !== id);
 		delete settings.providers[id];
-		switchProvider("muse");
+		switchProvider(builtin("muse"));
 	}
 
 	/** This model's thinking dial (native knob or prompt hints); hidden

@@ -54,7 +54,12 @@
 		replyLanguageFor,
 		type LanguageMenu
 	} from "$lib/languages";
-	import { listProviders, createProvider, getProviderDef } from "$lib/providers/registry";
+	import {
+		listProviders,
+		createProvider,
+		getProviderDef,
+		type ProviderId
+	} from "$lib/providers/registry";
 	import { offlineTarget, onlineRestore } from "$lib/offline";
 	import { MockProvider, mockProviderEnabled } from "$lib/providers/mock";
 	import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -3182,7 +3187,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	 * on-device Gemma option; the reconnect restores only what the drop
 	 * parked. Not rendered state — the provider switch re-renders itself.
 	 */
-	let offlineParkedFrom: string | null = null;
+	let offlineParkedFrom: ProviderId | null = null;
 
 	function handleOffline(): void {
 		const target = offlineTarget(settings.activeProviderId);

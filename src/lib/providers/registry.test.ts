@@ -1,9 +1,19 @@
 import { describe, it, expect } from "vitest";
-import { getProviderDef, listProviders, createProvider } from "./registry";
+import type { ChatId } from "../chat";
+import {
+	asProviderId,
+	builtin,
+	getProviderDef,
+	isBuiltinProviderId,
+	listProviders,
+	createProvider,
+	BUILTIN_PROVIDER_IDS,
+	type ProviderId
+} from "./registry";
 
 const custom = [
 	{
-		id: "custom-kimi",
+		id: asProviderId("custom-kimi"),
 		label: "Kimi",
 		defaultBaseUrl: "https://api.moonshot.ai/v1",
 		defaultModel: "moonshot-v1",
@@ -38,5 +48,22 @@ describe("registry", () => {
 				custom
 			)
 		).toBeTruthy();
+	});
+
+	it("pins the built-in set: registry ids match BUILTIN_PROVIDER_IDS", () => {
+		expect(listProviders().map((p) => p.id)).toEqual([...BUILTIN_PROVIDER_IDS]);
+		expect(isBuiltinProviderId("muse")).toBe(true);
+		expect(isBuiltinProviderId("local-gemma")).toBe(true);
+		expect(isBuiltinProviderId("custom-kimi")).toBe(false);
+		expect(isBuiltinProviderId("musse")).toBe(false);
+	});
+
+	it("rejects cross-kind ids at compile time", () => {
+		const chatId = "x" as ChatId;
+		// @ts-expect-error a chat id is not a provider id
+		const misassigned: ProviderId = chatId;
+		expect(misassigned).toBe("x");
+		// @ts-expect-error a typo'd built-in never compiles via builtin()
+		builtin("musse");
 	});
 });

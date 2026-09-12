@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { asProviderId } from "./providers/registry";
 import {
 	defaultSettings,
 	envProviderDefaults,
@@ -206,7 +207,7 @@ describe("settings", () => {
 		// Generic providers fall back to prompt hints.
 		s.customProviders = [
 			{
-				id: "x",
+				id: asProviderId("x"),
 				label: "X",
 				defaultBaseUrl: "https://x.test",
 				defaultModel: "xm",
@@ -214,7 +215,7 @@ describe("settings", () => {
 			}
 		];
 		s.providers["x"] = { baseUrl: "https://x.test", apiKey: "", model: "xm", models: [] };
-		s.activeProviderId = "x";
+		s.activeProviderId = asProviderId("x");
 		s.thinking = { x: "high" };
 		expect(effectiveSystemPrompt(s)).toBe("Be brief. Think carefully before answering.");
 		s.thinking = { x: "medium" };
@@ -332,7 +333,7 @@ describe("settings", () => {
 	it("starts with no custom providers and resets unknown active ids", () => {
 		expect(defaultSettings().customProviders).toEqual([]);
 		const s = blankSettings();
-		s.activeProviderId = "custom-gone";
+		s.activeProviderId = asProviderId("custom-gone");
 		saveSettings(s, memoryStore);
 		expect(loadSettings(memoryStore).activeProviderId).toBe("muse");
 	});

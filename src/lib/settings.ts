@@ -1,4 +1,11 @@
-import { getProviderDef, listProviders, type ProviderDef } from "./providers/registry";
+import {
+	builtin,
+	getProviderDef,
+	listProviders,
+	BUILTIN_PROVIDER_IDS,
+	type ProviderDef,
+	type ProviderId
+} from "./providers/registry";
 import { replyLanguageFor } from "./languages";
 import {
 	thinkingFor,
@@ -54,7 +61,7 @@ export interface ProviderSettings {
 
 export interface AppSettings {
 	version: 1;
-	activeProviderId: string;
+	activeProviderId: ProviderId;
 	providers: Record<string, ProviderSettings>;
 	/** User-added provider defs (Cline-style); settings live in `providers`. */
 	customProviders: ProviderDef[];
@@ -219,7 +226,7 @@ export function envProviderDefaults(
 	env: Record<string, string | undefined>
 ): Record<string, ProviderSettings> {
 	const providers: Record<string, ProviderSettings> = {};
-	for (const id of ["deepseek", "muse", "local-gemma"]) {
+	for (const id of BUILTIN_PROVIDER_IDS) {
 		const def = getProviderDef(id);
 		providers[id] = {
 			baseUrl: firstSet(env, BASE_URL_ALIASES[id] ?? []) || def.defaultBaseUrl,
@@ -251,7 +258,7 @@ export function defaultSettings(): AppSettings {
 	const providers = envProviderDefaults(devEnv());
 	return {
 		version: 1,
-		activeProviderId: "muse",
+		activeProviderId: builtin("muse"),
 		providers,
 		customProviders: [],
 		systemPrompt: DEFAULT_SYSTEM_PROMPT,
@@ -338,7 +345,7 @@ export function loadSettings(store?: KeyValueStore): AppSettings {
 		// An active provider that no longer exists (deleted custom) falls
 		// back to Muse rather than throwing in getProviderDef.
 		if (!listProviders(merged.customProviders).some((p) => p.id === merged.activeProviderId)) {
-			merged.activeProviderId = "muse";
+			merged.activeProviderId = builtin("muse");
 		}
 		// Backfill the model cache (provider entries from older saves
 		// replace the fresh ones wholesale, so the field is missing).

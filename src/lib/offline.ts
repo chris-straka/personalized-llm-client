@@ -4,9 +4,10 @@
  * what the drop parked — never a provider the user picked meanwhile.
  * Pure helpers (tested); the event wiring lives in `+page.svelte`.
  */
+import { asProviderId, builtin, type ProviderId } from "./providers/registry";
 
 /** The on-device provider id (see `providers/registry.ts`). */
-export const OFFLINE_FALLBACK_ID = "local-gemma";
+export const OFFLINE_FALLBACK_ID: ProviderId = builtin("local-gemma");
 
 /** Test seam id: the mock provider never touches the network either. */
 const MOCK_ID = "mock";
@@ -20,7 +21,7 @@ export function needsNetwork(providerId: string): boolean {
  * Offline moment: the id to switch to, or null when already local
  * (nothing to park).
  */
-export function offlineTarget(activeId: string): string | null {
+export function offlineTarget(activeId: string): ProviderId | null {
 	return needsNetwork(activeId) ? OFFLINE_FALLBACK_ID : null;
 }
 
@@ -28,8 +29,11 @@ export function offlineTarget(activeId: string): string | null {
  * Back online: the id to restore, or null when there is nothing to do —
  * no parked provider, or the user has moved on to something else meanwhile.
  */
-export function onlineRestore(parkedFrom: string | null, activeId: string): string | null {
+export function onlineRestore(
+	parkedFrom: string | null,
+	activeId: string
+): ProviderId | null {
 	if (parkedFrom === null) return null;
 	if (activeId !== OFFLINE_FALLBACK_ID) return null;
-	return parkedFrom;
+	return asProviderId(parkedFrom);
 }
