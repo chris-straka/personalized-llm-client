@@ -1416,6 +1416,11 @@ import { isPromptIdle } from "$lib/chrome";
 				if (focus) enterEditMode();
 				return;
 			}
+			// File the leaving chat's drafts away first: resetDraftExtras
+			// empties `annotations`, and the autosave effect would then
+			// persist the empty list under the old id (draft restore
+			// on return would come back blank).
+			saveDraftAnnotations(chatState.activeChatId, annotations, chats.map((c) => c.id));
 			resetDraftExtras();
 			newChat(chatState);
 			scrollBox?.scrollTo({ top: 0, behavior: "smooth" });
@@ -1500,6 +1505,15 @@ import { isPromptIdle } from "$lib/chrome";
 	function doNewChat(): void {
 		previewChatId = null;
 		stopVoice();
+		// File the leaving chat's drafts away before resetDraftExtras
+		// empties them — otherwise the autosave effect files the empty
+		// list under the old chat's id and return-restore comes back
+		// blank (same ordering as transitionToChat's save-before-load).
+		saveDraftAnnotations(
+			chatState.activeChatId,
+			annotations,
+			chatState.chats.map((c) => c.id)
+		);
 		resetDraftExtras();
 		newChat(chatState);
 		scrollBox?.scrollTo({ top: 0, behavior: "smooth" });

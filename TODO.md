@@ -52,7 +52,7 @@ cut; release chain outcome still unconfirmed (see Now).
 
 ## Now (in progress)
 
-- [ ] Annotation draft restore on return is broken — fix first.
+- [x] Annotation draft restore on return is broken — fix first.
   Accept: 1 unsent draft (`.prompt-tools .ann-wrap`, see
   `imgs/annotation_textbox_filled.png`) in chat A survives New chat and is
   back (exactly 1, not duplicated) on return to A; S4 contract holds
