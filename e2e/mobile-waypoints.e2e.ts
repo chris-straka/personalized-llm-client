@@ -1,17 +1,27 @@
 import { test, expect } from "@playwright/test";
 import { seedChat } from "./helpers";
 
-test.use({ hasTouch: true, isMobile: true });
+test.use({
+	hasTouch: true,
+	isMobile: true,
+	// The touch jump trigger (.wp-jump) is UA-gated behind androidUI —
+	// hasTouch/isMobile alone leave the desktop tick control up.
+	userAgent:
+		"Mozilla/5.0 (Linux; Android 14; SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36",
+	viewport: { width: 412, height: 915 }
+});
 
-function tenTurns(): Array<{ role: "user" | "assistant"; content: string }> {
-	return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].flatMap((n) => [
+function fifteenTurns(): Array<{ role: "user" | "assistant"; content: string }> {
+	// Fifteen user turns: the sheet caps at 55vh, so the list must
+	// overflow and scroll inside it on a 915px phone viewport.
+	return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14].flatMap((n) => [
 		{ role: "user" as const, content: `question ${n}` },
 		{ role: "assistant" as const, content: `answer ${n}` }
 	]);
 }
 
 test.beforeEach(async ({ page }) => {
-	await seedChat(page, tenTurns());
+	await seedChat(page, fifteenTurns());
 	await page.goto("/");
 	await expect(page.locator(".wp-jump")).toBeVisible({ timeout: 60_000 });
 });
@@ -48,7 +58,7 @@ test("long lists scroll inside the sheet", async ({ page }) => {
 		(el) => el.scrollHeight > el.clientHeight + 1
 	);
 	expect(overflowing).toBe(true);
-	await expect(menu.locator('button[role="menuitem"]')).toHaveCount(10);
+	await expect(menu.locator('button[role="menuitem"]')).toHaveCount(15);
 });
 
 test("veil press dismisses the sheet", async ({ page }) => {
