@@ -4301,7 +4301,20 @@ import { isPromptIdle } from "$lib/chrome";
 				cancelMessageEdit();
 				return;
 			}
-			if (event.key === "Escape" && !inEditor) {
+			if (event.key === "Escape" && inEditor) {
+				// ESC with the composer focused: drop the caret and
+				// dismiss composer-adjacent overlays. Voice keeps playing
+				// (it has its own toggle); modals, search, sideview, and
+				// message edits keep their earlier branches above.
+				event.preventDefault();
+				event.stopPropagation();
+				editor?.blur();
+				selMenu = null;
+				translate = null;
+				openLangMenu = null;
+				return;
+			}
+		if (event.key === "Escape" && !inEditor) {
 				selMenu = null;
 				inspectChar = null;
 				translate = null;
