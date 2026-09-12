@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
 	quoteFragmentText,
+	equationBodyOf,
 	loadDraftAnnotations,
 	saveDraftAnnotations,
 	snapSelectionToWordEdges,
@@ -33,6 +34,57 @@ describe("quoteFragmentText", () => {
 
 	it("trims plain selections untouched", () => {
 		expect(quoteFragmentText(fragment("<p>  hello world  </p>"))).toBe("hello world");
+	});
+
+	it("drops math chrome heads, keeping the equation body", () => {
+		const text = quoteFragmentText(
+			fragment(
+				'<div class="ccez-math" data-math-index="0"><div class="ccez-math-head"><span class="ccez-math-lang">math</span></div><div class="ccez-math-body"><span class="katex">E</span></div></div>'
+			)
+		);
+		expect(text).toBe("E");
+	});
+});
+
+describe("equationBodyOf", () => {
+	function mathDoc(): HTMLElement {
+		const root = document.createElement("div");
+		root.innerHTML =
+			'<div class="ccez-math" data-math-index="0"><div class="ccez-math-head">head</div><div class="ccez-math-body"><span class="katex">E_n</span></div></div>' +
+			'<p>plain <span class="ccez-math-inline" data-math-index="1"><span class="ccez-math-body">x</span></span> tail</p>';
+		document.body.append(root);
+		return root;
+	}
+
+	it("returns the display body for nodes inside display math", () => {
+		const root = mathDoc();
+		const glyph = root.querySelector(".ccez-math-body .katex")!;
+		const body = equationBodyOf(glyph);
+		expect(body?.classList.contains("ccez-math-body")).toBe(true);
+		root.remove();
+	});
+
+	it("returns the inline body for nodes inside inline math", () => {
+		const root = mathDoc();
+		const glyph = root.querySelector(".ccez-math-inline .ccez-math-body")!;
+		expect(equationBodyOf(glyph)?.classList.contains("ccez-math-body")).toBe(true);
+		root.remove();
+	});
+
+	it("falls back to the wrapper when it holds no body", () => {
+		const wrap = document.createElement("span");
+		wrap.setAttribute("data-math-index", "7");
+		wrap.textContent = "bare";
+		document.body.append(wrap);
+		expect(equationBodyOf(wrap.firstChild)).toBe(wrap);
+		wrap.remove();
+	});
+
+	it("returns null outside math", () => {
+		const root = mathDoc();
+		expect(equationBodyOf(root.querySelector("p")!)).toBeNull();
+		expect(equationBodyOf(null)).toBeNull();
+		root.remove();
 	});
 });
 

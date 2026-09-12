@@ -351,8 +351,27 @@ export interface AnnotationMark {
  * for 漢字). Only the base text is content.
  */
 export function quoteFragmentText(frag: DocumentFragment): string {
-	frag.querySelectorAll("[data-ann-badge], rt, rp, .frt").forEach((el) => el.remove());
+	frag
+		.querySelectorAll("[data-ann-badge], rt, rp, .frt, .ccez-math-head")
+		.forEach((el) => el.remove());
 	return frag.textContent?.trim() ?? "";
+}
+
+/**
+ * Equation body holding a node, when the node sits inside rendered
+ * math (`[data-math-index]`): display blocks wash/quote their
+ * `.ccez-math-body`, inline math its whole wrapper. Null outside math.
+ * KaTeX splits glyphs across spans, so a partial pick inside an
+ * equation quotes a fragment that never re-matches (and washes a
+ * shard): callers expand the live range over this element first, and
+ * the re-stamp unwraps the stale fragment wash with every other mark.
+ */
+export function equationBodyOf(node: Node | null): Element | null {
+	const element = node instanceof Element ? node : node?.parentElement;
+	const wrap = element?.closest?.("[data-math-index]");
+	if (!(wrap instanceof Element)) return null;
+	const body = wrap.querySelector(".ccez-math-body");
+	return body instanceof Element ? body : wrap;
 }
 
 export function quoteTextNodes(root: Node): Text[] {

@@ -165,7 +165,12 @@ cut; release chain outcome still unconfirmed (see Now).
   (Done Sep 2026 on work/stream-annotation2: `.review-pencil:hover` glows
   accent-blue with a drop-shadow (symmetric transition on the base rule)
   instead of going ink; locked in `annotations-ux.test.ts`.)
-- [ ] Math annotation: normalize selection to whole equation; clear stale wash.
+- [x] Math annotation: normalize selection to whole equation; clear stale wash.
+  (Done Sep 2026 on work/stream-annotation2: `currentQuote` expands
+  math-internal picks over the equation body via `equationBodyOf`
+  (both ends must sit in one equation); `quoteFragmentText` drops
+  `.ccez-math-head` chrome; the re-stamp unwraps the stale fragment
+  wash with every other mark. Unit-locked in `annotations-dom.test.ts`.)
 - [ ] Undecided: new chats show one past annotation + AI answer (no expletives,
       trash-can delete, disappears after first message, "What can I do for you?"
   - 3s pause). Decide/build or drop.

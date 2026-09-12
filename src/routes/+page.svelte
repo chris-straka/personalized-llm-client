@@ -101,6 +101,7 @@
 		annotationCountLabel,
 		withAnnotations,
 		quoteFragmentText,
+		equationBodyOf,
 		newAnnotationId,
 		annRefsFor,
 		lockSelectionToMessage,
@@ -1716,6 +1717,20 @@ import { isPromptIdle } from "$lib/chrome";
 			? selection.anchorNode
 			: selection.anchorNode?.parentElement;
 		if (!inRendered?.closest(".rendered")) return null;
+		// Math picks normalize to the whole equation: a partial glyph
+		// pick quotes a shard that never re-matches, so when both ends
+		// sit in one equation the range expands over its body first.
+		const anchorBody = equationBodyOf(selection.anchorNode);
+		if (anchorBody && equationBodyOf(selection.focusNode) === anchorBody) {
+			try {
+				const whole = document.createRange();
+				whole.selectNodeContents(anchorBody);
+				selection.removeAllRanges();
+				selection.addRange(whole);
+			} catch {
+				// A disturbed range keeps the partial pick below.
+			}
+		}
 		// Clone the range and drop badge buttons and ruby readings:
 		// selecting across an existing annotation would otherwise bake
 		// its number into the new quote ("Kyoto1 in two sentences"),
