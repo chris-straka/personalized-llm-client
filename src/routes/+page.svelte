@@ -3307,6 +3307,10 @@ import { isPromptIdle } from "$lib/chrome";
 	function startScrollHold(key: string, velocity: number): void {
 		stopScrollHold();
 		if (!scrollBox) return;
+		// The .messages column eases programmatic jumps (scroll-behavior:
+		// smooth); per-frame glide sets need instant application, or the
+		// box chases a moving target and lags several-fold behind.
+		scrollBox.style.scrollBehavior = "auto";
 		const hold = { key, velocity, downAt: Date.now(), lastT: performance.now(), raf: 0 };
 		scrollHold = hold;
 		const tick = (t: number) => {
@@ -3323,6 +3327,7 @@ import { isPromptIdle } from "$lib/chrome";
 		if (!hold || event.key !== hold.key) return;
 		cancelAnimationFrame(hold.raf);
 		scrollHold = null;
+		scrollBox?.style.removeProperty("scroll-behavior");
 		if (holdIsTap(hold.downAt, Date.now()) && scrollBox) {
 			scrollChatBy(
 				hold.key === "d" || hold.key === "u"
@@ -3334,6 +3339,7 @@ import { isPromptIdle } from "$lib/chrome";
 	function stopScrollHold(): void {
 		if (scrollHold) cancelAnimationFrame(scrollHold.raf);
 		scrollHold = null;
+		scrollBox?.style.removeProperty("scroll-behavior");
 	}
 	function scrollChatTop(): void {
 		scrollBox?.scrollTo({ top: 0, behavior: "smooth" });
