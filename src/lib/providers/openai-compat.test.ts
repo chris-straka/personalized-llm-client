@@ -214,6 +214,27 @@ describe("thinking", () => {
 		expect(off).not.toHaveProperty("reasoning_effort");
 	});
 
+	it("reads the level per request: a mid-stream change lands on the next call", async () => {
+		const fetchMock = vi.fn(async () =>
+			jsonResponse({ choices: [{ message: { content: "x" } }] })
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		const provider = new OpenAICompatProvider("muse", {
+			...CONFIG,
+			model: "muse-spark-1.3-contributor"
+		});
+		// Same instance, two sends: the second carries the new level,
+		// never a cached copy of the first.
+		await provider.chat([{ role: "user", content: "x" }], { thinking: "low" });
+		await provider.chat([{ role: "user", content: "x" }], { thinking: "high" });
+		const bodies = fetchMock.mock.calls.map((call) => {
+			const [, init] = call as unknown as [string, RequestInit];
+			return JSON.parse(init.body as string) as Record<string, unknown>;
+		});
+		expect(bodies[0]).toMatchObject({ reasoning_effort: "low" });
+		expect(bodies[1]).toMatchObject({ reasoning_effort: "high" });
+	});
+
 	it("sends nothing native for unknown providers and ids", async () => {
 		const body = await postedBody("probe", "m", "high");
 		expect(body).not.toHaveProperty("reasoning_effort");
