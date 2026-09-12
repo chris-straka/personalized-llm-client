@@ -2,8 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { seedChat } from "./helpers";
 
 /**
- * Character Inspect (DO NOT RUN here: the dev-server port is shared —
- * see the bucket brief. Kept as a spec for CI/nightly runs).
+ * Character Inspect.
  *
  * Gating: the Inspect button appears next to Annotate only when the
  * settings checkbox is on AND the highlight is a single Han

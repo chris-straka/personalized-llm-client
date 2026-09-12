@@ -1,6 +1,5 @@
 /**
- * textai bucket: text rendering + on-device AI (DO NOT RUN here — shared
- * dev-server port; run via `bunx playwright test e2e/textai.e2e.ts`).
+ * textai bucket: text rendering + on-device AI.
  *
  * Covers: CJK composition never half-sends, annotation badge text stays
  * contiguous (mark-DOM fallback), chat switching lands on the target
