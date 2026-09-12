@@ -1,9 +1,11 @@
 /**
  * Inspect: single-character Han (kanji/hanzi) lookup overlay.
  *
- * Fully offline and size-conscious: a compact hand-curated table
- * (stroke counts + short Unihan-style glosses, ~2KB source) plus the
- * immediate-component splits in radicals.ts. No fetch, no worker,
+ * Fully offline: a compact hand-curated table (stroke counts + short
+ * glosses, ~2KB source) plus the immediate-component splits in
+ * radicals.ts, enriched by the generated Unihan bundle
+ * (unihan.generated.ts: kDefinition + kMandarin + kJapaneseOn +
+ * kJapaneseKun for CJK Unified, ~1.2MB source). No fetch, no worker,
  * no network at runtime.
  *
  * Follow-up (reported honestly, not shipped): full stroke-ORDER path
@@ -13,6 +15,7 @@
  * clearly labeled as such — alongside radicals, count, and definition.
  */
 import { decomposeChar, isHanChar } from "./radicals";
+import { UNIHAN } from "./unihan.generated";
 
 /** One inspected character: everything the overlay shows. */
 export interface InspectData {
@@ -21,8 +24,18 @@ export interface InspectData {
 	components: string[];
 	/** Total stroke count, or null when outside the compact table. */
 	strokeCount: number | null;
-	/** Short Unihan-style gloss, or null when outside the compact table. */
+	/**
+	 * Short gloss: the curated table wins when it covers the
+	 * character, otherwise the bundled Unihan kDefinition, otherwise
+	 * null so the overlay says so instead of guessing.
+	 */
 	definition: string | null;
+	/** Hanyu pinyin with tone marks (Unihan kMandarin), or null. */
+	mandarin: string | null;
+	/** Space-separated on readings (Unihan kJapaneseOn), or null. */
+	japaneseOn: string | null;
+	/** Space-separated kun readings (Unihan kJapaneseKun), or null. */
+	japaneseKun: string | null;
 	/**
 	 * True when per-stroke vector paths are bundled for this character.
 	 * Always false until the KanjiVG follow-up lands; the overlay then
@@ -104,16 +117,20 @@ export function shouldShowInspect(quote: string, enabled: boolean): boolean {
 	return isSingleHanChar(quote);
 }
 
-/** Offline lookup for one character (radicals + count + definition). */
+/** Offline lookup for one character (radicals + count + definition + readings). */
 export function getInspectData(char: string): InspectData {
 	const trimmed = char.trim();
 	const hit = TABLE[trimmed];
+	const unihan = UNIHAN[trimmed];
 	const entry = decomposeChar(trimmed);
 	return {
 		char: trimmed,
 		components: entry?.components ?? [],
 		strokeCount: hit?.s ?? null,
-		definition: hit?.d ?? null,
+		definition: hit?.d ?? unihan?.d ?? null,
+		mandarin: unihan?.m ?? null,
+		japaneseOn: unihan?.on ?? null,
+		japaneseKun: unihan?.kun ?? null,
 		hasStrokePaths: false
 	};
 }

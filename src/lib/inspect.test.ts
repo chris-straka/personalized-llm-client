@@ -46,6 +46,9 @@ describe("getInspectData", () => {
 			components: ["言", "吾"],
 			strokeCount: 14,
 			definition: "language; to speak",
+			mandarin: "yǔ",
+			japaneseOn: "GO GYO",
+			japaneseKun: "KATARU KOTOBA TSUGERU",
 			hasStrokePaths: false
 		});
 		expect(getInspectData("好")).toMatchObject({
@@ -60,14 +63,33 @@ describe("getInspectData", () => {
 	});
 
 	it("falls back honestly outside the compact table", () => {
-		// 鬱 is Han but outside both tables: empty components, nulls.
+		// 鬱 is Han but outside the component table: empty components
+		// and null strokes, enriched by the Unihan bundle instead.
 		const out = getInspectData("鬱");
 		expect(out).toEqual({
 			char: "鬱",
 			components: [],
 			strokeCount: null,
-			definition: null,
+			definition: "luxuriant; dense, thick; moody",
+			mandarin: "yù",
+			japaneseOn: "UTSU",
+			japaneseKun: "SHIGERU",
 			hasStrokePaths: false
+		});
+	});
+
+	it("prefers the curated gloss over the Unihan definition", () => {
+		// The curated table's short gloss wins; Unihan's longer
+		// "language, words; saying, expression" stays the fallback.
+		expect(getInspectData("語").definition).toBe("language; to speak");
+	});
+
+	it("reports null readings for characters outside Unihan coverage", () => {
+		expect(getInspectData("あ")).toMatchObject({
+			definition: null,
+			mandarin: null,
+			japaneseOn: null,
+			japaneseKun: null
 		});
 	});
 
