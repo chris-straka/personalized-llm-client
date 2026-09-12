@@ -1,36 +1,64 @@
 import { describe, expect, it } from "vitest";
 import {
+	BROWSER_HOME_URL,
+	BROWSER_SEARCH_PREFIX,
 	SIDE_VIEW_DOCK_WIDTH,
-	SIDE_VIEW_ENGINES,
+	clampSideviewWidth,
 	isSideviewUrlAllowed,
-	sideviewEngine,
+	resolveBrowserUrl,
 	sideviewLayout,
 	toggleSideviewOpen
 } from "./sideview";
 
-describe("sideview engines", () => {
-	it("defaults to Google Translate with Bing as fallback", () => {
-		expect(SIDE_VIEW_ENGINES[0]?.id).toBe("google");
-		expect(SIDE_VIEW_ENGINES.map((engine) => engine.id)).toContain("bing");
-		for (const engine of SIDE_VIEW_ENGINES) {
-			expect(engine.url.startsWith("https://")).toBe(true);
-			expect(isSideviewUrlAllowed(engine.url)).toBe(true);
-		}
+describe("resolveBrowserUrl", () => {
+	it("opens home on empty input", () => {
+		expect(resolveBrowserUrl("")).toBe(BROWSER_HOME_URL);
+		expect(resolveBrowserUrl("   ")).toBe(BROWSER_HOME_URL);
+		expect(isSideviewUrlAllowed(BROWSER_HOME_URL)).toBe(true);
 	});
 
-	it("resolves unknown engine ids to the default", () => {
-		expect(sideviewEngine("google").id).toBe("google");
-		expect(sideviewEngine("bing").id).toBe("bing");
-		expect(sideviewEngine("nope").id).toBe("google");
-		expect(sideviewEngine("").id).toBe("google");
+	it("loads full http(s) URLs as-is", () => {
+		expect(resolveBrowserUrl("https://example.com/page")).toBe("https://example.com/page");
+		expect(resolveBrowserUrl("http://localhost:1420/")).toBe("http://localhost:1420/");
+	});
+
+	it("adds https to bare hosts", () => {
+		expect(resolveBrowserUrl("example.com")).toBe("https://example.com/");
+		expect(resolveBrowserUrl("  example.com/docs  ")).toBe("https://example.com/docs");
+	});
+
+	it("searches anything that is not a URL", () => {
+		expect(resolveBrowserUrl("cats")).toBe(`${BROWSER_SEARCH_PREFIX}cats`);
+		expect(resolveBrowserUrl("what is furigana")).toBe(
+			`${BROWSER_SEARCH_PREFIX}what%20is%20furigana`
+		);
+		// javascript: input must never become the tab URL.
+		expect(resolveBrowserUrl("javascript:alert(1)")).toBe(
+			`${BROWSER_SEARCH_PREFIX}javascript%3Aalert(1)`
+		);
+	});
+
+	it("always resolves to a gate-allowed URL", () => {
+		for (const raw of ["", "example.com", "cats and dogs", "javascript:alert(1)", "data:x"]) {
+			expect(isSideviewUrlAllowed(resolveBrowserUrl(raw))).toBe(true);
+		}
+	});
+});
+
+describe("clampSideviewWidth", () => {
+	it("rounds and clamps the dragged width into range", () => {
+		expect(clampSideviewWidth(420.6)).toBe(421);
+		expect(clampSideviewWidth(100)).toBe(280);
+		expect(clampSideviewWidth(2000)).toBe(720);
+		expect(clampSideviewWidth(500)).toBe(500);
 	});
 });
 
 describe("isSideviewUrlAllowed", () => {
 	it("allows remote http(s) pages", () => {
-		expect(isSideviewUrlAllowed("https://translate.google.com/")).toBe(true);
+		expect(isSideviewUrlAllowed("https://duckduckgo.com/")).toBe(true);
 		expect(isSideviewUrlAllowed("http://localhost:1420/")).toBe(true);
-		expect(isSideviewUrlAllowed("  https://www.bing.com/translator  ")).toBe(true);
+		expect(isSideviewUrlAllowed("  https://example.com/  ")).toBe(true);
 	});
 
 	it("rejects script, data, file, and unparseable URLs", () => {

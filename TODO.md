@@ -201,11 +201,17 @@ cut; release chain outcome still unconfirmed (see Now).
       j/k navigate results.
 - [ ] Cmd+P: native focus order must match highlighted message; Tab/Shift-Tab
       must match arrow-key target; ESC then j/k/arrows scroll results.
-- [ ] Sideview -> plain Browser: rename research->browser; shortcut-only
+- [x] Sideview -> plain Browser: rename research->browser; shortcut-only
       (drop toggle button); no Google Translate framing anywhere near it; better
       error handling; edge-drag resize with memorized size; Cmd+T from the prompt
       unfocuses into the browser search bar; single tab preferred (if tabs, then
       Shift+Cmd+[ / ] switches; note Shift+Cmd+H/L taken).
+      (Done work/stream-chrome: Cmd+T = single-tab Browser everywhere except over
+      selected message text, where it keeps the S4 translate-lookup; selection
+      trigger untouched. Engines gone -> address bar (DuckDuckGo home, bare hosts
+      get https, else web search); width memorized in settings.sideviewWidthPx
+      280-720; shell refusal surfaces an error line instead of silent fallback.
+      Shell dock + shell edge-drag still hand-verify in tauri dev.)
 
 ## Pile: sending + OCR
 

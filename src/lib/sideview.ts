@@ -1,22 +1,29 @@
 import type { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 import type { Webview } from "@tauri-apps/api/webview";
 import { tauriBackendAvailable } from "./secrets";
+import { SIDEVIEW_WIDTH_MAX, SIDEVIEW_WIDTH_MIN } from "./settings";
 
 /**
- * Research side panel ("bucket sideview"): Cmd+T docks a second OS
- * webview on the right of the same Tauri window for external lookup
- * pages. Exactly one tab is ever open; the engine switcher navigates
- * that same webview. Outside the Tauri shell (plain `vite dev`,
- * Vitest) there is no webview host, so the bridge reports false and
- * the page renders a DOM fallback strip instead of crashing.
+ * Browser side panel (single tab): Cmd+T docks a second OS webview
+ * on the right of the same Tauri window — a plain browser, no
+ * Translate framing. Exactly one tab is ever open; the address bar
+ * navigates that same webview. Outside the Tauri shell (plain
+ * `vite dev`, Vitest) there is no webview host, so the bridge
+ * reports false and the page renders a DOM fallback strip instead
+ * of crashing.
  *
- * Pure helpers (engines, URL gate, toggle, layout) are unit-tested;
- * the `*Sideview` bridge below runs only inside the desktop shell —
- * shell-creation/resize behavior is NOT covered by automated tests
- * (unverified in the Tauri shell; exercise Cmd+T there by hand).
+ * Pure helpers (home/search resolve, URL gate, toggle, layout,
+ * width clamp) are unit-tested; the `*Sideview` bridge below runs
+ * only inside the desktop shell — shell-creation/resize behavior is
+ * NOT covered by automated tests (unverified in the Tauri shell;
+ * exercise Cmd+T there by hand).
  */
 
-/** Webview label for the single research tab. */
+/**
+ * Webview label for the single browser tab. Kept from the
+ * research-panel days on purpose: renaming it would orphan the
+ * previous tab as an invisible always-hidden webview on upgrade.
+ */
 export const SIDE_VIEW_LABEL = "research-sideview";
 
 /** Dock width in logical px on desktop-width windows. */
@@ -25,35 +32,45 @@ export const SIDE_VIEW_DOCK_WIDTH = 420;
 /** Below this viewport width the panel overlays instead of splitting. */
 export const SIDE_VIEW_OVERLAY_BELOW = 640;
 
-export type SideviewEngineId = "google" | "bing";
+/** Home page for a fresh browser tab (plain search, no Translate framing). */
+export const BROWSER_HOME_URL = "https://duckduckgo.com/";
 
-export interface SideviewEngine {
-	id: SideviewEngineId;
-	/** Short label for the switcher. */
-	name: string;
-	/** Lookup home page (the single tab's URL). */
-	url: string;
-}
+/** Search prefix: non-URL address input becomes a search for the raw text. */
+export const BROWSER_SEARCH_PREFIX = "https://duckduckgo.com/?q=";
+
+/** Bare input that looks like a host/path (no spaces): treat as a URL. */
+const BARE_HOST_RE = /^[\w-]+(\.[\w-]+)+(:\d+)?(\/\S*)?$/;
 
 /**
- * Lookup engines. Google Translate is the default; Bing Translator is
- * the friendlier fallback — Translate sometimes bot-blocks embedded
- * contexts, which is why the switcher exists at all.
+ * Resolve address-bar input to the single tab's URL. Empty input
+ * opens home; http(s) URLs (scheme optional for bare hosts) load
+ * as-is; anything else becomes a web search for the raw text. The
+ * result always passes {@link isSideviewUrlAllowed}.
  */
-export const SIDE_VIEW_ENGINES: SideviewEngine[] = [
-	{ id: "google", name: "Google Translate", url: "https://translate.google.com/" },
-	{ id: "bing", name: "Bing Translator", url: "https://www.bing.com/translator" }
-];
-
-/** Engine by id; unknown ids fall back to the default (Google). */
-export function sideviewEngine(id: string): SideviewEngine {
-	return SIDE_VIEW_ENGINES.find((engine) => engine.id === id) ?? SIDE_VIEW_ENGINES[0]!;
+export function resolveBrowserUrl(raw: string): string {
+	const input = raw.trim();
+	if (!input) return BROWSER_HOME_URL;
+	if (!/\s/.test(input)) {
+		const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(input) ? input : `https://${input}`;
+		try {
+			const parsed = new URL(withScheme);
+			if (
+				(parsed.protocol === "http:" || parsed.protocol === "https:") &&
+				(/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(input) || BARE_HOST_RE.test(input))
+			) {
+				return parsed.toString();
+			}
+		} catch {
+			// Not a URL below; fall through to search.
+		}
+	}
+	return BROWSER_SEARCH_PREFIX + encodeURIComponent(input);
 }
 
 /**
- * URL gate for the research tab: only remote http(s) pages may load.
+ * URL gate for the browser tab: only remote http(s) pages may load.
  * Rejects javascript:/data:/file:/blob: and unparseable input so a
- * bad engine URL can never script or file-read through the panel.
+ * bad address can never script or file-read through the panel.
  */
 export function isSideviewUrlAllowed(raw: string): boolean {
 	try {
@@ -64,9 +81,18 @@ export function isSideviewUrlAllowed(raw: string): boolean {
 	}
 }
 
-/** Next open state for the toggle (Cmd+T, Esc, button all share it). */
+/** Next open state for the toggle (Cmd+T and Esc share it; shortcut-only, no button). */
 export function toggleSideviewOpen(open: boolean): boolean {
 	return !open;
+}
+
+/**
+ * Clamp a dragged panel width into the memorized range (whole px).
+ * Non-numbers reset to the dock default via the settings loader —
+ * this only clamps real input.
+ */
+export function clampSideviewWidth(px: number): number {
+	return Math.min(SIDEVIEW_WIDTH_MAX, Math.max(SIDEVIEW_WIDTH_MIN, Math.round(px)));
 }
 
 export interface SideviewBounds {
@@ -110,12 +136,12 @@ export function sideviewLayout(
 }
 
 /**
- * Narrow handle to the single research tab (shell-only; the dynamic
+ * Narrow handle to the single browser tab (shell-only; the dynamic
  * imports below carry the real types, so no casts are needed).
  */
 type SideviewHandle = Pick<Webview, "close" | "hide" | "setPosition" | "setSize" | "show">;
 
-/** Cached handle to the single research tab (null until created). */
+/** Cached handle to the single browser tab (null until created). */
 let sideviewRef: SideviewHandle | null = null;
 
 async function bridge(): Promise<{
@@ -143,7 +169,7 @@ async function bridge(): Promise<{
 }
 
 /**
- * Open (or reveal) the single research tab and dock it beside the
+ * Open (or reveal) the single browser tab and dock it beside the
  * main webview. False outside the shell or when the shell refuses —
  * callers fall back to the DOM strip. Never throws.
  */
@@ -176,7 +202,7 @@ export async function openSideview(url: string, layout: SideviewLayout): Promise
 }
 
 /**
- * Engine switch: the JS Webview API exposes no navigate, so the
+ * Address-bar go: the JS Webview API exposes no navigate, so the
  * single tab is recreated at the new URL (still exactly one tab).
  * False when the shell refuses; never throws.
  */

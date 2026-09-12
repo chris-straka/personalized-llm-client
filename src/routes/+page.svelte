@@ -123,15 +123,13 @@
 	import { switchChatWithTransition } from "$lib/viewTransitions";
 	import { getInspectData, shouldShowInspect } from "$lib/inspect";
 	import {
-		SIDE_VIEW_ENGINES,
+		clampSideviewWidth,
 		hideSideview,
 		layoutSideviewViews,
 		navigateSideview,
 		openSideview,
-		sideviewEngine,
-		sideviewLayout,
-		toggleSideviewOpen,
-		type SideviewEngineId
+		resolveBrowserUrl,
+		sideviewLayout
 	} from "$lib/sideview";
 	import {
 	isAndroidUserAgent,
@@ -904,15 +902,19 @@ import { isPromptIdle } from "$lib/chrome";
 	}
 
 	/**
-	 * Research side panel (Cmd+T): a second OS webview docked right
-	 * in the same Tauri window, exactly one tab, for external lookup
-	 * pages (default Google Translate, Bing fallback in the
-	 * switcher). Shrinking the main webview changes what
-	 * window.innerWidth reports, so the full window width is tracked
-	 * across resizes instead of re-read (see below).
+	 * Browser side panel (Cmd+T): a second OS webview docked right
+	 * in the same Tauri window — exactly one tab, a plain browser
+	 * with an address bar, no Translate framing. Shrinking the main
+	 * webview changes what window.innerWidth reports, so the full
+	 * window width is tracked across resizes instead of re-read
+	 * (see below).
 	 */
 	let sideviewOpen = $state(false);
-	let sideviewEngineId = $state<SideviewEngineId>("google");
+	/** Address-bar text; the single tab's URL derives from it (empty = home). */
+	let browserAddress = $state("");
+	let browserInputEl: HTMLInputElement | null = $state(null);
+	/** Why the DOM fallback strip is showing (shell refusal); null when clean. */
+	let sideviewError: string | null = $state(null);
 	/** True while the native tab is docked (shell granted the webview). */
 	let sideviewHosted = $state(false);
 	/** DOM fallback strip when no shell webview is available. */
@@ -921,7 +923,9 @@ import { isPromptIdle } from "$lib/chrome";
 	let sideviewFullH: number | null = null;
 	let sideviewSideW = 0;
 	let sideviewOverlaid = false;
-	const sideviewUrl = $derived(sideviewEngine(sideviewEngineId).url);
+	const sideviewUrl = $derived(resolveBrowserUrl(browserAddress));
+	/** Edge-drag resize in flight (fallback strip handle). */
+	let sideviewDrag: { startX: number; startW: number } | null = $state(null);
 
 	/** Full window viewport, reconstructing the docked-off width. */
 	function sideviewViewport(): { width: number; height: number } {
@@ -938,18 +942,37 @@ import { isPromptIdle } from "$lib/chrome";
 		sideviewOverlaid = layout.overlay;
 	}
 
-	async function setSideviewOpen(open: boolean): Promise<void> {
+	/** Focus the address bar: Cmd+T lands typing there, out of the prompt. */
+	function focusBrowserAddress(): void {
+		browserInputEl?.focus();
+		browserInputEl?.select();
+	}
+
+	async function setSideviewOpen(open: boolean, focusAddress = false): Promise<void> {
 		try {
 			if (open) {
 				sideviewOpen = true;
+				sideviewError = null;
 				const viewport = sideviewViewport();
 				sideviewFullW = viewport.width;
 				sideviewFullH = viewport.height;
-				const layout = sideviewLayout(viewport.width, viewport.height);
+				const layout = sideviewLayout(
+					viewport.width,
+					viewport.height,
+					settings.sideviewWidthPx
+				);
 				const hosted = await openSideview(sideviewUrl, layout);
 				if (hosted) noteSideviewLayout(layout);
 				sideviewHosted = hosted;
 				sideviewFallback = !hosted;
+				if (!hosted && tauriBackendAvailable()) {
+					// A shell exists but refused the webview: say so
+					// instead of failing silent. Plain browsers get
+					// the strip's static note, not an error.
+					sideviewError =
+						"The desktop shell would not dock the browser tab, so this is a link strip instead.";
+				}
+				if (focusAddress) focusBrowserAddress();
 			} else {
 				sideviewOpen = false;
 				sideviewFallback = false;
@@ -978,31 +1001,53 @@ import { isPromptIdle } from "$lib/chrome";
 		}
 	}
 
-	function toggleSideview(): void {
-		void setSideviewOpen(toggleSideviewOpen(sideviewOpen));
-	}
-
-	async function switchSideviewEngine(id: SideviewEngineId): Promise<void> {
-		sideviewEngineId = id;
-		if (!sideviewOpen || !sideviewHosted) return;
+	/**
+	 * Address-bar go: resolve the input and move the single tab to
+	 * it. The fallback strip just repoints its link (same derived
+	 * URL); a shell refusal flips to the strip with the reason shown.
+	 */
+	async function submitBrowserAddress(): Promise<void> {
+		if (!sideviewOpen) return;
+		sideviewError = null;
+		if (!sideviewHosted) return;
 		try {
 			const viewport = sideviewViewport();
 			sideviewFullW = viewport.width;
 			sideviewFullH = viewport.height;
-			const layout = sideviewLayout(viewport.width, viewport.height);
+			const layout = sideviewLayout(
+				viewport.width,
+				viewport.height,
+				settings.sideviewWidthPx
+			);
 			// The JS Webview API exposes no navigate: recreate the
-			// single tab at the new engine URL.
-			const hosted = await navigateSideview(sideviewEngine(id).url, layout);
+			// single tab at the resolved URL.
+			const hosted = await navigateSideview(sideviewUrl, layout);
 			if (hosted) {
 				noteSideviewLayout(layout);
 			} else {
 				sideviewHosted = false;
 				sideviewFallback = true;
+				sideviewError =
+					"The desktop shell would not move the browser tab, so this is a link strip instead.";
 			}
 		} catch {
 			sideviewHosted = false;
 			sideviewFallback = true;
+			sideviewError =
+				"The desktop shell would not move the browser tab, so this is a link strip instead.";
 		}
+	}
+
+	/**
+	 * Memorize the edge-dragged panel width. Live-drags update the
+	 * setting; the save lands on release (see the handle's
+	 * pointerup) so a drag writes once.
+	 */
+	function dragSideviewTo(clientX: number): void {
+		if (!sideviewDrag) return;
+		settings.sideviewWidthPx = clampSideviewWidth(
+			sideviewDrag.startW + (sideviewDrag.startX - clientX)
+		);
 	}
 
 	$effect(() => {
@@ -1013,7 +1058,11 @@ import { isPromptIdle } from "$lib/chrome";
 			const viewport = sideviewViewport();
 			sideviewFullW = viewport.width;
 			sideviewFullH = viewport.height;
-			const layout = sideviewLayout(viewport.width, viewport.height);
+			const layout = sideviewLayout(
+				viewport.width,
+				viewport.height,
+				settings.sideviewWidthPx
+			);
 			noteSideviewLayout(layout);
 			void layoutSideviewViews(layout);
 		};
@@ -4047,21 +4096,22 @@ import { isPromptIdle } from "$lib/chrome";
 			if (event.key === "Escape" && !event.repeat) escDownAt = Date.now();
 			const inEditor = (event.target as HTMLElement | null)?.closest(".cm-content, .ta-input");
 			if ((event.metaKey || event.ctrlKey) && (event.key === "t" || event.key === "T")) {
-				// Over message text the combo feeds the translate
-				// lookup; everywhere else it toggles the research
-				// side panel (the prompt and the browser keep it).
+				// Over selected message text the combo feeds the
+				// translate lookup (S4 behavior, selection-triggered).
+				// Everywhere else — including the prompt — it opens
+				// the single-tab browser and lands focus in its
+				// address bar.
 				if (!inEditor && currentQuote()) {
 					event.preventDefault();
 					event.stopPropagation();
 					void openTranslate();
 					return;
 				}
-				if (!inEditor) {
-					event.preventDefault();
-					event.stopPropagation();
-					toggleSideview();
-					return;
-				}
+				event.preventDefault();
+				event.stopPropagation();
+				if (!sideviewOpen) void setSideviewOpen(true, true);
+				else focusBrowserAddress();
+				return;
 			}
 			if (event.key === "Escape" && (shortcutsOpen || inspectChar)) {
 				// A modal always wins Esc, even from inside the prompt.
@@ -4079,7 +4129,7 @@ import { isPromptIdle } from "$lib/chrome";
 				return;
 			}
 			if (event.key === "Escape" && sideviewOpen) {
-				// The docked research panel closes next, from
+				// The docked browser panel closes next, from
 				// anywhere (it has no text worth cancelling).
 				event.preventDefault();
 				event.stopPropagation();
@@ -5191,36 +5241,32 @@ import { isPromptIdle } from "$lib/chrome";
 					</span>
 				{/if}
 			</span>
-			<!-- Research side panel: Cmd+T docks a second OS webview
-			right in the same window (one tab, engine switcher). The
-			toggle button covers runtimes where the browser keeps the
-			combo (plain dev, e2e). -->
+			<!-- Browser side panel: Cmd+T docks a single-tab browser
+			right in the same window. Shortcut-only on purpose (no
+			toggle button): the combo opens from anywhere, including
+			the prompt, and lands focus in the address bar. -->
 			<span class="sideview-bar">
 				{#if sideviewOpen}
-					<select
-						aria-label="Research engine"
-						bind:value={sideviewEngineId}
-						onchange={() => void switchSideviewEngine(sideviewEngineId)}
+					<form
+						class="browser-address"
+						onsubmit={(event) => {
+							event.preventDefault();
+							void submitBrowserAddress();
+						}}
 					>
-						{#each SIDE_VIEW_ENGINES as engine (engine.id)}
-							<option value={engine.id}>{engine.name}</option>
-						{/each}
-					</select>
+						<input
+							bind:this={browserInputEl}
+							type="text"
+							aria-label="Browser address"
+							placeholder="Search or address"
+							autocomplete="off"
+							autocapitalize="off"
+							spellcheck={false}
+							bind:value={browserAddress}
+						/>
+						<button type="submit" aria-label="Go to address">Go</button>
+					</form>
 				{/if}
-				<button
-					type="button"
-					class="sideview-toggle"
-					class:active={sideviewOpen}
-					aria-label="Toggle research panel"
-					aria-expanded={sideviewOpen}
-					title={tip(
-						isMac ? "Research panel (⌘T)" : "Research panel (Ctrl+T)",
-						"Research panel"
-					)}
-					onclick={toggleSideview}
-				>
-					Research
-				</button>
 				<button
 					type="button"
 					class="export-btn"
@@ -6000,22 +6046,50 @@ import { isPromptIdle } from "$lib/chrome";
 	{#if sideviewOpen && sideviewFallback}
 		<!-- No Tauri shell here (plain browser dev, e2e): there is no
 		second-OS-webview host, so the panel degrades to a docked
-		strip with an external link instead of crashing. -->
-		<aside class="sideview-fallback" aria-label="Research panel">
+		strip with an external link instead of crashing. The link
+		follows the same address-bar resolve as the native tab. -->
+		<aside
+			class="sideview-fallback"
+			aria-label="Browser panel"
+			style="width: {Math.round(settings.sideviewWidthPx)}px"
+		>
+			<div
+				class="browser-resize"
+				aria-hidden="true"
+				onpointerdown={(event) => {
+					(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+					sideviewDrag = { startX: event.clientX, startW: settings.sideviewWidthPx };
+				}}
+				onpointermove={(event) => {
+					if (sideviewDrag) dragSideviewTo(event.clientX);
+				}}
+				onpointerup={() => {
+					if (sideviewDrag) {
+						sideviewDrag = null;
+						saveSettingsNow();
+					}
+				}}
+				onpointercancel={() => {
+					sideviewDrag = null;
+				}}
+			></div>
 			<div class="sideview-fallback-head">
-				<strong>Research</strong>
+				<strong>Browser</strong>
 				<button
 					type="button"
-					aria-label="Close research panel"
+					aria-label="Close browser panel"
 					title="Close (Esc)"
 					onclick={() => void setSideviewOpen(false)}
 				>
 					×
 				</button>
 			</div>
-			<p>The research panel needs the desktop app for its second webview. Here it stays a link.</p>
+			<p>The browser panel needs the desktop app for its second webview. Here it stays a link.</p>
+			{#if sideviewError}
+				<p class="browser-error">{sideviewError}</p>
+			{/if}
 			<a href={sideviewUrl} target="_blank" rel="external noopener noreferrer">
-				Open {sideviewEngine(sideviewEngineId).name} in a browser tab
+				Open {browserAddress.trim() ? sideviewUrl : "browser home"} in a browser tab
 			</a>
 		</aside>
 	{/if}
@@ -6217,7 +6291,7 @@ import { isPromptIdle } from "$lib/chrome";
 					<div><dt>Speak highlight</dt><dd>Select text, then right click</dd></div>
 					<div><dt>Thoughts show/hide</dt><dd>Ctrl+O</dd></div>
 					<div><dt>Translate selection</dt><dd>{isMac ? "⌘T" : "Ctrl+T"} over message text (to English, feeds annotation)</dd></div>
-					<div><dt>Research side panel</dt><dd>{isMac ? "⌘T" : "Ctrl+T"} elsewhere, Esc closes (one tab, engine switcher)</dd></div>
+					<div><dt>Browser side panel</dt><dd>{isMac ? "⌘T" : "Ctrl+T"} anywhere (address bar takes focus), Esc closes (one tab)</dd></div>
 					<div><dt>Stop voice / close menus</dt><dd>Esc (outside the prompt)</dd></div>
 					<!-- ⌘D is meta-only (Ctrl+D skips in scroll mode), so Windows names Delete alone. -->
 					<div><dt>Delete a message</dt><dd>{isMac ? "Hover the message, then ⌘D or Delete" : "Hover the message, then Delete"}</dd></div>
@@ -7058,16 +7132,21 @@ import { isPromptIdle } from "$lib/chrome";
 	.lang-chip :global(.action-glyph) {
 		height: 0.8rem;
 	}
-	/* Research panel chrome recedes like the language pill. The bar
-	docks right in the title strip; the toggle covers runtimes where
-	the browser keeps Cmd+T for itself. */
+	/* Browser panel chrome recedes like the language pill. The bar
+	docks right in the title strip; the panel is shortcut-only, so
+	this only shows the address bar while it is open. */
 	.sideview-bar {
 		margin-left: auto;
 		display: inline-flex;
 		align-items: center;
 		gap: 0.5rem;
 	}
-	.sideview-bar select {
+	.browser-address {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+	}
+	.browser-address input {
 		font: inherit;
 		font-size: 0.78rem;
 		color: inherit;
@@ -7075,11 +7154,32 @@ import { isPromptIdle } from "$lib/chrome";
 		border: 1px solid #1c1c1e;
 		border-color: var(--strong);
 		border-radius: 999px;
-		padding: 0.2rem 0.5rem;
-		cursor: pointer;
-		max-width: 11rem;
+		padding: 0.2rem 0.6rem;
+		width: 13rem;
+		max-width: 38vw;
 	}
-	.sideview-toggle,
+	.browser-address input::placeholder {
+		opacity: 0.55;
+	}
+	.browser-address button {
+		font: inherit;
+		font-size: 0.78rem;
+		color: #1c1c1e;
+		color: var(--ink);
+		border: 1px solid #1c1c1e;
+		border-color: var(--strong);
+		border-radius: 999px;
+		background: none;
+		cursor: pointer;
+		padding: 0.2rem 0.7rem;
+		white-space: nowrap;
+		opacity: 0.55;
+		transition: opacity 0.18s ease;
+	}
+	.browser-address button:hover,
+	.browser-address button:focus-visible {
+		opacity: 1;
+	}
 	.export-btn {
 		font: inherit;
 		/* The open strip is a fixed drawer (z-index 55) covering the
@@ -7100,27 +7200,37 @@ import { isPromptIdle } from "$lib/chrome";
 		opacity: 0.55;
 		transition: opacity 0.18s ease;
 	}
-	.sideview-toggle:hover,
-	.sideview-toggle:focus-visible,
-	.sideview-toggle.active,
 	.export-btn:hover,
 	.export-btn:focus-visible {
 		opacity: 1;
 	}
-	.sideview-toggle.active {
-		font-weight: 600;
-	}
 	/* Fallback strip (browser dev, no shell webview): docks right
 	like the native tab does in the shell. Overrides the left
-	chat-list drawer above (same element, opposite edge). */
+	chat-list drawer above (same element, opposite edge). Width is
+	the memorized panel width (inline style); this is the floor. */
 	.sideview-fallback {
 		left: auto;
 		right: 0;
-		width: 22rem;
+		min-width: 17.5rem;
+		max-width: 90vw;
 		border-right: 0;
 		border-left: 1px solid #e5e5ea;
 		border-left-color: var(--line-soft);
 		box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+	}
+	/* Edge-drag resize handle: a slim strip on the panel's left
+	edge; dragging it memorizes the width into settings. */
+	.browser-resize {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: -5px;
+		width: 10px;
+		cursor: ew-resize;
+		touch-action: none;
+	}
+	.browser-error {
+		color: var(--danger, #b3261e);
 	}
 	.sideview-fallback-head {
 		display: flex;
