@@ -497,7 +497,13 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	let annPopTimer: ReturnType<typeof setTimeout> | null = null;
 	let annDraft = $state("");
 	let annPopBox: HTMLTextAreaElement | undefined = $state();
-	/** The Enter that saves an annotation must never double as a send. */
+	/**
+	 * The Enter that saves an annotation must never double as a send.
+	 * Any pointer press in between proves a distinct gesture, so it
+	 * clears the window (see the pointerdown listener below): without
+	 * this, a fast file-then-send (or its e2e) lands inside the 500ms
+	 * window and the send is silently eaten.
+	 */
 	let sendGuardUntil = 0;
 	let selMenu = $state<{
 		x: number;
@@ -1305,8 +1311,14 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		const setting = settings.promptIdleSec ?? 6;
 		const idleSec = !androidUI ? setting : idleTimeoutCustomized ? setting : 0;
 		const on = (): void => noteInput();
+		// A pointer press is a distinct gesture from the filing Enter,
+		// so it ends the anti-double-send window (see sendGuardUntil).
+		const onDown = (): void => {
+			sendGuardUntil = 0;
+		};
 		window.addEventListener("pointermove", on, { passive: true });
 		window.addEventListener("pointerdown", on, { passive: true });
+		window.addEventListener("pointerdown", onDown);
 		window.addEventListener("keydown", on);
 		window.addEventListener("wheel", on, { passive: true });
 		window.addEventListener("touchstart", on, { passive: true });
@@ -1322,6 +1334,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		return () => {
 			window.removeEventListener("pointermove", on);
 			window.removeEventListener("pointerdown", on);
+			window.removeEventListener("pointerdown", onDown);
 			window.removeEventListener("keydown", on);
 			window.removeEventListener("wheel", on);
 			window.removeEventListener("touchstart", on);
@@ -2070,7 +2083,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		};
 		pendingAnn = pending;
 		clearSelection();
-		const width = popWidth();
+		const width = popWidth(true);
 		// The comment box sits a breath below the Annotate menu's
 		// anchor: sharing selMenu.y leaves it floating high above tall
 		// CJK lines. Narrow highlights center the box over themselves;
@@ -2221,8 +2234,11 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 
 	/** Annotation popover width: the desktop card, clamped to fit narrow
 	phones — without the clamp x goes negative and it runs off-screen. */
-	function popWidth(): number {
-		return Math.min(384, window.innerWidth - 16);
+	function popWidth(fresh: boolean): number {
+		// CSS widths (16px root): .ann-pop is 24rem, .ann-pop.fresh is
+		// 19rem. Measuring the nominal 384 for a fresh box centers on
+		// the wrong middle (see annotations-ux centering spec).
+		return Math.min(fresh ? 19 * 16 : 24 * 16, window.innerWidth - 16);
 	}
 
 	/**
@@ -2247,7 +2263,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		settleAnnPop();
 		// Narrow phones are narrower than the desktop card: clamp first
 		// or x goes negative and the popover runs off-screen.
-		const width = popWidth();
+		const width = popWidth(false);
 		let x = Math.min(Math.max(8, anchor.x - width / 2), window.innerWidth - width - 8);
 		const height = 240;
 		let y = anchor.y + 8;
@@ -3152,8 +3168,11 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 
 	function onSubmit(kind: SubmitKind) {
 		// The annotation pill owns Enter while open, and the Enter that
-		// saved it must not double as a send right after.
-		if (annPop) return;
+		// saved it must not double as a send right after. A pill already
+		// fading out (data committed) owns nothing: the time guard below
+		// still eats a bare double-Enter, while a pointer press in between
+		// clears that guard as a distinct gesture.
+		if (annPop && !annPopClosing) return;
 		// Keyboard sends bypass the dead button: hold the draft while a
 		// reply streams (same gate the button uses — see canSubmit).
 		if (!canSubmit) return;

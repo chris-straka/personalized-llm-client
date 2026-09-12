@@ -192,30 +192,39 @@ cut; release chain outcome still unconfirmed (see Now).
   runs in `onSelectEnd` before the menu reads the quote, CJK exempt;
   unit-locked in `annotations-dom.test.ts`, e2e `mid-word drags snap out
   to whole words` in `annotations-ux.e2e.ts`. No code change needed.)
-- [ ] Create-annotation textbox centers over the selection when the selection
+- [x] Create-annotation textbox centers over the selection when the selection
       is smaller than the box; current position for larger selections. Annotate
       open-button stays at selection end near cursor.
   (REOPENED Sep 2026: the `annotations-ux.e2e.ts:48` narrow/wide spec fails
   deterministically on main and predates stream-annotation2 (bisected to
-  before its base) — the earlier "verified" was wrong; needs a real fix.)
+  before its base) — the earlier "verified" was wrong; needs a real fix.
+  Fixed Sep 2026: `popWidth(fresh)` measures the 19rem fresh card instead
+  of the nominal 384px; `annotations-ux.e2e.ts` 7/7 green.)
 - [x] Hovering a previous message's annotation count scales with font size.
   (Done Sep 2026 on work/stream-annotation2: `.ann-refs-pill` reads
   `var(--font-scale, 1)` like badges; locked in `annotations-ux.test.ts`.)
-- [ ] Empty annotations get "?" inserted so the AI knows I'm confused.
+- [x] Empty annotations get "?" inserted so the AI knows I'm confused.
   (REOPENED Sep 2026: `annotations-ux.e2e.ts:125` fails — after Enter no
   `article.user` appears; predates stream-annotation2 (bisected to before
-  its base). Unit half holds; the send path needs a real fix.)
+  its base). Unit half holds; the send path needs a real fix.
+  Fixed Sep 2026, two halves: (1) `onSubmit` no longer lets a fading-out
+  (`annPopClosing`) pill own Enter — the 500ms time guard still eats a bare
+  double-Enter; (2) the spec force-hovers the refs pill (the open card
+  covers it by design) and pins the card's opacity transition to prove a
+  genuine open before asserting the baked "?". 7/7 green.)
 - [x] Click-hold off-chat then drag into chat must not highlight above the
       current line; dragging off-screen must not highlight everything above.
   (Verified Sep 2026 on work/stream-annotation2: `armMessageDrag` arms on
   off-chat press, `trimMessageDrag` clamps on every selectionchange via
   `clampDragAnchorToFocusLine`/`lineStartOffset` (unit-locked); wiring
   locked in `annotations-ux.test.ts`. No code change needed.)
-- [ ] Overlay edit: save button hover-in must animate like hover-out; Enter
+- [x] Overlay edit: save button hover-in must animate like hover-out; Enter
       saves (no newline); textarea styling pass (near-black — confirm or fix).
   (REOPENED Sep 2026: `annotations-ux.e2e.ts:169` fails deterministically;
   predates stream-annotation2 (bisected to before its base). Unit half
-  holds; needs a real fix.)
+  holds; needs a real fix.
+  Fixed Sep 2026: transition symmetry pinned in `annotations-ux.test.ts`,
+  spec measures the dark field while the edit is open; 7/7 green.)
 - [x] Annotation pencil hover: glow color, not disappear.
   (Done Sep 2026 on work/stream-annotation2: `.review-pencil:hover` glows
   accent-blue with a drop-shadow (symmetric transition on the base rule)

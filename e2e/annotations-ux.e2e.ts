@@ -138,7 +138,11 @@ test("empty annotations bake a question mark for the model", async ({ page }) =>
 	await page.keyboard.press("Enter");
 	const user = page.locator("article.user").first();
 	await expect(user).toBeVisible();
-	await user.locator(".ann-refs-pill").hover();
+	// The open card covers its own pill by design (copy lives inside),
+	// so a checked hover can never complete: force the real mouse over
+	// and prove the card genuinely opened via its opacity transition.
+	await user.locator(".ann-refs-pill").hover({ force: true });
+	await expect(user.locator(".ann-refs-pop")).toHaveCSS("opacity", "1");
 	await expect(user.locator(".ann-refs-comment").first()).toHaveText("?");
 });
 
@@ -181,26 +185,20 @@ test("review edit box saves on Enter and stays readable", async ({ page }) => {
 	const box = page.locator(".review textarea");
 	await expect(box).toBeVisible();
 	await box.fill("");
+	// The dark edit box is a raised surface, never near-black. Measure
+	// while the edit is open: Enter closes it, leaving nothing to read.
+	// (Transition symmetry is pinned in annotations-ux.test.ts against
+	// elements this flow never mounts.)
+	const darkField = await page.evaluate(() => {
+		document.documentElement.dataset.theme = "dark";
+		const ta = document.querySelector(".review textarea") as HTMLElement | null;
+		return ta ? getComputedStyle(ta).backgroundColor : null;
+	});
+	// #3a3a3c, not the near-black field #101013.
+	expect(darkField).not.toBe("rgb(16, 16, 19)");
 	await box.press("Enter");
 	// Enter saved instead of inserting a newline: the edit closed.
 	await expect(box).toHaveCount(0);
-	// Save animates symmetrically (transition on the base rule) and
-	// the dark edit box is a raised surface, never near-black.
-	const style = await page.evaluate(() => {
-		document.documentElement.dataset.theme = "dark";
-		const save = document.querySelector(".ann-save");
-		const reviewSave = document.querySelector(".review-edit-actions button");
-		const ta = document.querySelector(".review textarea") as HTMLElement | null;
-		return {
-			saveTransition: save ? getComputedStyle(save).transition : null,
-			reviewTransition: reviewSave ? getComputedStyle(reviewSave).transition : null,
-			darkField: ta ? getComputedStyle(ta).backgroundColor : null
-		};
-	});
-	expect(style.saveTransition).toContain("0.15s");
-	expect(style.reviewTransition).toContain("0.15s");
-	// #3a3a3c, not the near-black field #101013.
-	expect(style.darkField).not.toBe("rgb(16, 16, 19)");
 });
 
 test("gutter drags never highlight above the cursor line", async ({ page }) => {
