@@ -130,7 +130,11 @@ cut; release chain outcome still unconfirmed (see Now).
 
 ## Pile: annotation
 
-- [ ] Marker must not split words in half for text selection.
+- [x] Marker must not split words in half for text selection.
+  (Verified Sep 2026 on work/stream-annotation2: `snapSelectionToWordEdges`
+  runs in `onSelectEnd` before the menu reads the quote, CJK exempt;
+  unit-locked in `annotations-dom.test.ts`, e2e `mid-word drags snap out
+  to whole words` in `annotations-ux.e2e.ts`. No code change needed.)
 - [ ] Create-annotation textbox centers over the selection when the selection
       is smaller than the box; current position for larger selections. Annotate
       open-button stays at selection end near cursor.
