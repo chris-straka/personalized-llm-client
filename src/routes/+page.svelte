@@ -79,6 +79,7 @@
 		holdIsTap,
 		isEscapeHold,
 		messageEdgeScrollTop,
+		resolveSidebarSpaceEnter,
 		scrollHoldVelocity,
 		stepScrollTop,
 		unselectedScrollIntent
@@ -396,6 +397,20 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	$effect(() => {
 		if (settingsOpen) wpOpen = false;
 	});
+	// The menu opens at the middle option, not the top: it scrolls
+	// into view without stealing focus (keyboard users tab in from
+	// the top as before; a focus move would also pin the menu
+	// against hover-outside dismissal).
+	$effect(() => {
+		if (!wpOpen) return;
+		void tick().then(() => {
+			if (!wpOpen) return;
+			const items = wpWrap?.querySelectorAll('.wp-menu button[role="menuitem"]');
+			const mid = items?.item(Math.floor(((items.length ?? 1) - 1) / 2));
+			if (!(mid instanceof HTMLElement)) return;
+			mid.scrollIntoView({ block: "nearest" });
+		});
+	});
 	// The pill's position tracks the chat itself (new messages, chat
 	// switches), not just scrolls: the synchronous reads subscribe the
 	// effect, and the DOM re-read settles after paint, when article
@@ -441,9 +456,22 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			}
 			set(false);
 		};
+		// Hover-reveal also opens mid-list (the pinned-open effect only
+		// covers wpOpen): a fresh hover lands on the middle option, while
+		// a user-placed scroll and keyboard browsing are left alone.
+		const midOnEnter = () => {
+			const menuEl = el.querySelector(".wp-menu");
+			if (!(menuEl instanceof HTMLElement) || menuEl.scrollTop > 0) return;
+			if (menuEl.contains(document.activeElement)) return;
+			const items = menuEl.querySelectorAll('button[role="menuitem"]');
+			const mid = items.item(Math.floor((items.length - 1) / 2));
+			if (mid instanceof HTMLElement) mid.scrollIntoView({ block: "nearest" });
+		};
+		el.addEventListener("mouseenter", midOnEnter);
 		window.addEventListener("mousemove", onMove, { passive: true });
 		document.documentElement.addEventListener("mouseleave", onLeave);
 		return () => {
+			el.removeEventListener("mouseenter", midOnEnter);
 			window.removeEventListener("mousemove", onMove);
 			document.documentElement.removeEventListener("mouseleave", onLeave);
 			if (raf) window.cancelAnimationFrame(raf);
@@ -3623,7 +3651,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		const sameDay = date.toDateString() === today.toDateString();
 		const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 		const day = sameDay ? "Today" : date.toLocaleDateString([], { month: "short", day: "numeric" });
-		return `${day} ${time} · ${count} msg`;
+		return `${day} ${time} · ${count > 99 ? "99+" : count} msg`;
 	}
 
 	function promptOptions(): PromptEditorOptions {
@@ -4866,9 +4894,15 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 					(event.key === " " || event.key === "l" || event.key === "L")
 				) {
 					// Space would click the focused button by default; take
-					// it over so entering always lands in the prompt.
+					// it over so entering always lands in the prompt
+					// (resolveSidebarSpaceEnter: nothing selected stays
+					// on the current chat, never the top one).
 					event.preventDefault();
-					enterSideChat();
+					settings.sidebarCollapsed = true;
+					persistSettings();
+					if (resolveSidebarSpaceEnter(sideIdx, chatState.chats.length).kind === "stay") {
+						enterEditMode();
+					} else enterSideChat();
 					return;
 				}
 				if (
@@ -5685,6 +5719,19 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 					onkeydown={(e) => {
 						if (e.key === "Escape") wpOpen = false;
 					}}
+					onmouseleave={() => {
+						// Hovering outside closes the menu after a jump.
+						// Focus on a menu *item* keeps it (tabbing users
+						// don't lose their place to a mouse jiggle), but
+						// focus lingering on the toggle after a mouse click
+						// must not pin it open.
+						const menu = wpWrap?.querySelector(".wp-menu");
+						const deep =
+							menu != null &&
+							document.activeElement instanceof Element &&
+							menu.contains(document.activeElement);
+						if (wpOpen && !deep) wpOpen = false;
+					}}
 				>
 					<button
 						type="button"
@@ -5727,9 +5774,15 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 								role="menuitem"
 								aria-current={n === wpPos - 1}
 								title={waypointLabel(target?.content ?? "", 200)}
-								onclick={() => {
+								onclick={(e) => {
 									jumpTo(index);
 									wpOpen = false;
+									// Mouse jumps release focus so hover-outside can
+									// close: focus pinned on the item would hold the
+									// menu open under a stationary pointer. Keyboard
+									// (detail 0) keeps focus and the pin, so tabbing
+									// users don't lose their place.
+									if (e.detail > 0) e.currentTarget.blur();
 								}}
 							>
 								<span class="wp-dot" data-role={target?.role ?? "user"} aria-hidden="true"></span>
@@ -6169,11 +6222,13 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			}}
 		>
 			<div class="prompt-tools">
-				{#if points.length > 3 && !(selMenu && androidUI)}
-					<!-- Touch jump-to-message trigger: an icon in the tools
-					cluster, styled like attach/mic (desktop keeps ticks).
-					On phones the selection dock takes this slot instead —
-					both side by side crowd the placeholder. -->
+				{#if androidUI && points.length > 3 && !selMenu}
+					<!-- Touch-only jump-to-message trigger: an icon in the
+					tools cluster, styled like attach/mic. Desktop and web
+					keep the far-right tick control instead — one owner
+					for jumps. On phones the selection dock takes this
+					slot instead — both side by side crowd the
+					placeholder. -->
 					<button
 						type="button"
 						class="wp-jump"
@@ -7053,11 +7108,22 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	pill spans the full row width flush with the + button below it.
 	Keyboard focus brings it back (focus-within); touch has no hover,
 	so the × stays in flow there. */
+	/* Row buttons share one fixed box: same size, centered glyph, so
+	hover states never shift layout. The × reads bigger in a smaller
+	button; export sits one box plus a gap left of it. */
 	aside li .del {
 		position: absolute;
 		right: 0;
 		top: 50%;
 		transform: translateY(-50%);
+		width: 1.75rem;
+		height: 1.75rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0;
+		font-size: 1.15rem;
+		line-height: 1;
 		opacity: 0;
 		pointer-events: none;
 	}
@@ -7071,9 +7137,14 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	brings it back; touch keeps it in flow like the x). */
 	aside li .exp {
 		position: absolute;
-		right: 1.55rem;
+		right: 2.1rem;
 		top: 50%;
 		transform: translateY(-50%);
+		width: 1.75rem;
+		height: 1.75rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		opacity: 0;
 		pointer-events: none;
 		border: 0;
@@ -7081,7 +7152,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		cursor: pointer;
 		color: #6e6e73;
 		color: var(--muted);
-		padding: 0.15rem;
+		padding: 0;
 		line-height: 0;
 	}
 	aside li:hover .exp,
@@ -7925,7 +7996,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			visibility 0s linear 0.18s;
 	}
 	.wp-wrap:hover .wp-menu,
-	.wp-wrap:focus-within .wp-menu,
+	.wp-menu:focus-within,
 	.wp-wrap.open .wp-menu {
 		/* Reveal now, fade in: the incoming transition governs. */
 		opacity: 1;

@@ -12,6 +12,7 @@ import {
 	holdIsTap,
 	isEscapeHold,
 	messageEdgeScrollTop,
+	resolveSidebarSpaceEnter,
 	scrollHoldVelocity,
 	stepScrollTop,
 	unselectedScrollIntent
@@ -76,6 +77,19 @@ describe("messageEdgeScrollTop", () => {
 		expect(
 			messageEdgeScrollTop({ scrollTop: 200, boxTop: 100, elTop: 300, elHeight: 60, viewH: 600, edge: "end" })
 		).toBe(200 + 200 + 60 - 600 + HOVER_EDGE_MARGIN_PX);
+	});
+});
+
+describe("resolveSidebarSpaceEnter", () => {
+	it("stays on the current chat with nothing selected", () => {
+		expect(resolveSidebarSpaceEnter(-1, 3)).toEqual({ kind: "stay" });
+		expect(resolveSidebarSpaceEnter(-1, 0)).toEqual({ kind: "stay" });
+	});
+
+	it("enters the clamped row otherwise", () => {
+		expect(resolveSidebarSpaceEnter(0, 3)).toEqual({ kind: "enter", index: 0 });
+		expect(resolveSidebarSpaceEnter(2, 3)).toEqual({ kind: "enter", index: 2 });
+		expect(resolveSidebarSpaceEnter(9, 3)).toEqual({ kind: "enter", index: 2 });
 	});
 });
 

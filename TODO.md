@@ -69,6 +69,20 @@ cut; release chain outcome still unconfirmed (see Now).
       rejects, upstream not on gtk 0.9; documented in Cargo.toml, Linux-only,
       no app code touches glib. Cargo 59/59 green. Revisit on Tauri gtk-0.9.)
 
+## Pile: waypoint + sidebar chrome (added Sep 2026, user pile-on)
+
+- [ ] Waypoint jump icon in the main text prompt must not appear on desktop
+      or web (the far-right waypoint control already covers it there).
+- [ ] Far-right waypoint overlay opens at the MIDDLE option, not the top.
+- [ ] After jumping via a waypoint option, hovering outside the overlay
+      closes it.
+- [ ] Space with nothing selected always focuses the main text prompt
+      (never selects the top chat).
+- [ ] Sidebar message counter caps at two digits: 99+ past 99 messages.
+- [ ] Export button must not shift on hover (layout shift).
+- [ ] Sidebar X button: smaller button (same size as export), larger X
+      glyph; the saved space goes left of the export button.
+
 ## Pile: composer
 
 - [x] Idle-hide: main prompt hides on inactivity; image bubble must hide too.

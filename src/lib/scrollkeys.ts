@@ -64,6 +64,18 @@ export function ggArmed(lastGAt: number, now: number, windowMs = GG_WINDOW_MS): 
 	return now - lastGAt < windowMs;
 }
 
+export type SidebarSpaceEnter = { kind: "stay" } | { kind: "enter"; index: number };
+
+/**
+ * Space in the open chat list: with no row selected (sideIdx < 0) the
+ * user stays on the current chat and lands in its prompt — never the
+ * top chat. Otherwise the clamped row is entered.
+ */
+export function resolveSidebarSpaceEnter(sideIdx: number, chatCount: number): SidebarSpaceEnter {
+	if (sideIdx < 0 || chatCount <= 0) return { kind: "stay" };
+	return { kind: "enter", index: Math.min(Math.max(sideIdx, 0), chatCount - 1) };
+}
+
 /** d/u fast scroll distance: half the visible chat height. */
 export function halfPageDy(viewH: number, dir: 1 | -1): number {
 	return dir * Math.max(1, Math.floor(viewH / 2));
