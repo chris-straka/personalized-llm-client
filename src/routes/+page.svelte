@@ -8256,18 +8256,26 @@ import { isPromptIdle } from "$lib/chrome";
 	.ann-refs-copy:hover {
 		color: #fff;
 	}
+	/* Attachment strip: same 1.2rem column edges as the composer (never
+	a full-bleed row), one scrolling row when many — pills never wrap
+	into a tall stack and never spill past the column. */
 	.attachments {
 		list-style: none;
 		display: flex;
-		flex-wrap: wrap;
+		flex-wrap: nowrap;
 		gap: 0.4rem;
-		margin: 0;
-		padding: 0.5rem 1.2rem 0;
+		margin: 0 1.2rem;
+		padding: 0.5rem 0 0.25rem;
+		box-sizing: border-box;
+		max-width: calc(100% - 2.4rem);
+		overflow-x: auto;
+		scrollbar-width: thin;
 	}
 	.attachments li {
 		display: flex;
 		align-items: center;
 		gap: 0.4rem;
+		flex-shrink: 0;
 		font-size: 0.78rem;
 		background: #eef4ff;
 		background: var(--hl);
