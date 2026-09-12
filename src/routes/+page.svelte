@@ -5509,11 +5509,10 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		{#if toast}
 			<button type="button" class="toast" title="Click to copy" aria-live="polite" transition:fade={{ duration: 160 }} onclick={copyToast}>{toast}</button>
 		{/if}
-		<!-- Slim title strip: app name plus the reply-language pill's
-		anchor (token count lives in the settings panel now, and
-		Settings itself moved to the menu bar). Double-click zooms. -->
+		<!-- Empty drag strip: nothing but the traffic-light clearance (the
+		reply-language pill and browser address bar only appear here
+		while summoned). Double-click zooms. -->
 		<header role="toolbar" aria-label="App" tabindex="-1" onmousedown={dragWindow} ondblclick={zoomWindow}>
-			<span class="app-title">Ccez LLM</span>
 			<span class="tokens-wrap">
 				{#if activeReplyLang}
 					<span class="lang-chip-float" transition:fade={{ duration: 90 }}>
@@ -7399,15 +7398,6 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		-webkit-user-select: none;
 		cursor: default;
 	}
-	/* App name in the title strip: quiet chrome beside the drag
-	surface, never interactive (double-click still zooms). */
-	.app-title {
-		font-weight: 600;
-		letter-spacing: 0.01em;
-		color: #6e6e73;
-		color: var(--muted);
-		pointer-events: none;
-	}
 	/* Chrome recedes so the chat leads: the language pill and waypoint
 	ticks rest dimmed until hovered or focused. */
 	.lang-chip {
@@ -7544,11 +7534,11 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		gap: 0.35rem;
 	}
 	.find-bar {
-		position: fixed;
-		top: 2.6rem;
-		left: 50%;
-		transform: translateX(-50%);
-		z-index: 58;
+		/* In-flow, never an overlay: a fixed bar here would sit over
+		the top messages and cut them off — only the window bounds
+		may clip text, so opening find pushes the column down. */
+		align-self: center;
+		margin: 0.35rem 1.2rem 0;
 		display: flex;
 		align-items: center;
 		gap: 0.4rem;

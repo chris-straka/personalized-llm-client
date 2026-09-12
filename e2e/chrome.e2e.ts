@@ -20,19 +20,20 @@ async function openSettings(page: import("@playwright/test").Page) {
 	await expect(page.locator(".settings-panel")).not.toHaveClass(/closed/);
 }
 
-/** Top bar shows the app name and keeps double-click-to-zoom. */
-test("top bar shows text and survives a double-click", async ({ page }) => {
+/** Top bar is an empty drag strip (traffic lights only) and keeps double-click-to-zoom. */
+test("top bar shows no text and survives a double-click", async ({ page }) => {
 	await openWithMessages(page, [{ role: "user", content: "hi" }]);
-	const title = page.locator("header .app-title");
-	await expect(title).toHaveText("Ccez LLM");
+	const header = page.locator("main > header");
+	await expect(header).toBeVisible();
+	await expect(header).toHaveText(/^\s*$/);
+	await expect(page.locator("header .app-title")).toHaveCount(0);
 	// Browser build has no shell zoom (Tauri-only no-op): the strip
-	// stays put and keeps its text. The title itself is click-through
-	// (pointer-events none, so the window drag strip wins) — drive the
-	// double-click by dispatch, which still runs the zoom path.
-	await title.evaluate((el) =>
+	// stays put and stays empty — drive the double-click by dispatch,
+	// which still runs the zoom path.
+	await header.evaluate((el) =>
 		el.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))
 	);
-	await expect(title).toHaveText("Ccez LLM");
+	await expect(header).toHaveText(/^\s*$/);
 });
 
 /** Idle prompt: hides after the timeout, restores on any input. */
