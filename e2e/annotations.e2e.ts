@@ -332,7 +332,8 @@ test("review popup uses note labels", async ({ page }) => {
 	await expect(review).not.toContainText("User comment");
 });
 
-/** An annotations-only message renders folded with its quotes previewed. */
+/** An annotations-only message renders unfolded (em-dash plus the count)
+and folds to its quotes previewed on demand. */
 test("annotations-only message renders folded", async ({ page }) => {
 	await seedChat(page, [
 		{
@@ -343,16 +344,17 @@ test("annotations-only message renders folded", async ({ page }) => {
 	await page.reload();
 	const article = page.locator("article.user");
 	await expect(article).toBeVisible();
+	await expect(article.locator(".rendered")).toContainText("—");
+	await expect(article.locator(".ann-refs-pill")).toBeVisible();
+	// Folding previews the quotes; unfolding restores the em-dash body
+	// with the pill above — the baked block never shows.
+	await article.locator('.actions button[aria-label="Fold this message"]').click();
 	const preview = article.locator(".folded-preview");
 	await expect(preview).toContainText("風に舞う");
-	await expect(article.locator(".ann-refs-pill")).toBeVisible();
-	// Unfolding reveals the full block and drops the pill.
 	await article.locator('.actions button[aria-label="Unfold this message"]').click();
-	await expect(article.locator(".rendered")).toContainText("Annotated selections:");
-	await expect(article.locator(".ann-refs-pill")).toHaveCount(0);
-	// Refolding restores the compact view.
-	await article.locator('.actions button[aria-label="Fold this message"]').click();
-	await expect(article.locator(".folded-preview")).toBeVisible();
+	await expect(article.locator(".rendered")).toContainText("—");
+	await expect(article.locator(".rendered")).not.toContainText("Annotated selections:");
+	await expect(article.locator(".ann-refs-pill")).toBeVisible();
 });
 
 /** No message row offers an audio download anymore. */
@@ -678,11 +680,17 @@ test("message copy excludes baked annotations", async ({ page }) => {
 /** Each baked annotation copies from the sent-refs card's icon button. */
 test("sent-refs card copies one annotation", async ({ page }) => {
 	await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+	// A leading assistant message pushes the user article down: the
+	// count pill floats above its message and is unhittable at the
+	// viewport's top edge.
 	await seedChat(page, [
+		{ role: "assistant", content: "noted" },
 		{ role: "user", content: 'explain this\n\nAnnotated selections:\n1. "bonjour" — greeting?' }
 	]);
 	await page.goto("/");
-	await page.locator(".ann-refs-pill").first().hover();
+	// Forced: the card opens overlapping its pill by design, so the
+	// pill itself never stays the hit target once the card is up.
+	await page.locator(".ann-refs-pill").first().hover({ force: true });
 	await page.locator(".ann-refs-copy").first().click();
 	await expect(page.locator(".toast")).toHaveText("Copied", { timeout: 10_000 });
 	expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('"bonjour" — greeting?');

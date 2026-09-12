@@ -5335,7 +5335,7 @@ import { isPromptIdle } from "$lib/chrome";
 			{#each viewChat.messages as msg, i (msg.id)}
 				{@const sentRefs = annRefsFor(msg.content)}
 				{@const refsOnly = sentRefs ? sentRefs.text.trim() === "" : false}
-				{@const isFolded = refsOnly ? !foldedIds.has(msg.id) : foldedIds.has(msg.id)}
+				{@const isFolded = foldedIds.has(msg.id)}
 				{@const script = detectScript(sentRefs ? sentRefs.text : msg.content)}
 				{@const aidId = script ? MODEL_AID_FOR_SCRIPT[script] : null}
 				{@const localKinds = offeredLocalAids(sentRefs ? sentRefs.text : msg.content)}
