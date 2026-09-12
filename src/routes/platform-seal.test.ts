@@ -72,7 +72,7 @@ describe("android seal", () => {
 
 	it("yields the waypoint slot to the selection dock on phones", () => {
 		const source = pageSource();
-		expect(source).toContain("{#if points.length > 3 && !(selMenu && androidUI)}");
+		expect(source).toContain("{#if androidUI && points.length > 3 && !selMenu}");
 	});
 });
 
