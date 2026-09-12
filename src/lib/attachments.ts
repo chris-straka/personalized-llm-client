@@ -26,7 +26,7 @@ export interface Attachment {
 
 /** Marker line inserted in the prompt when an image is pasted. The composer
  * strips these lines on send — the image travels as an attachment instead. */
-export const IMAGE_MARKER = "[Pasted an image]";
+export const IMAGE_MARKER = "[Pasted image]";
 
 /** Max side (px) for images before upload. */
 export const IMAGE_MAX_DIM = 1568;
@@ -170,4 +170,30 @@ export function stripImageMarkers(text: string): string {
 		.split("\n")
 		.filter((line) => line.trim() !== IMAGE_MARKER)
 		.join("\n");
+}
+
+/**
+ * Composer insertion for a newly pasted/dropped image: the marker tag with
+ * one trailing space (the cursor lands right after it), starting its own
+ * line only when the cursor sits mid-line — never a leading blank line.
+ * Own-line placement is load-bearing: send-time stripping
+ * (`stripImageMarkers`) only drops whole marker lines, so the tag must
+ * never share a line with draft text. Pure and unit-tested.
+ */
+export function imageMarkerInsert(doc: string): string {
+	const prefix = doc === "" || doc.endsWith("\n") ? "" : "\n";
+	return `${prefix}${IMAGE_MARKER} `;
+}
+
+/** Remove one pasted-image marker line (pill → tag half of two-way removal). */
+export function removeMarkerLine(text: string): string {
+	const lines = text.split("\n");
+	const at = lines.findIndex((line) => line.trim() === IMAGE_MARKER);
+	if (at === -1) return text;
+	return [...lines.slice(0, at), ...lines.slice(at + 1)].join("\n");
+}
+
+/** How many marker lines a draft holds (tag → pill reconciliation). */
+export function countMarkerLines(text: string): number {
+	return text.split("\n").filter((line) => line.trim() === IMAGE_MARKER).length;
 }

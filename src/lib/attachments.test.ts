@@ -3,9 +3,12 @@ import {
 	IMAGE_MARKER,
 	IMAGE_MAX_DIM,
 	MAX_FILE_CHARS,
+	countMarkerLines,
 	fitDimensions,
+	imageMarkerInsert,
 	imageTokens,
 	isTextFile,
+	removeMarkerLine,
 	stripImageMarkers
 } from "./attachments";
 import { estimateTextTokens } from "./render";
@@ -46,6 +49,25 @@ describe("image markers", () => {
 		const text = `hello\n${IMAGE_MARKER}\nworld`;
 		expect(stripImageMarkers(text)).toBe("hello\nworld");
 		expect(stripImageMarkers("no markers")).toBe("no markers");
+	});
+
+	it("says [Pasted image] with one trailing space and no leading blank line", () => {
+		expect(IMAGE_MARKER).toBe("[Pasted image]");
+		expect(imageMarkerInsert("")).toBe(`${IMAGE_MARKER} `);
+		expect(imageMarkerInsert("draft\n")).toBe(`${IMAGE_MARKER} `);
+		// Mid-line: own line, but no blank line before the tag.
+		expect(imageMarkerInsert("hello")).toBe(`\n${IMAGE_MARKER} `);
+	});
+
+	it("removes one marker line at a time", () => {
+		const text = `hello\n${IMAGE_MARKER}\n${IMAGE_MARKER}\nworld`;
+		expect(removeMarkerLine(text)).toBe(`hello\n${IMAGE_MARKER}\nworld`);
+		expect(removeMarkerLine("no markers")).toBe("no markers");
+	});
+
+	it("counts marker lines including trailing-space tags", () => {
+		expect(countMarkerLines(`${IMAGE_MARKER} \nhello\n${IMAGE_MARKER}`)).toBe(2);
+		expect(countMarkerLines("plain")).toBe(0);
 	});
 });
 
