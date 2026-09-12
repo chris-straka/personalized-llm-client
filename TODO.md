@@ -585,3 +585,6 @@ to whole words` in `annotations-ux.e2e.ts`. No code change needed.)
 `bun run check` + `bun run test` + `cargo check/test` + focused e2e per area;
 full suite before push. Device-only paths: unit tests + honest unverified
 notes, never pass claims.
+
+## Pile: s1-suites (work/s1-suites)
+- Merged e2e suites (sel-menu+ios, android+touch+share, voice+error+native+ios, furigana+hover+ruby, annotations+ux, chrome-misc one-liners); 9 specs removed, merged files green on E2E_PORT=5231 except 3 failures also failing on HEAD (chrome idle-hide, annotation badge re-press + review note-labels).
