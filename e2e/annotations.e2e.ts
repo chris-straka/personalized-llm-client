@@ -123,10 +123,14 @@ test("fourth click clears the paragraph pick and the menu", async ({ page }) => 
 	await expect(page.locator(".sel-menu")).toHaveCount(0);
 });
 
-/** Repeats anchor where selected: annotating the last "c" in "ccc"
-stamps the badge on the last "c", not the first. */
+/** Repeats anchor where selected: annotating the second "a" in
+"a a" stamps the badge on the second "a", not the first. A
+single-character word keeps the range on word edges, so the
+create marker's word-snap (which intentionally expands mid-word
+cuts like the last "c" of "ccc" to the whole word) leaves it
+alone and the repeat disambiguation is what gets exercised. */
 test("annotating a repeated character anchors the selected repeat", async ({ page }) => {
-	await seedChat(page, [{ role: "assistant", content: "ccc" }]);
+	await seedChat(page, [{ role: "assistant", content: "a a" }]);
 	await page.goto("/");
 	const body = page.locator("article .rendered").first();
 	await expect(body).toBeVisible();
@@ -134,7 +138,7 @@ test("annotating a repeated character anchors the selected repeat", async ({ pag
 	if (!box) throw new Error("message has no box");
 	const y = box.y + box.height / 2;
 	// Real press to normalize the click guard, then a real range over
-	// the last "c" before the matching mouseup summons the menu.
+	// the second "a" before the matching mouseup summons the menu.
 	await page.mouse.click(box.x + 10, y);
 	await page.mouse.move(box.x + box.width - 2, y);
 	await page.mouse.down();
