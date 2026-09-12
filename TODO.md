@@ -341,8 +341,11 @@ to whole words` in `annotations-ux.e2e.ts`. No code change needed.)
       with `margin-right` docking its edge to the assistant column
       (`min(85%, chat-width)`), so own messages never drift right past
       AI width on narrow windows.)
-- [ ] Fresh-install defaults: own-message background OFF; message buttons
+- [x] Fresh-install defaults: own-message background OFF; message buttons
       hover-only for both me and AI.
+      (Verified Sep 2026 on work/w1-waypoint: `defaultSettings` has
+      `ownBubble: false`, `hoverUserActions: true`,
+      `hoverAssistantActions: true` — fresh installs already match.)
 - [ ] Option for message buttons scaling with font size (verify current state;
       create-annotation box scaling with font size also unverified — check both).
 - [x] Sliders: dragging up resets to default — decide keep/fix. Only the
