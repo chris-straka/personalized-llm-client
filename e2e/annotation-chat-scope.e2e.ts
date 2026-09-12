@@ -28,8 +28,9 @@ test("annotation drafts stay with their chat", async ({ page }) => {
 	await expect(page.locator(".hero")).toBeVisible();
 	await expect(page.locator(".prompt-tools .ann-wrap")).toHaveCount(0);
 
-	// Back to chat A: the draft is restored, not duplicated.
+	// Back to chat A: the draft is restored, not duplicated. New chats
+	// append at the bottom (see newChat), so A is still the first row.
 	const rows = page.locator("aside ul li button.side-chat");
-	await rows.nth(1).click();
+	await rows.nth(0).click();
 	await expect(page.locator(".prompt-tools .ann-wrap")).toHaveCount(1);
 });

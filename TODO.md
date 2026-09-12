@@ -57,7 +57,7 @@ cut; release chain outcome still unconfirmed (see Now).
   `imgs/annotation_textbox_filled.png`) in chat A survives New chat and is
   back (exactly 1, not duplicated) on return to A; S4 contract holds
   (select → comment → wrapped into next query).
-- [ ] `e2e/annotation-chat-scope.e2e.ts` failing — fix.
+- [x] `e2e/annotation-chat-scope.e2e.ts` failing — fix.
   Accept: `bunx playwright test e2e/annotation-chat-scope.e2e.ts` green —
   B's composer starts at 0 `.ann-wrap`, A restores to 1.
 - [ ] Confirm v0.2.5 rename/verify/publish outcome (`gh release view v0.2.5`).
