@@ -116,6 +116,16 @@ describe("draft annotation persistence", () => {
 		expect(loadDraftAnnotations("c2")).toEqual([]);
 	});
 
+	it("deleting a background chat keeps the active chat's drafts", () => {
+		saveDraftAnnotations("c1", [ann()], ["c1", "c2"]);
+		saveDraftAnnotations("c2", [ann({ id: "a2" as Annotation["id"] })], ["c1", "c2"]);
+		// Drop c2 in the background: re-file c1's in-memory drafts with
+		// c2 excluded from known ids (the dropChat background branch).
+		saveDraftAnnotations("c1", [ann()], ["c1"]);
+		expect(loadDraftAnnotations("c1")).toEqual([ann()]);
+		expect(loadDraftAnnotations("c2")).toEqual([]);
+	});
+
 	it("drops corrupt entries and survives corrupt storage", () => {
 		window.localStorage.setItem(
 			"ccez-studio-annotations-v1",

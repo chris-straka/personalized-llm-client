@@ -233,7 +233,7 @@ cut; release chain outcome still unconfirmed (see Now).
 - [ ] Main chat top shows traffic lights and nothing else; prompt/backdrop must
   never cut off top messages (only window bounds clip text).
 - [ ] Settings menu shows the build version (or "dev" in dev).
-- [ ] Annotations are leaking across chats — each chat (incl. its prompt) owns
+- [x] Annotations are leaking across chats — each chat (incl. its prompt) owns
   its annotations. (Related: annotation-scope e2e under Now.)
   Accept: deleting a background chat leaves the active composer's drafts +
   attachments untouched; deleting the active chat lands on its neighbor
