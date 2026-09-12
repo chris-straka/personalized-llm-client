@@ -53,10 +53,12 @@ describe("image markers", () => {
 
 	it("says [Pasted image] with one trailing space and no leading blank line", () => {
 		expect(IMAGE_MARKER).toBe("[Pasted image]");
-		expect(imageMarkerInsert("")).toBe(`${IMAGE_MARKER} `);
-		expect(imageMarkerInsert("draft\n")).toBe(`${IMAGE_MARKER} `);
+		expect(imageMarkerInsert("")).toBe(`${IMAGE_MARKER} \n`);
+		expect(imageMarkerInsert("draft\n")).toBe(`${IMAGE_MARKER} \n`);
 		// Mid-line: own line, but no blank line before the tag.
-		expect(imageMarkerInsert("hello")).toBe(`\n${IMAGE_MARKER} `);
+		expect(imageMarkerInsert("hello")).toBe(`\n${IMAGE_MARKER} \n`);
+		// Stacked pastes: each tag keeps its own line.
+		expect(imageMarkerInsert(`${IMAGE_MARKER} \n`)).toBe(`${IMAGE_MARKER} \n`);
 	});
 
 	it("removes one marker line at a time", () => {

@@ -173,16 +173,18 @@ export function stripImageMarkers(text: string): string {
 }
 
 /**
- * Composer insertion for a newly pasted/dropped image: the marker tag with
- * one trailing space (the cursor lands right after it), starting its own
- * line only when the cursor sits mid-line — never a leading blank line.
- * Own-line placement is load-bearing: send-time stripping
- * (`stripImageMarkers`) only drops whole marker lines, so the tag must
- * never share a line with draft text. Pure and unit-tested.
+ * Composer insertion for a newly pasted/dropped image: the marker tag on
+ * its own line (one trailing space, then a newline), the caret landing on
+ * the fresh line below. Own-line placement is load-bearing twice over:
+ * send-time stripping (`stripImageMarkers`) only drops whole marker
+ * lines, and typing on the tag's line would absorb it — instantly
+ * detaching the pill through two-way removal. Never a leading blank
+ * line: the prefix newline only starts the tag's own line mid-draft.
+ * Pure and unit-tested.
  */
 export function imageMarkerInsert(doc: string): string {
 	const prefix = doc === "" || doc.endsWith("\n") ? "" : "\n";
-	return `${prefix}${IMAGE_MARKER} `;
+	return `${prefix}${IMAGE_MARKER} \n`;
 }
 
 /** Remove one pasted-image marker line (pill → tag half of two-way removal). */
