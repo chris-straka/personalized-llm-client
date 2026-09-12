@@ -346,8 +346,13 @@ to whole words` in `annotations-ux.e2e.ts`. No code change needed.)
       (Verified Sep 2026 on work/w1-waypoint: `defaultSettings` has
       `ownBubble: false`, `hoverUserActions: true`,
       `hoverAssistantActions: true` — fresh installs already match.)
-- [ ] Option for message buttons scaling with font size (verify current state;
+- [x] Option for message buttons scaling with font size (verify current state;
       create-annotation box scaling with font size also unverified — check both).
+      (Verified Sep 2026 on work/w1-waypoint: `scaleActionsWithFont`
+      setting + `main.scale-actions` rules scale buttons/glyphs with text
+      size (default OFF). Annotation review card checked: fixed rem sizes,
+      consistent with all other UI chrome (prompt 16px fixed, palette,
+      settings) — no change, scaling it alone would break chrome rhythm.)
 - [x] Sliders: dragging up resets to default — decide keep/fix. Only the
       inner buttons (100%, 36 rem, 6s) reset — label clicks must not. Inactivity
       slider tops at 10s; max reads "never" (never hides).
