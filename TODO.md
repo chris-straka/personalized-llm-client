@@ -53,7 +53,13 @@ cut; release chain outcome still unconfirmed (see Now).
 ## Now (in progress)
 
 - [ ] Annotation draft restore on return is broken — fix first.
+  Accept: 1 unsent draft (`.prompt-tools .ann-wrap`, see
+  `imgs/annotation_textbox_filled.png`) in chat A survives New chat and is
+  back (exactly 1, not duplicated) on return to A; S4 contract holds
+  (select → comment → wrapped into next query).
 - [ ] `e2e/annotation-chat-scope.e2e.ts` failing — fix.
+  Accept: `bunx playwright test e2e/annotation-chat-scope.e2e.ts` green —
+  B's composer starts at 0 `.ann-wrap`, A restores to 1.
 - [ ] Confirm v0.2.5 rename/verify/publish outcome (`gh release view v0.2.5`).
 - [ ] Review + resolve the moderate Dependabot alert on the default branch
   (flagged at push time, 2026-09-12).
@@ -229,6 +235,10 @@ cut; release chain outcome still unconfirmed (see Now).
 - [ ] Settings menu shows the build version (or "dev" in dev).
 - [ ] Annotations are leaking across chats — each chat (incl. its prompt) owns
   its annotations. (Related: annotation-scope e2e under Now.)
+  Accept: deleting a background chat leaves the active composer's drafts +
+  attachments untouched; deleting the active chat lands on its neighbor
+  with that neighbor's drafts restored and the deleted id pruned from
+  `ccez-studio-annotations-v1`.
 - [ ] LaTeX annotation behavior: selecting equations double-highlights and
   stale highlights persist. Decide the interaction (partial-equation highlight
   would help) or constrain it deliberately.
