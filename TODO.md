@@ -332,7 +332,10 @@ to whole words` in `annotations-ux.e2e.ts`. No code change needed.)
       (scrollkeys e2e green.)
 - [x] Shift+Cmd+Plus/Minus adjusts chat width. ("shift-meta-plus widens
       the chat column" chrome e2e green.)
-- [ ] Chat width configurable past 80rem.
+- [x] Chat width configurable past 80rem.
+      (Verified Sep 2026 on work/w1-waypoint: `CHAT_WIDTH_MAX` = 120 in
+      `src/lib/settings.ts`, settings slider `max={CHAT_WIDTH_MAX}`, no
+      80rem remnant anywhere; keyboard chords clamp to the same max.)
 - [ ] Own messages stop drifting right past AI width.
 - [ ] Fresh-install defaults: own-message background OFF; message buttons
       hover-only for both me and AI.
