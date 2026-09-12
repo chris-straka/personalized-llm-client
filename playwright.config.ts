@@ -2,7 +2,9 @@ import { defineConfig } from "@playwright/test";
 // Explicit import (never global `process`): see vite.config.js.
 import process from "node:process";
 
-const PORT = 5213;
+// E2E_PORT isolates parallel checkouts/agents: each suite gets its own dev
+// server instead of sharing (and killing) port 5213 via reuseExistingServer.
+const PORT = Number(process.env.E2E_PORT ?? 5213);
 
 export default defineConfig({
 	testDir: "e2e",
