@@ -52,7 +52,7 @@ describe("sendPasteFolds", () => {
 
 	it("shifts spans past marker lines and trim", () => {
 		const doc = `\n\n${IMAGE_MARKER}\nhello PASTED`;
-		const { text, folds } = sendPasteFolds(doc, [{ from: 26, to: 32, chars: 6 }]);
+		const { text, folds } = sendPasteFolds(doc, [{ from: 23, to: 29, chars: 6 }]);
 		expect(text).toBe("hello PASTED");
 		expect(folds).toEqual([{ start: 6, end: 12, chars: 6 }]);
 	});

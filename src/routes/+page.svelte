@@ -27,6 +27,7 @@
 		sendMessage,
 		setPasteFold,
 		visibleMessageCount,
+		isSending,
 		type ChatMsg,
 		type ChatId,
 		type ChatMsgId
@@ -90,7 +91,9 @@
 	import {
 		fileToAttachment,
 		stripImageMarkers,
-		IMAGE_MARKER,
+		imageMarkerInsert,
+		countMarkerLines,
+		removeMarkerLine,
 		type Attachment
 	} from "$lib/attachments";
 		import {
@@ -775,8 +778,10 @@ import { isPromptIdle } from "$lib/chrome";
 	// and stage — but only after doSend/stage already emptied the
 	// composer. Gating here keeps the button dead AND the draft intact,
 	// so Enter during Thinking is a no-op instead of a lost message.
+	// Per-chat lock: a reply streaming in another chat never deadens
+	// this composer's send — only this chat's own stream gates it.
 	const canSubmit = $derived(
-		!chatState.sending && (hasText || attachments.length > 0 || annotations.length > 0)
+		!isSending(chatState) && (hasText || attachments.length > 0 || annotations.length > 0)
 	);
 
 	function toggleSidebar(): void {
@@ -1177,8 +1182,9 @@ import { isPromptIdle } from "$lib/chrome";
 				(options) => navigator.mediaDevices.getDisplayMedia(options),
 				grabVideoFrame
 			);
+			const images = file.type.startsWith("image/") ? 1 : 0;
 			await addFiles([file]);
-			editor?.insertText(`\n${IMAGE_MARKER}\n`);
+			insertImageMarkers(images);
 		} catch (error) {
 			if (!isPermissionDismissal(error)) {
 				attachError = error instanceof Error ? error.message : String(error);
@@ -1571,7 +1577,17 @@ import { isPromptIdle } from "$lib/chrome";
 		annPop = null;
 		annDraft = "";
 		attachments = [];
-		previewId = null;
+		// Pills are gone: their tags go too, or a stale marker would
+		// reconcile away the next chat's first image.
+		markerSyncMuted = true;
+		try {
+			if (editor && countMarkerLines(editor.getText()) > 0) {
+				editor.setText(stripImageMarkers(editor.getText()));
+			}
+			prevMarkerCount = 0;
+		} finally {
+			markerSyncMuted = false;
+		}
 		selMenu = null;
 		translate = null;
 	}
@@ -1638,14 +1654,80 @@ import { isPromptIdle } from "$lib/chrome";
 	}
 
 	function onImagePasted(file: File): void {
-		void addFiles([file]).then(() => {
-			editor?.insertText(`\n${IMAGE_MARKER}\n`);
-		});
+		void addFiles([file]).then(() => insertImageMarkers(1));
+	}
+
+	/** One `[Pasted image]` tag per fresh image, caret after each tag's space. */
+	function insertImageMarkers(count: number): void {
+		if (!editor || count <= 0) return;
+		markerSyncMuted = true;
+		try {
+			for (let i = 0; i < count; i++) {
+				editor.insertText(imageMarkerInsert(editor.getText()));
+			}
+			prevMarkerCount = countMarkerLines(editor.getText());
+		} finally {
+			markerSyncMuted = false;
+		}
+	}
+
+	/**
+	 * Image pill <-> `[Pasted image]` tag two-way removal. Pill → tag:
+	 * dropping the pill removes one marker line from the draft. Tag →
+	 * pill lives in `promptOptions().onDocChange`: when the marker count
+	 * falls, the newest image attachments go with it. `markerSyncMuted`
+	 * bridges the two (programmatic edits must not reconcile against
+	 * themselves); `prevMarkerCount` is the last reconciled count.
+	 */
+	let markerSyncMuted = false;
+	let prevMarkerCount = 0;
+
+	/**
+	 * Attachment-card copy (icon-only, reusing the message-button copy
+	 * glyph): text attachments copy their inlined text; images copy the
+	 * image bytes (ClipboardItem) so a paste lands the picture, not a
+	 * data URL. Toasts read "Copied" like every other copy path.
+	 */
+	function copyAttachment(att: Attachment): void {
+		if (att.kind === "text" && att.text !== null) {
+			copyPlain(att.text, "Copied");
+			return;
+		}
+		if (att.kind === "image" && att.dataUrl) {
+			const failed = "Couldn't copy to the clipboard.";
+			if (!navigator.clipboard?.write) {
+				flashToast(failed);
+				return;
+			}
+			void (async () => {
+				try {
+					const blob = await (await fetch(att.dataUrl as string)).blob();
+					await navigator.clipboard.write([
+						new ClipboardItem({ [blob.type || "image/jpeg"]: blob })
+					]);
+					flashToast("Copied");
+				} catch {
+					flashToast(failed);
+				}
+			})();
+			return;
+		}
+		flashToast("Nothing to copy yet.");
 	}
 
 	function removeAttachment(id: string): void {
+		const removed = attachments.find((a) => a.id === id);
 		attachments = attachments.filter((a) => a.id !== id);
 		if (previewId === id) previewId = null;
+		if (removed?.kind === "image" && editor) {
+			markerSyncMuted = true;
+			try {
+				editor.setText(removeMarkerLine(editor.getText()));
+				prevMarkerCount = countMarkerLines(editor.getText());
+			} finally {
+				markerSyncMuted = false;
+			}
+		}
 	}
 
 	/**
@@ -1662,7 +1744,11 @@ import { isPromptIdle } from "$lib/chrome";
 		ocrBusyId = att.id;
 		attachError = null;
 		try {
-			const result = await recognizeImageText(att.dataUrl, latinFallback());
+			// No language hint: the backend's learner default covers
+			// English + CJK scripts. Passing the Latin TTS fallback
+			// here restricted Vision to English, so Chinese paragraphs
+			// missed entirely and surfaced as red errors.
+			const result = await recognizeImageText(att.dataUrl, null);
 			const text = result.text.trim();
 			if (!text) {
 				attachError = "No text found in this image.";
@@ -2942,8 +3028,11 @@ import { isPromptIdle } from "$lib/chrome";
 		// The prompt empties the moment the message goes out — not when the
 		// (possibly long) reply finishes streaming in. The annotation pill
 		// and count go with it: the block is already baked into the sent
-		// message, so nothing waits on the reply.
+		// message, so nothing waits on the reply. Attachment pills clear
+		// with it (`outgoing` already captured them for the send).
 		editor?.clear();
+		attachments = [];
+		previewId = null;
 		annotations = [];
 		pendingAnn = null;
 		reviewOpen = false;
@@ -3081,7 +3170,16 @@ import { isPromptIdle } from "$lib/chrome";
 		highlightAnnId = null;
 		settleAnnPop();
 		annPop = null;
-		editor?.setText(refs ? refs.text : msg.content);
+		// Message content carries no marker lines (send strips them):
+		// recount instead of reconciling, or the just-loaded image
+		// attachments would drop as "deleted tags".
+		markerSyncMuted = true;
+		try {
+			editor?.setText(refs ? refs.text : msg.content);
+			prevMarkerCount = countMarkerLines(editor?.getText() ?? "");
+		} finally {
+			markerSyncMuted = false;
+		}
 		editor?.setPlaceholder(EDIT_PLACEHOLDER);
 		editor?.focus();
 		scrollToBottom();
@@ -3429,6 +3527,26 @@ import { isPromptIdle } from "$lib/chrome";
 			onImagePaste: onImagePasted,
 			onDocChange: (text) => {
 				hasText = text.trim().length > 0;
+				// Tag → pill half of two-way removal: the user deleted
+				// marker lines by hand, so the newest image attachments
+				// go with them (newest first — pastes stack in order).
+				if (markerSyncMuted) return;
+				const now = countMarkerLines(text);
+				if (now < prevMarkerCount) {
+					let drop = prevMarkerCount - now;
+					const kept = [...attachments];
+					for (let i = kept.length - 1; i >= 0 && drop > 0; i--) {
+						if (kept[i]?.kind === "image") {
+							kept.splice(i, 1);
+							drop--;
+						}
+					}
+					attachments = kept;
+					if (previewId && !attachments.some((a) => a.id === previewId)) {
+						previewId = null;
+					}
+				}
+				prevMarkerCount = now;
 			}
 		};
 	}
@@ -4229,7 +4347,20 @@ import { isPromptIdle } from "$lib/chrome";
 				cancelMessageEdit();
 				return;
 			}
-			if (event.key === "Escape" && !inEditor) {
+			if (event.key === "Escape" && inEditor) {
+				// ESC with the composer focused: drop the caret and
+				// dismiss composer-adjacent overlays. Voice keeps playing
+				// (it has its own toggle); modals, search, sideview, and
+				// message edits keep their earlier branches above.
+				event.preventDefault();
+				event.stopPropagation();
+				editor?.blur();
+				selMenu = null;
+				translate = null;
+				openLangMenu = null;
+				return;
+			}
+		if (event.key === "Escape" && !inEditor) {
 				selMenu = null;
 				inspectChar = null;
 				translate = null;
@@ -5422,7 +5553,19 @@ import { isPromptIdle } from "$lib/chrome";
 					onmouseenter={() => (hoveredIdx = i)}
 					onmouseleave={(event) => onArticleLeave(event, msg, i)}
 				>
-					{#if sentRefs}
+					{#if msg.attachments && msg.attachments.length > 0}
+					<!-- Sent-message attachment chips: above the message
+					and before (left of) the annotation marker, so files
+					sent with the turn read as its head, not its tail. -->
+					<div class="sent-files">
+						{#each msg.attachments as att (att.id)}
+							<span class="sent-chip" title="{att.name} · ~{att.tokens} tokens">
+								<ActionIcon kind="attach" /> {att.name}
+							</span>
+						{/each}
+					</div>
+				{/if}
+				{#if sentRefs}
 						<!-- Baked annotation block, collapsed above the
 						message: the count stays visible like the composer
 						pill; hovering (or tabbing to) the number itself
@@ -5482,13 +5625,6 @@ import { isPromptIdle } from "$lib/chrome";
 							onAidError={(_id: ChatMsgId, reason?: string) => aidFailed(msg.id, reason)}
 						/>
 					</div>
-					{#if msg.attachments && msg.attachments.length > 0}
-						<div class="sent-files">
-							{#each msg.attachments as att (att.id)}
-								<span title="{att.name} · ~{att.tokens} tokens">📎 {att.name}</span>
-							{/each}
-						</div>
-					{/if}
 					{#if !(streamingThis && msg.content.trim() === "") && !previewing}
 					<div
 						class="actions"
@@ -5655,7 +5791,7 @@ import { isPromptIdle } from "$lib/chrome";
 					{/if}
 				</article>
 			{/each}
-			{#if chatState.sending && chatState.activeChatId === chatState.sendingChatId}
+			{#if isSending(chatState)}
 				<p class="sending" role="status" aria-label="Waiting for a reply">
 					Thinking<span class="tdots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
 				</p>
@@ -5697,24 +5833,36 @@ import { isPromptIdle } from "$lib/chrome";
 		{#if attachments.length > 0 || attachError}
 			<ul class="attachments" class:composer-idle={promptIdle}>
 				{#each attachments as att (att.id)}
-					<li>
-						{#if att.kind === "image"}
+					<li class:card={att.kind === "image" && !!att.dataUrl}>
+						{#if att.kind === "image" && att.dataUrl}
 							<button
 								type="button"
 								class="thumb"
 								title="Toggle preview"
+								aria-label="Toggle image preview"
+								aria-pressed={previewId === att.id}
 								onclick={() => (previewId = previewId === att.id ? null : att.id)}
 							>
-								IMG
+								<img src={att.dataUrl} alt="" />
 							</button>
 						{:else}
 							<span class="file-kind" aria-hidden="true">FILE</span>
 						{/if}
 						<span class="name" title="{att.name} · ~{att.tokens} tokens">{att.name}</span>
 						<span class="tok">~{att.tokens}</span>
+						<button
+							type="button"
+							class="card-btn"
+							aria-label="Copy attachment"
+							title="Copy attachment"
+							onclick={() => copyAttachment(att)}
+						>
+							<ActionIcon kind="copy" />
+						</button>
 						{#if att.kind === "image" && att.dataUrl}
 							<button
 								type="button"
+								class="ocr-btn"
 								aria-label="Recognize text in image"
 								title="Recognize text in image"
 								disabled={ocrBusyId === att.id}
@@ -5723,8 +5871,14 @@ import { isPromptIdle } from "$lib/chrome";
 								{ocrBusyId === att.id ? "…" : "OCR"}
 							</button>
 						{/if}
-						<button type="button" aria-label="Remove attachment" onclick={() => removeAttachment(att.id)}>
-							×
+						<button
+							type="button"
+							class="card-btn"
+							aria-label="Remove attachment"
+							title="Remove attachment"
+							onclick={() => removeAttachment(att.id)}
+						>
+							<ActionIcon kind="close" />
 						</button>
 					</li>
 				{/each}
@@ -5766,7 +5920,10 @@ import { isPromptIdle } from "$lib/chrome";
 			ondrop={(e) => {
 				e.preventDefault();
 				const files = dropFilesFromDataTransfer(e.dataTransfer);
-				if (files.length > 0) void addFiles(files);
+				if (files.length > 0) {
+					const images = files.filter((f) => f.type.startsWith("image/")).length;
+					void addFiles(files).then(() => insertImageMarkers(images));
+				}
 			}}
 		>
 			<div class="prompt-tools">
@@ -8069,10 +8226,29 @@ import { isPromptIdle } from "$lib/chrome";
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.4rem;
-		margin-top: 0.35rem;
+		margin-bottom: 0.35rem;
 		font-size: 0.75rem;
 		color: #6e6e73;
 		color: var(--muted);
+	}
+	/* Attachment chips: icon + name in a quiet pill (no emoji — the
+	attach glyph matches the composer's icon-only treatment). */
+	.sent-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		border: 1px solid #c7c7cc;
+		border-color: var(--line);
+		border-radius: 999px;
+		padding: 0.15rem 0.6rem;
+		max-width: 100%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.sent-chip :global(.action-glyph) {
+		height: 0.85em;
+		flex-shrink: 0;
 	}
 	/* Sent-message annotation refs: the baked block collapses to the
 	count (like the composer pill); hover or Tab reveals the saved
@@ -8187,18 +8363,26 @@ import { isPromptIdle } from "$lib/chrome";
 	.ann-refs-copy:hover {
 		color: #fff;
 	}
+	/* Attachment strip: same 1.2rem column edges as the composer (never
+	a full-bleed row), one scrolling row when many — pills never wrap
+	into a tall stack and never spill past the column. */
 	.attachments {
 		list-style: none;
 		display: flex;
-		flex-wrap: wrap;
+		flex-wrap: nowrap;
 		gap: 0.4rem;
-		margin: 0;
-		padding: 0.5rem 1.2rem 0;
+		margin: 0 1.2rem;
+		padding: 0.5rem 0 0.25rem;
+		box-sizing: border-box;
+		max-width: calc(100% - 2.4rem);
+		overflow-x: auto;
+		scrollbar-width: thin;
 	}
 	.attachments li {
 		display: flex;
 		align-items: center;
 		gap: 0.4rem;
+		flex-shrink: 0;
 		font-size: 0.78rem;
 		background: #eef4ff;
 		background: var(--hl);
@@ -8223,8 +8407,54 @@ import { isPromptIdle } from "$lib/chrome";
 		color: #3a3a3c;
 	}
 	.attachments .thumb {
-		font-size: 0.9rem;
+		border: 0;
+		background: none;
+		cursor: pointer;
+		line-height: 0;
 		padding: 0;
+	}
+	/* Image cards: thumbnail preview up top, token/copy/OCR/X footer
+	below (the strip itself stays one scrolling row — only the card
+	wraps internally). */
+	.attachments li.card {
+		flex-wrap: wrap;
+		row-gap: 0.3rem;
+		border-radius: 12px;
+		padding: 0.4rem 0.5rem;
+		max-width: 12rem;
+		align-items: center;
+	}
+	.attachments li.card .thumb {
+		flex: 1 1 100%;
+	}
+	.attachments .thumb img {
+		display: block;
+		width: 100%;
+		height: 4.5rem;
+		object-fit: cover;
+		border-radius: 8px;
+	}
+	/* Card buttons are icon-only (message-button copy glyph, close
+	glyph), sized to the card's font so they track it. */
+	.attachments .card-btn {
+		display: inline-flex;
+		align-items: center;
+		padding: 0.15rem;
+		font-size: 0.78rem;
+	}
+	.attachments .card-btn :global(.action-glyph) {
+		height: 1em;
+	}
+	.attachments .ocr-btn {
+		font-size: 0.72rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		padding: 0.15rem 0.3rem;
+		border-radius: 6px;
+	}
+	.attachments .ocr-btn:disabled {
+		opacity: 0.45;
+		cursor: default;
 	}
 	.preview {
 		display: block;
@@ -9271,6 +9501,13 @@ import { isPromptIdle } from "$lib/chrome";
 	.prompt {
 		position: relative;
 		margin: 0.6rem 1.2rem 1.1rem;
+		/* First-line reservation for the absolute tools cluster
+		(count badge + attach/shot/mic/voice): remeasured Sep 2026 —
+		the Shot text button (~2.7rem) never fit the old 4.6rem base,
+		so draft text slid under the cluster. Combos below only widen
+		it; .wp-jump adds via --tools-extra so every combo composes. */
+		--tools-pad: 6.8rem;
+		--tools-extra: 0rem;
 		border: 1px solid #c7c7cc;
 		border-color: var(--line);
 		border-radius: 12px;
@@ -9378,7 +9615,8 @@ import { isPromptIdle } from "$lib/chrome";
 	.attach-btn,
 	.paste-btn,
 	.voice-float,
-	.mic-btn {
+	.mic-btn,
+	.wp-jump {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
@@ -9388,7 +9626,16 @@ import { isPromptIdle } from "$lib/chrome";
 		background: none;
 		cursor: pointer;
 		padding: 0.2rem;
+		/* Pinned seat so the glyph em below resolves against the
+		tools row, not whatever font lands on the button. */
+		font-size: 1rem;
 		transition: color 0.18s ease;
+	}
+	/* Tool glyphs ride the row's font size (em, not the component's
+	fixed rem): paperclip, mic, voice, and jump icons scale with the
+	composer instead of staying tiny at large text. */
+	.prompt-tools :global(.action-glyph) {
+		height: 1.05em;
 	}
 	.paste-btn:disabled {
 		opacity: 0.4;
@@ -9466,33 +9713,38 @@ import { isPromptIdle } from "$lib/chrome";
 		message it becomes, not a terminal. */
 		font-family:
 			-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
-		padding-right: 4.6rem;
+		padding-right: calc(var(--tools-pad) + var(--tools-extra));
 		caret-color: #1c1c1e;
 		caret-color: var(--ink);
 	}
 	/* The mic icon widens the tools cluster: hold the first line clear
 	of it, but only while it is actually mounted. */
 	.prompt.has-mic :global(.cm-content) {
-		padding-right: 6.5rem;
+		--tools-pad: 8.6rem;
 	}
 	/* Annotation count badge joins the tools cluster: hold the first
 	line clear of the wider row while any annotations exist. */
 	.prompt.has-anns :global(.cm-content) {
-		padding-right: 7rem;
+		--tools-pad: 9.5rem;
 	}
 	.prompt.has-mic.has-anns :global(.cm-content) {
-		padding-right: 8.9rem;
+		--tools-pad: 11.5rem;
 	}
 	/* Declarative mirrors of the has-mic/has-anns classes above: same
 	seats, no JS. The classes stay as fallback. */
 	.prompt:has(.mic-btn) :global(.cm-content) {
-		padding-right: 6.5rem;
+		--tools-pad: 8.6rem;
 	}
 	.prompt:has(.ann-wrap) :global(.cm-content) {
-		padding-right: 7rem;
+		--tools-pad: 9.5rem;
 	}
 	.prompt:has(.mic-btn):has(.ann-wrap) :global(.cm-content) {
-		padding-right: 8.9rem;
+		--tools-pad: 11.5rem;
+	}
+	/* Jump trigger joins the cluster in long threads: reserve its seat
+	on top of whichever combo is live (var composition, not ×4 rules). */
+	.prompt:has(.wp-jump) {
+		--tools-extra: 1.8rem;
 	}
 	.prompt :global(.cm-editor) {
 		/* Beats the CodeMirror theme's own font-size on specificity.
@@ -9510,7 +9762,7 @@ import { isPromptIdle } from "$lib/chrome";
 		font-family:
 			-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
 		font-size: 0.95rem;
-		padding: 0.6rem 4.6rem 0.6rem 0;
+		padding: 0.6rem calc(var(--tools-pad) + var(--tools-extra)) 0.6rem 0;
 		caret-color: #1c1c1e;
 		/* Mechanical twin of the cm rules: same pairs, Android-only node. */
 		caret-color: var(--ink);
@@ -9532,22 +9784,22 @@ import { isPromptIdle } from "$lib/chrome";
 		color: var(--line-hover);
 	}
 	.prompt.has-mic :global(.ta-input) {
-		padding-right: 6.5rem;
+		--tools-pad: 8.6rem;
 	}
 	.prompt.has-anns :global(.ta-input) {
-		padding-right: 7rem;
+		--tools-pad: 9.5rem;
 	}
 	.prompt.has-mic.has-anns :global(.ta-input) {
-		padding-right: 8.9rem;
+		--tools-pad: 11.5rem;
 	}
 	.prompt:has(.mic-btn) :global(.ta-input) {
-		padding-right: 6.5rem;
+		--tools-pad: 8.6rem;
 	}
 	.prompt:has(.ann-wrap) :global(.ta-input) {
-		padding-right: 7rem;
+		--tools-pad: 9.5rem;
 	}
 	.prompt:has(.mic-btn):has(.ann-wrap) :global(.ta-input) {
-		padding-right: 8.9rem;
+		--tools-pad: 11.5rem;
 	}
 	.prompt :global(.cm-placeholder) {
 		color: #8e8e93;

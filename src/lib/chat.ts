@@ -65,14 +65,28 @@ export interface Chat {
 export interface ChatState {
 	chats: Chat[];
 	activeChatId: ChatId;
+	/** Any reply streaming anywhere (kept for global readers: ticker, edit gates). */
 	sending: boolean;
 	/**
 	 * Chat that owns the in-flight reply (null when idle). A send keeps
 	 * streaming into its own chat when the user looks elsewhere, so the
 	 * Thinking indicator — and the tokens — never leak onto whatever
 	 * chat replaces it. Never persisted: reloads always boot idle.
+	 * With concurrent sends this tracks the most recent one; the full
+	 * set lives in `sendingChatIds`.
 	 */
 	sendingChatId: ChatId | null;
+	/**
+	 * Every chat with a reply currently streaming. Sends lock per chat,
+	 * not globally: chat B sends while chat A still streams. Never
+	 * persisted: reloads always boot idle.
+	 */
+	sendingChatIds: ChatId[];
+}
+
+/** True when the given chat (default: active) has a reply streaming. */
+export function isSending(state: ChatState, id?: ChatId): boolean {
+	return state.sendingChatIds.includes(id ?? state.activeChatId);
 }
 
 const STORAGE_KEY = "ccez-studio-chats-v1";
@@ -99,7 +113,13 @@ function browserStore(): KeyValueStore | null {
 }
 
 export function createChatState(store?: KeyValueStore): ChatState {
-	const state: ChatState = { chats: [], activeChatId: "" as ChatId, sending: false, sendingChatId: null };
+	const state: ChatState = {
+		chats: [],
+		activeChatId: "" as ChatId,
+		sending: false,
+		sendingChatId: null,
+		sendingChatIds: []
+	};
 	loadChats(state, store ?? browserStore() ?? memoryStore);
 	if (state.chats.length === 0) {
 		const chat = blankChat();
@@ -206,22 +226,28 @@ export function setChatVoice(
 	persistChats(state, store);
 }
 
-/** Abort controller for the in-flight send, if any (see abortSend). */
-let inflight: AbortController | null = null;
+/** Abort controllers for in-flight sends, keyed by owning chat (see abortSend). */
+const inflightByChat = new Map<ChatId, AbortController>();
 
 /**
- * Abort the in-flight send, if any. Dropping a chat mid-stream must kill
- * its network request too — otherwise it pointlessly finishes into a
- * chat that no longer exists. (Merely looking at another chat never
- * aborts: the stream stays pinned to its origin via sendingChatId.)
+ * Abort in-flight sends: one chat's when given an id, all of them
+ * without one. Dropping a chat mid-stream must kill its network
+ * request too — otherwise it pointlessly finishes into a chat that no
+ * longer exists. (Merely looking at another chat never aborts: each
+ * stream stays pinned to its origin via sendingChatId.)
  */
-export function abortSend(): void {
-	inflight?.abort();
-	inflight = null;
+export function abortSend(chatId?: ChatId): void {
+	if (chatId === undefined) {
+		for (const controller of inflightByChat.values()) controller.abort();
+		inflightByChat.clear();
+		return;
+	}
+	inflightByChat.get(chatId)?.abort();
+	inflightByChat.delete(chatId);
 }
 
 export function deleteChat(state: ChatState, id: ChatId, store?: KeyValueStore): void {
-	abortSend();
+	abortSend(id);
 	const at = state.chats.findIndex((c) => c.id === id);
 	state.chats = state.chats.filter((c) => c.id !== id);
 	if (state.chats.length === 0) state.chats = [blankChat()];
@@ -247,8 +273,8 @@ export function deleteMessage(state: ChatState, index: number, store?: KeyValueS
 	// Removing the streaming placeholder mid-flight strands it the same
 	// way dropping the chat does — kill the send with it.
 	const target = chat.messages[index];
-	if (state.sending && target?.role === "assistant" && index === chat.messages.length - 1) {
-		abortSend();
+	if (isSending(state) && target?.role === "assistant" && index === chat.messages.length - 1) {
+		abortSend(chat.id);
 	}
 	chat.messages = chat.messages.filter((_, i) => i !== index);
 	persistChats(state, store);
@@ -266,7 +292,7 @@ export function stageMessage(
 	store?: KeyValueStore
 ): void {
 	const trimmed = text.trim();
-	if ((!trimmed && attachments.length === 0) || state.sending) return;
+	if ((!trimmed && attachments.length === 0) || isSending(state)) return;
 	const chat = activeChat(state);
 	chat.messages = [
 		...chat.messages,
@@ -366,7 +392,7 @@ export async function resendLast(
 ): Promise<void> {
 	const chat = activeChat(state);
 	const last = chat.messages[chat.messages.length - 1];
-	if (!last || last.role !== "user" || state.sending) return;
+	if (!last || last.role !== "user" || state.sendingChatIds.includes(chat.id)) return;
 	await streamAssistantReply(state, provider, systemPrompt, { thinking: opts.thinking }, opts.store);
 }
 
@@ -475,8 +501,10 @@ export async function sendMessage(
 	const trimmed = text.trim();
 	const attachments = opts.attachments ?? [];
 	const pasteFolds = opts.pasteFolds ?? [];
-	if ((!trimmed && attachments.length === 0) || state.sending) return;
 	const chat = activeChat(state);
+	// Per-chat lock: this chat streaming blocks only itself — a reply
+	// in flight elsewhere never gates a fresh send here.
+	if ((!trimmed && attachments.length === 0) || state.sendingChatIds.includes(chat.id)) return;
 	chat.messages = [
 		...chat.messages,
 		{
@@ -513,21 +541,23 @@ export async function streamAssistantReply(
 	opts: { signal?: AbortSignal | undefined; thinking?: string | undefined } = {},
 	store?: KeyValueStore
 ): Promise<void> {
-	if (state.sending) return;
 	const chat = activeChat(state);
 	const chatId = chat.id;
+	if (state.sendingChatIds.includes(chatId)) return;
 	const apiMessages = buildApiMessages(chat, systemPrompt);
 	const replyId = newChatMsgId();
 	chat.messages = [
 		...chat.messages,
 		{ id: replyId, role: "assistant", content: "", usage: null, error: null }
 	];
+	state.sendingChatIds = [...state.sendingChatIds, chatId];
 	state.sending = true;
 	state.sendingChatId = chatId;
-	// Own controller (chained off a caller-provided signal, if any) so
-	// dropping the chat can abort the network request, not just orphan it.
+	// Own controller per chat (chained off a caller-provided signal, if
+	// any) so dropping one chat aborts only its network request — a
+	// concurrent reply elsewhere streams on untouched.
 	const controller = new AbortController();
-	inflight = controller;
+	inflightByChat.set(chatId, controller);
 	if (opts.signal?.aborted) controller.abort();
 	else opts.signal?.addEventListener("abort", () => controller.abort(), { once: true });
 	// NOTE: never mutate a message object in place here. Svelte's proxy
@@ -558,9 +588,14 @@ export async function streamAssistantReply(
 			error: error instanceof Error ? error.message : String(error)
 		});
 	} finally {
-		if (inflight === controller) inflight = null;
-		state.sending = false;
-		if (state.sendingChatId === chatId) state.sendingChatId = null;
+		if (inflightByChat.get(chatId) === controller) inflightByChat.delete(chatId);
+		state.sendingChatIds = state.sendingChatIds.filter((id) => id !== chatId);
+		state.sending = state.sendingChatIds.length > 0;
+		// sendingChatId tracks the most recent in-flight chat for the
+		// legacy global readers: fall back to a still-streaming one.
+		if (state.sendingChatId === chatId) {
+			state.sendingChatId = state.sendingChatIds[state.sendingChatIds.length - 1] ?? null;
+		}
 		persistChats(state, store);
 	}
 }
@@ -575,8 +610,7 @@ export function visibleMessageCount(state: ChatState, chat: Chat): number {
 	const msgs = chat.messages;
 	const last = msgs[msgs.length - 1];
 	if (
-		state.sending &&
-		state.sendingChatId === chat.id &&
+		state.sendingChatIds.includes(chat.id) &&
 		last?.role === "assistant" &&
 		last.content === "" &&
 		!last.error

@@ -144,6 +144,72 @@ test.describe("phone idle default", () => {
 	});
 });
 
+test("ESC in the composer drops focus", async ({ page }) => {
+	const editor = page.locator(".cm-content").first();
+	await editor.click();
+	await expect(editor).toBeFocused();
+	await page.keyboard.press("Escape");
+	await expect(editor).not.toBeFocused();
+});
+
+test("composer text clears the tools cluster", async ({ page }) => {
+	// Remeasured reservation: the Shot text button never fit the old
+	// 4.6rem base, so draft text slid under the cluster.
+	const pad = await page
+		.locator(".cm-content")
+		.first()
+		.evaluate((el) => parseFloat(getComputedStyle(el).paddingRight));
+	expect(pad).toBeGreaterThan(100);
+});
+
+/** Drop a canvas-painted PNG onto the composer (in-page DataTransfer). */
+async function dropImage(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		const canvas = document.createElement("canvas");
+		canvas.width = 8;
+		canvas.height = 8;
+		const ctx = canvas.getContext("2d");
+		if (!ctx) throw new Error("Canvas 2D unavailable");
+		ctx.fillStyle = "#336699";
+		ctx.fillRect(0, 0, 8, 8);
+		return new Promise<void>((resolve, reject) => {
+			canvas.toBlob((blob) => {
+				try {
+					if (!blob) throw new Error("canvas produced no blob");
+					const transfer = new DataTransfer();
+					transfer.items.add(new File([blob], "blue.png", { type: "image/png" }));
+					const target = document.querySelector(".prompt");
+					if (!target) throw new Error("missing composer");
+					target.dispatchEvent(
+						new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer })
+					);
+					resolve();
+				} catch (error) {
+					reject(error);
+				}
+			}, "image/png");
+		});
+	});
+}
+
+test("send clears pills and files a chip above the message", async ({ page }) => {
+	await dropImage(page);
+	const card = page.locator(".attachments li.card");
+	await expect(card).toBeVisible({ timeout: 15_000 });
+	// Down to the tag's fresh line below (the click can land mid-tag,
+	// and typing on the tag line would absorb it and drop the pill),
+	// then send through the mock provider.
+	await page.locator(".cm-content").first().click();
+	await page.keyboard.press("ArrowDown");
+	await page.keyboard.type("hello");
+	await page.keyboard.press("Enter");
+	// Pills empty with the prompt at send time…
+	await expect(page.locator(".attachments")).toHaveCount(0);
+	// …and the sent turn carries an attachment chip above its text.
+	const chip = page.locator(".sent-chip").last();
+	await expect(chip).toContainText("blue.png", { timeout: 30_000 });
+});
+
 test("popup touches the badge and clear-all lives inside it", async ({ page }) => {
 	const badge = await addAnnotation(page);
 
