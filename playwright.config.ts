@@ -13,10 +13,21 @@ export default defineConfig({
 	testMatch: "**/*.e2e.ts",
 	timeout: 60_000,
 	expect: { timeout: 10_000 },
-	fullyParallel: false,
-	// Two browsers at a time: the suite boots one dev server, and more
-	// workers only contend on cold compile (seen as flakes, never signal).
-	workers: 2,
+	// Every spec file is independent (seedChat seeds per-test via
+	// addInitScript; no spec reads another's localStorage), so files run
+	// in parallel. Tests within one file stay serial (one page at a time).
+	fullyParallel: true,
+	// Half the cores: the suite boots one dev server per shard, and
+	// workers beyond ~50% only contend on cold Vite compile (seen as
+	// flakes, never signal). A percentage tracks any machine (local
+	// 8-core, CI 4-core) without per-host tuning.
+	workers: "50%",
+	// Sharding across machines/runners: give EVERY shard its own port so
+	// two shards never share (and kill) one dev server, e.g.
+	//   E2E_PORT=5221 bunx playwright test --shard=1/2
+	//   E2E_PORT=5222 bunx playwright test --shard=2/2
+	// Parallel checkouts on one box follow the same rule (one E2E_PORT
+	// per agent/suite; 5213 stays the default for a lone run).
 	// One retry absorbs cold-compile flakes (two workers contending on the
 	// first Vite compile can exceed the timeout once, then pass warm).
 	// Persistent failures still fail twice, so retries never hide signal.
