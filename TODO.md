@@ -492,7 +492,7 @@ to whole words` in `annotations-ux.e2e.ts`. No code change needed.)
       (Blocked Sep 2026, stream-platform: all four need a real Android
       device to see/verify — untouched. Voice/chrome areas belong to
       sibling streams; coordinate before changing.)
-- [ ] Offline AI fallback — DO LAST: when offline, Gemma becomes its own
+- [ ] Offline AI fallback — DO LAST (after 0.3.0): when offline, Gemma becomes its own
       settings option replacing the DeepSeek/Muse bubbles; auto-switch back on
       reconnect. Android via MediaPipe; Mac via the user's existing Ollama (audit
       installs, pick the right model for an M4 mini, remove cruft, wire in).
