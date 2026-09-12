@@ -20,18 +20,36 @@ test("a wrapped multi-kanji base keeps its reading centered", async ({ page }) =
 	await expect(actions).toBeVisible({ timeout: 60_000 });
 	await actions.locator('button:has-text("読み仮名")').click();
 	await expect(body.locator(".frb").first()).toBeVisible({ timeout: 60_000 });
-	const drift = await body.evaluate((el) => {
-		let worst = 0;
-		for (const base of el.querySelectorAll(".frb")) {
-			const reading = base.querySelector(".frt");
-			if (!reading) continue;
-			const b = base.getBoundingClientRect();
-			const r = reading.getBoundingClientRect();
-			worst = Math.max(worst, Math.abs(b.left + b.width / 2 - (r.left + r.width / 2)));
-		}
-		return worst;
-	});
-	expect(drift).toBeLessThan(4);
+	// macOS pulls readings further left (Hiragana bearings put the
+	// ink right of the kanji at the default offset), so box centers
+	// no longer coincide there — ink does. Measure paint truth via
+	// Range rects on mac, boxes elsewhere.
+	const dataMac = await page.locator(".app").getAttribute("data-mac");
+	const drift = await body.evaluate(
+		(el, mac) => {
+			const rect = (node: Node): { l: number; w: number } => {
+				if (!mac) {
+					const r = (node as Element).getBoundingClientRect();
+					return { l: r.left, w: r.width };
+				}
+				const rg = document.createRange();
+				rg.selectNodeContents(node);
+				const r = rg.getBoundingClientRect();
+				return { l: r.left, w: r.width };
+			};
+			let worst = 0;
+			for (const base of el.querySelectorAll(".frb")) {
+				const reading = base.querySelector(".frt");
+				if (!reading?.firstChild || !base.firstChild) continue;
+				const b = rect(mac ? base.firstChild : base);
+				const r = rect(mac ? reading.firstChild : reading);
+				worst = Math.max(worst, Math.abs(b.l + b.w / 2 - (r.l + r.w / 2)));
+			}
+			return worst;
+		},
+		dataMac !== null
+	);
+	expect(drift).toBeLessThan(dataMac !== null ? 2 : 4);
 });
 
 test("long pinyin syllables never collide with their neighbors", async ({ page }) => {

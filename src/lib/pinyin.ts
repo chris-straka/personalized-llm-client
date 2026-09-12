@@ -10,7 +10,19 @@ import { classifyAidLine, RUBY_SCRIPT_RE, type LocalAid } from "./reading";
  * tone-marked reading; everything else passes through escaped and
  * unannotated.
  */
+/**
+ * Hiragana + katakana: the unambiguous Japanese signal (same class as
+ * the aid classifier's — kanji are Han in both languages, kana is not).
+ */
+const KANA_SEGMENT_RE = /[\u3040-\u309F\u30A0-\u30FF]/;
+
 export function pinyinRuby(text: string): string {
+	// Script-segment detection: any kana run makes this a Japanese
+	// segment, and pinyin readings on Japanese kanji are wrong
+	// readings (pinyin-pro happily returns Chinese for 読む's 読).
+	// Callers gate by line already; this keeps the engine itself from
+	// ever annotating Japanese words no matter who calls it next.
+	if (KANA_SEGMENT_RE.test(text)) return escapeHtml(text);
 	const syllables = pinyin(text, { toneType: "symbol", type: "array" });
 	const chars = [...text];
 	return chars
