@@ -195,7 +195,7 @@
 		type SavePickerOptions
 	} from "$lib/intake";
 	import { isKeyboardOpen, keyboardOverlapPx } from "$lib/viewportReflow";
-import { isPromptIdle } from "$lib/chrome";
+import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	import {
 		speakText,
 		speakMultilingual,
@@ -1256,10 +1256,10 @@ import { isPromptIdle } from "$lib/chrome";
 	 * a 500ms ticker hides it (slides down out of view) once the
 	 * effective timeout elapses with no input. The timeout and mobile
 	 * reads subscribe the effect, so a settings change or the phone
-	 * detection landing re-arms the ticker. An empty chat never hides:
-	 * with no text to uncover, the prompt and its attachment strip
-	 * stay put. (Skipping short-but-nonempty threads too is the chrome
-	 * pile's idle-hide checkbox, with its own contract test.)
+	 * detection landing re-arms the ticker. An empty chat never hides,
+	 * and neither does a thread shorter than the viewport
+	 * (contentFitsViewport, contract-tested in chrome.test.ts): with
+	 * nothing to uncover, the prompt and its attachment strip stay put.
 	 */
 	let lastInputAt = $state(Date.now());
 	let promptIdle = $state(false);
@@ -1279,6 +1279,10 @@ import { isPromptIdle } from "$lib/chrome";
 		const timer = window.setInterval(() => {
 			if (!isPromptIdle(lastInputAt, Date.now(), idleSec)) return;
 			if (viewChat.messages.length === 0) return;
+			// Short threads never hide: with nothing to uncover, the
+			// prompt only strands itself (see contentFitsViewport).
+			const box = scrollBox;
+			if (box && contentFitsViewport(box.scrollHeight, box.clientHeight)) return;
 			promptIdle = true;
 		}, 500);
 		return () => {

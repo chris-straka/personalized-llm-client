@@ -1,4 +1,4 @@
-import { PROMPT_IDLE_MAX, PROMPT_IDLE_MIN } from "./settings";
+import { PROMPT_IDLE_MAX, PROMPT_IDLE_MIN, PROMPT_IDLE_NEVER } from "./settings";
 
 /**
  * App-chrome helpers (pure, DOM-free): prompt idle-hide and slider
@@ -19,10 +19,47 @@ export function isPromptIdle(lastInputAt: number, now: number, idleSec: number):
 	return now - lastInputAt >= idleSec * 1000;
 }
 
-/** Clamp a raw idle-timeout value into the settings range (whole seconds). */
+/**
+ * Clamp a raw idle-timeout value into the settings range (whole
+ * seconds). 0 ("never hide") passes through; everything else outside
+ * the range falls back to the range floor.
+ */
 export function clampPromptIdleSec(raw: number): number {
 	if (typeof raw !== "number" || Number.isNaN(raw)) return PROMPT_IDLE_MIN;
+	if (raw === PROMPT_IDLE_NEVER) return PROMPT_IDLE_NEVER;
 	return Math.min(PROMPT_IDLE_MAX, Math.max(PROMPT_IDLE_MIN, Math.round(raw)));
+}
+
+/**
+ * The idle slider's top tick sits one past the max and means "never":
+ * the stored value is 0 (hiding disabled — see `isPromptIdle`).
+ */
+export const IDLE_SLIDER_TOP = PROMPT_IDLE_MAX + 1;
+
+/** Slider position -> stored idle seconds (top tick stores "never"). */
+export function idleSliderToSetting(slider: number): number {
+	if (slider >= IDLE_SLIDER_TOP) return PROMPT_IDLE_NEVER;
+	return clampPromptIdleSec(slider);
+}
+
+/** Stored idle seconds -> slider position ("never" rides the top tick). */
+export function idleSettingToSlider(sec: number): number {
+	if (!(sec > 0)) return IDLE_SLIDER_TOP;
+	return clampPromptIdleSec(sec);
+}
+
+/** Readout for the stored idle value: seconds, or "never". */
+export function formatIdleTimeout(sec: number): string {
+	return sec > 0 ? `${Math.round(sec)} s` : "never";
+}
+
+/**
+ * True when the chat content fits without scrolling: idle-hide skips
+ * then (with nothing to uncover, hiding the prompt only strands it).
+ * Pure over measured pixels so the page feeds `scrollBox` rects.
+ */
+export function contentFitsViewport(scrollHeight: number, clientHeight: number): boolean {
+	return scrollHeight <= clientHeight;
 }
 
 /**

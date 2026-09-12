@@ -1,11 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
 	clampPromptIdleSec,
+	contentFitsViewport,
 	draggedSliderPastTop,
+	formatIdleTimeout,
+	IDLE_SLIDER_TOP,
+	idleSettingToSlider,
+	idleSliderToSetting,
 	isPromptIdle,
 	SLIDER_DRAG_RESET_PX
 } from "./chrome";
-import { PROMPT_IDLE_DEFAULT, PROMPT_IDLE_MAX, PROMPT_IDLE_MIN } from "./settings";
+import {
+	PROMPT_IDLE_DEFAULT,
+	PROMPT_IDLE_MAX,
+	PROMPT_IDLE_MIN,
+	PROMPT_IDLE_NEVER
+} from "./settings";
 
 describe("isPromptIdle", () => {
 	it("hides once the timeout has fully elapsed", () => {
@@ -35,6 +45,38 @@ describe("clampPromptIdleSec", () => {
 		expect(clampPromptIdleSec(PROMPT_IDLE_MIN - 10)).toBe(PROMPT_IDLE_MIN);
 		expect(clampPromptIdleSec(PROMPT_IDLE_MAX + 10)).toBe(PROMPT_IDLE_MAX);
 		expect(clampPromptIdleSec(Number.NaN)).toBe(PROMPT_IDLE_MIN);
+	});
+
+	it("passes the never-hide sentinel through", () => {
+		expect(clampPromptIdleSec(PROMPT_IDLE_NEVER)).toBe(PROMPT_IDLE_NEVER);
+	});
+});
+
+describe("idle slider mapping", () => {
+	it("tops at 10s with the top tick meaning never", () => {
+		expect(PROMPT_IDLE_MAX).toBe(10);
+		expect(IDLE_SLIDER_TOP).toBe(PROMPT_IDLE_MAX + 1);
+		expect(idleSliderToSetting(IDLE_SLIDER_TOP)).toBe(PROMPT_IDLE_NEVER);
+		expect(idleSliderToSetting(6)).toBe(6);
+	});
+
+	it("parks never-hide on the top tick, seconds below it", () => {
+		expect(idleSettingToSlider(PROMPT_IDLE_NEVER)).toBe(IDLE_SLIDER_TOP);
+		expect(idleSettingToSlider(0)).toBe(IDLE_SLIDER_TOP);
+		expect(idleSettingToSlider(6)).toBe(6);
+	});
+
+	it("reads the top tick as never, the rest as seconds", () => {
+		expect(formatIdleTimeout(PROMPT_IDLE_NEVER)).toBe("never");
+		expect(formatIdleTimeout(6)).toBe("6 s");
+	});
+});
+
+describe("contentFitsViewport", () => {
+	it("skips idle-hide when nothing scrolls", () => {
+		expect(contentFitsViewport(400, 600)).toBe(true);
+		expect(contentFitsViewport(600, 600)).toBe(true);
+		expect(contentFitsViewport(601, 600)).toBe(false);
 	});
 });
 
