@@ -9340,6 +9340,13 @@ import { isPromptIdle } from "$lib/chrome";
 	.prompt {
 		position: relative;
 		margin: 0.6rem 1.2rem 1.1rem;
+		/* First-line reservation for the absolute tools cluster
+		(count badge + attach/shot/mic/voice): remeasured Sep 2026 —
+		the Shot text button (~2.7rem) never fit the old 4.6rem base,
+		so draft text slid under the cluster. Combos below only widen
+		it; .wp-jump adds via --tools-extra so every combo composes. */
+		--tools-pad: 6.8rem;
+		--tools-extra: 0rem;
 		border: 1px solid #c7c7cc;
 		border-color: var(--line);
 		border-radius: 12px;
@@ -9535,33 +9542,38 @@ import { isPromptIdle } from "$lib/chrome";
 		message it becomes, not a terminal. */
 		font-family:
 			-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
-		padding-right: 4.6rem;
+		padding-right: calc(var(--tools-pad) + var(--tools-extra));
 		caret-color: #1c1c1e;
 		caret-color: var(--ink);
 	}
 	/* The mic icon widens the tools cluster: hold the first line clear
 	of it, but only while it is actually mounted. */
 	.prompt.has-mic :global(.cm-content) {
-		padding-right: 6.5rem;
+		--tools-pad: 8.6rem;
 	}
 	/* Annotation count badge joins the tools cluster: hold the first
 	line clear of the wider row while any annotations exist. */
 	.prompt.has-anns :global(.cm-content) {
-		padding-right: 7rem;
+		--tools-pad: 9.5rem;
 	}
 	.prompt.has-mic.has-anns :global(.cm-content) {
-		padding-right: 8.9rem;
+		--tools-pad: 11.5rem;
 	}
 	/* Declarative mirrors of the has-mic/has-anns classes above: same
 	seats, no JS. The classes stay as fallback. */
 	.prompt:has(.mic-btn) :global(.cm-content) {
-		padding-right: 6.5rem;
+		--tools-pad: 8.6rem;
 	}
 	.prompt:has(.ann-wrap) :global(.cm-content) {
-		padding-right: 7rem;
+		--tools-pad: 9.5rem;
 	}
 	.prompt:has(.mic-btn):has(.ann-wrap) :global(.cm-content) {
-		padding-right: 8.9rem;
+		--tools-pad: 11.5rem;
+	}
+	/* Jump trigger joins the cluster in long threads: reserve its seat
+	on top of whichever combo is live (var composition, not ×4 rules). */
+	.prompt:has(.wp-jump) {
+		--tools-extra: 1.8rem;
 	}
 	.prompt :global(.cm-editor) {
 		/* Beats the CodeMirror theme's own font-size on specificity.
@@ -9579,7 +9591,7 @@ import { isPromptIdle } from "$lib/chrome";
 		font-family:
 			-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
 		font-size: 0.95rem;
-		padding: 0.6rem 4.6rem 0.6rem 0;
+		padding: 0.6rem calc(var(--tools-pad) + var(--tools-extra)) 0.6rem 0;
 		caret-color: #1c1c1e;
 		/* Mechanical twin of the cm rules: same pairs, Android-only node. */
 		caret-color: var(--ink);
@@ -9601,22 +9613,22 @@ import { isPromptIdle } from "$lib/chrome";
 		color: var(--line-hover);
 	}
 	.prompt.has-mic :global(.ta-input) {
-		padding-right: 6.5rem;
+		--tools-pad: 8.6rem;
 	}
 	.prompt.has-anns :global(.ta-input) {
-		padding-right: 7rem;
+		--tools-pad: 9.5rem;
 	}
 	.prompt.has-mic.has-anns :global(.ta-input) {
-		padding-right: 8.9rem;
+		--tools-pad: 11.5rem;
 	}
 	.prompt:has(.mic-btn) :global(.ta-input) {
-		padding-right: 6.5rem;
+		--tools-pad: 8.6rem;
 	}
 	.prompt:has(.ann-wrap) :global(.ta-input) {
-		padding-right: 7rem;
+		--tools-pad: 9.5rem;
 	}
 	.prompt:has(.mic-btn):has(.ann-wrap) :global(.ta-input) {
-		padding-right: 8.9rem;
+		--tools-pad: 11.5rem;
 	}
 	.prompt :global(.cm-placeholder) {
 		color: #8e8e93;
