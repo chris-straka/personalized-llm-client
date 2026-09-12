@@ -22,4 +22,14 @@ describe("updateRouteFor", () => {
 			"https://github.com/chris-straka/personalized-llm-client/releases/latest"
 		);
 	});
+
+	it("routes dev shells to the dev message instead of the updater", () => {
+		expect(updateRouteFor(false, true, true)).toEqual({ kind: "dev" });
+		// Android keeps its releases route in dev (APK flow still applies).
+		expect(updateRouteFor(true, true, true)).toEqual({ kind: "releases", url: RELEASES_URL });
+		// Web builds stay disabled regardless of dev.
+		expect(updateRouteFor(false, false, true)).toEqual({ kind: "none" });
+		// Release desktop shells still use the Tauri updater.
+		expect(updateRouteFor(false, true, false)).toEqual({ kind: "updater" });
+	});
 });

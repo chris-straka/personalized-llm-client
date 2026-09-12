@@ -15,7 +15,7 @@
 	import { thinkingFor, resolveThinkingId } from "$lib/providers/thinking";
 	import { ejectProvider, restoreProvider } from "$lib/session";
 	import { hydrateSecrets, tauriBackendAvailable } from "$lib/secrets";
-	import { updateRouteFor } from "$lib/updates";
+	import { DEV_UPDATE_MESSAGE, updateRouteFor } from "$lib/updates";
 	import { getCurrentWindow } from "@tauri-apps/api/window";
 	import { check } from "@tauri-apps/plugin-updater";
 	import {
@@ -229,7 +229,7 @@
 	}
 
 	/** Where "check for updates" goes: releases page, Tauri updater, or nowhere (web). */
-	const updateRoute = $derived(updateRouteFor(androidUI === true, inShell));
+	const updateRoute = $derived(updateRouteFor(androidUI === true, inShell, import.meta.env.DEV));
 
 	/**
 	 * Update result readout: the page toast when one is wired (it
@@ -264,6 +264,12 @@
 			} finally {
 				checkingUpdate = false;
 			}
+			return;
+		}
+		if (route.kind === "dev") {
+			// Dev shells have no updater artifacts: explain instead of a fetch error.
+			sayUpdate(DEV_UPDATE_MESSAGE);
+			checkingUpdate = false;
 			return;
 		}
 		try {
