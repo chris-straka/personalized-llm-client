@@ -77,6 +77,12 @@ describe("hover-only message actions", () => {
 		expect(block![1]).toMatch(/will-change\s*:\s*opacity\s*;/);
 	});
 
+	it("confirms message copy with a bare Copied toast", () => {
+		const source = pageSource();
+		expect(source).toContain('copyPlain(plainBody(content, role, sourcesWanted), "Copied")');
+		expect(source).not.toContain("Copied as plain text");
+	});
+
 	it("never moves the buttons with transform, translate, or animation", () => {
 		const css = pageStyle();
 		// The tooltip bubble (::after) intentionally rises; everything else

@@ -134,8 +134,12 @@ cut; release chain outcome still unconfirmed (see Now).
   (Done Sep 2026 on work/stream-annotation2: same removal as the folds
   item — no audio path remains on `contextmenu` or button-2 mouseup;
   pinned by the empty-space silence spec in `sel-menu.e2e.ts`.)
-- [ ] Copy toasts: latex copy shows toast; wording is "Copied" everywhere
+- [x] Copy toasts: latex copy shows toast; wording is "Copied" everywhere
       (not "Copied as plain text").
+  (Done Sep 2026 on work/stream-annotation2: message copy now toasts
+  "Copied" (the button tooltip keeps describing the plain-text mode);
+  math/code body-copy already toast "Copied" via `onToast`. Locked by
+  `actions-reveal.test.ts` + the latex/message-code toast specs.)
 - [ ] Message with ONLY annotations renders as en-dash + annotation marker
       above, same font size as text, and stays unfolded. Message copy excludes
       annotations; each annotation copies on left-click in either overlay

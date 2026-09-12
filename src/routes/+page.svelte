@@ -1645,7 +1645,7 @@ import { isPromptIdle } from "$lib/chrome";
 	}
 
 	function copyText(content: string, role: string): void {
-		copyPlain(plainBody(content, role, sourcesWanted), "Copied as plain text");
+		copyPlain(plainBody(content, role, sourcesWanted), "Copied");
 	}
 
 	/**
