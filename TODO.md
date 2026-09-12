@@ -91,7 +91,10 @@ cut; release chain outcome still unconfirmed (see Now).
   block-widget adjacency drops rows).
 ## Pile: messages + rendering
 
-- [ ] `$$` display math not rendering — fix.
+- [x] `$$` display math not rendering — fix. (Verified Sep 2026 on
+  work/stream-rendering: `extractMath` + KaTeX path in `src/lib/render.ts`
+  already handles `$$…$$`; `render.test.ts` x32 + all 6 `e2e/latex.e2e.ts`
+  pass unmodified. No code change needed.)
 - [ ] Inline `$math$` rendering (display fences already work).
 - [ ] Math chrome: no fold/copy/math labels; bar-click folds; body-click
   copies + toast; chevron + TeX preview.
