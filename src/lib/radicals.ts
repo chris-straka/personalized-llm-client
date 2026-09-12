@@ -1,15 +1,17 @@
 /**
  * Offline Han character decomposition (character components overlay).
  *
- * Fully bundled: no fetch, no worker, no network at runtime. The table
- * is a small hand-curated subset (common kanji/hanzi + their immediate
- * components), so it stays far under budget (~6KB source) and carries
- * no third-party license obligations.
+ * Fully bundled: no fetch, no worker, no network at runtime. Two layers:
+ * a small hand-curated table (57 common kanji/hanzi + immediate
+ * components, own copyright) wins on conflict; the generated
+ * cjkdecomp-subset module (~72KB, MIT data choice, see its header)
+ * covers ~3000 more. Unknown Han characters still fall back to an
+ * honest "unavailable" entry instead of guessing.
  *
- * The overlay is deliberately NOT called "Radicals": most splits are
- * immediate components, not Kangxi radicals. The selection-menu
- * button reads "Parts" — one short English word with no
- * Chinese-or-Japanese reading, neutral across the shared Han block.
+ * The module is deliberately NOT called "radicals": most splits are
+ * immediate components, not Kangxi radicals (214 of those exist; the
+ * 57 entries here are common characters, not radicals). The
+ * selection-menu companion is "Inspect" (single Han chars only).
  *
  * Offline-dictionary decision (measured Sep 2026, see track report):
  * - Unihan.zip (unicode.org, UCD path): 8,518,517 bytes zipped —
@@ -26,11 +28,13 @@
  *   wanakana, pinyin-pro, lindera-wasm, shiki, marked, … — verified
  *   by searching package.json/bun.lock for decomp/krad/radical).
  * - Choice: keep this curated immediate-component table (own
- *   copyright, this repo). Unknown Han characters fall back to an
- *   honest "unavailable" entry instead of guessing. A build-time
- *   extraction (per-character slices of Unihan kDefinition/kMandarin
- *   or cjkvi-ids for covered characters) stays a follow-up.
+ *   copyright, this repo) authoritative, plus a vendored resolved-L1
+ *   subset of amake/cjk-decomp (MIT data choice, ~72KB,
+ *   src/lib/cjkdecomp-subset.generated.ts) as fallback for the other
+ *   ~3000 common characters. Truly unknown Han characters still fall
+ *   back to an honest "unavailable" entry instead of guessing.
  */
+import { CJKDECOMP_SUBSET } from "./cjkdecomp-subset.generated";
 
 /** One character and its immediate components. */
 export interface ComponentEntry {
@@ -109,11 +113,20 @@ export function isHanChar(ch: string): boolean {
 	return /^[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]$/u.test(ch);
 }
 
-/** Immediate components for one character, or null when unknown. */
+/**
+ * Immediate components for one character, or null when unknown. The
+ * hand TABLE wins on conflict (learner-oriented coarse splits beat the
+ * data's finer Mainland-typeface analysis); the vendored cjk-decomp
+ * subset covers the other ~3000 common characters.
+ */
 export function decomposeChar(ch: string): ComponentEntry | null {
 	const hit = TABLE[ch];
-	if (!hit || hit.c.length === 0) return null;
-	return { char: ch, components: [...hit.c], ...(hit.n ? { note: hit.n } : {}) };
+	if (hit && hit.c.length > 0) {
+		return { char: ch, components: [...hit.c], ...(hit.n ? { note: hit.n } : {}) };
+	}
+	const data = CJKDECOMP_SUBSET[ch];
+	if (data && data.length > 0) return { char: ch, components: [...data] };
+	return null;
 }
 
 /**

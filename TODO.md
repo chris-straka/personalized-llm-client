@@ -234,12 +234,20 @@ cut; release chain outcome still unconfirmed (see Now).
       Parts button + multi-char overlay removed (Inspect already shows
       components for single chars, toggle included); `han-parts.e2e.ts`
       deleted, `inspect.e2e.ts` pins Annotate-alone + single-kana-alone.
-      Dict decision measured, not bundled — Unihan.zip 8,518,517 B,
-      CC-CEDICT export zip 3,974,014 B, KANJIDIC2 xml.gz 1,488,576 B,
-      cjkvi-ids ids.txt 2,161,631 B GPLv2 via CHISE (needs an IDS parser);
-      MIT alternative spotted for research: amake/cjk-decomp (84,269
-      records, `char:type(part,part)`). Curated 57-entry table stays as
-      Inspect's data layer. No release UI claims.)
+      Dict decision landed Sep 2026 — both bundled: Unihan readings+meanings
+      (`src/lib/unihan.generated.ts`, 20,936 entries / 1.19MB, Unicode
+      license notice embedded, regen via `bun run unihan`; hand-table
+      definitions keep priority, Unihan is fallback + always-on readings)
+      and cjk-decomp splits (`src/lib/cjkdecomp-subset.generated.ts`,
+      3078 Joyo+top-Hanzi resolved-L1 entries / 72KB, MIT data choice with
+      attribution header, regen via the cjkdecomp-subset script; hand
+      TABLE stays authoritative on conflict, e.g. 電 keeps 日乚土 not
+      雨电). cjkvi-ids rejected (GPLv2 via CHISE); cjk-decomp evaluated in
+      `docs/cjkdecomp-eval.md` (36/57 agree; mismatches are Mainland-typeface
+      finer-grain modeling — documented caveat on fallback chars). `radicals`
+      + `inspect` suites pin hand-wins + fallback + honest-null. The open
+      question above is answered: Unihan for readings/meanings, cjk-decomp
+      subset for splits. No release UI claims.)
 
 ## Pile: annotation
 

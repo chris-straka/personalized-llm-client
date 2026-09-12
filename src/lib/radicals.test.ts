@@ -25,8 +25,8 @@ describe("decomposeChar", () => {
 	});
 
 	it("returns null for unknown or non-Han input", () => {
-		// 鬱 is Han but outside the curated subset: honest null.
-		expect(decomposeChar("鬱")).toBeNull();
+		// 㐀 is Han but in neither the hand table nor the data subset.
+		expect(decomposeChar("㐀")).toBeNull();
 		expect(decomposeChar("あ")).toBeNull();
 	});
 });
@@ -39,11 +39,30 @@ describe("decomposeText", () => {
 	});
 
 	it("marks unknown Han characters with empty components", () => {
-		const out = decomposeText("鬱");
-		expect(out).toEqual([{ char: "鬱", components: [] }]);
+		const out = decomposeText("㐀");
+		expect(out).toEqual([{ char: "㐀", components: [] }]);
 	});
 
 	it("returns nothing for text without Han characters", () => {
 		expect(decomposeText("hello ひらがな")).toEqual([]);
+	});
+});
+
+describe("cjk-decomp subset fallback", () => {
+	it("covers common characters outside the hand table", () => {
+		// 館 is not hand-curated; the vendored subset resolves it
+		// (variants normalized at build time: 飠→食).
+		expect(decomposeChar("館")).toEqual({ char: "館", components: ["食", "官"] });
+		// 鬱 used to be the honest-null example; the subset covers it now.
+		expect(decomposeChar("鬱")).toEqual({
+			char: "鬱",
+			components: ["林", "缶", "冖", "鬯", "彡"]
+		});
+	});
+
+	it("hand table wins on conflict (learner coarse beats Mainland fine)", () => {
+		// The subset says 雨+电 (simplified); the hand split stands.
+		expect(decomposeChar("電")).toEqual({ char: "電", components: ["日", "乚", "土"] });
+		expect(decomposeChar("好")).toEqual({ char: "好", components: ["女", "子"] });
 	});
 });

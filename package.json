@@ -17,7 +17,8 @@
     "format": "prettier --write .",
     "tauri": "tauri",
     "release": "bun scripts/release.ts",
-    "unihan": "bun scripts/unihan-extract.ts"
+    "unihan": "bun scripts/unihan-extract.ts",
+    "cjkdecomp-subset": "bun scripts/cjkdecomp-subset.ts --data /tmp/cjk-decomp/cjk-decomp.txt --out src/lib/cjkdecomp-subset.generated.ts"
   },
   "license": "MIT",
   "dependencies": {

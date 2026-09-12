@@ -63,12 +63,12 @@ describe("getInspectData", () => {
 	});
 
 	it("falls back honestly outside the compact table", () => {
-		// 鬱 is Han but outside the component table: empty components
-		// and null strokes, enriched by the Unihan bundle instead.
+		// 鬱 is Han but outside the hand table: the vendored subset
+		// supplies components; Unihan still enriches readings.
 		const out = getInspectData("鬱");
 		expect(out).toEqual({
 			char: "鬱",
-			components: [],
+			components: ["林", "缶", "冖", "鬯", "彡"],
 			strokeCount: null,
 			definition: "luxuriant; dense, thick; moody",
 			mandarin: "yù",

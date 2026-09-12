@@ -98,6 +98,19 @@ test("single kana highlight shows Annotate alone", async ({ page }) => {
 	await expect(menu.locator('button:has-text("Inspect")')).toHaveCount(0);
 });
 
+test("Inspect resolves splits beyond the hand table via the data fallback", async ({
+	page
+}) => {
+	// 館 is not hand-curated: the vendored cjk-decomp subset supplies 食 + 官.
+	await seedWithInspect(page, true, "館");
+	await selectWord(page);
+	await page.locator('.sel-menu button:has-text("Inspect")').click();
+	const modal = page.locator(".inspect-modal");
+	await expect(modal).toBeVisible();
+	await expect(modal).toContainText("館");
+	await expect(modal).toContainText("食");
+});
+
 test("settings panel gates the feature behind a checkbox", async ({ page }) => {
 	await seedWithInspect(page, false, "語");
 	await page.keyboard.press("Meta+,");
