@@ -61,7 +61,15 @@ function main(): void {
 		console.log(`${ch}:${rec.type}(${rec.parts.join(",")}) → [${resolveLevel(table, ch).join(" ")}] → [${expandLeaves(table, ch).join(" ")}]`);
 	}
 
-	const hand = loadHandTable(readFileSync(arg("table", "src/lib/radicals.ts"), "utf8"));
+	let hand: Map<string, string[]>;
+	try {
+		hand = loadHandTable(readFileSync(arg("table", "src/lib/radicals.ts"), "utf8"));
+	} catch {
+		// The hand TABLE is deleted (splits come from the vendored
+		// subset now); the agreement section below no-ops on empty.
+		console.log("\n## agreement vs hand TABLE skipped (no TABLE in source)");
+		hand = new Map();
+	}
 	console.log(`\n## agreement vs hand TABLE (${hand.size} entries)`);
 	let exact = 0;
 	let resolved = 0;

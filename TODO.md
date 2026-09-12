@@ -250,7 +250,14 @@ cut; release chain outcome still unconfirmed (see Now).
       subset for splits. REVISED again Sep 2026 per user call — the 57 hand
       entries are deleted as arbitrary (they were common characters, never
       Kangxi radicals): splits come solely from the vendored subset, so
-      漢 shows 氵廿中夫 and 電 shows Mainland 雨电 now. No release UI claims.)
+      漢 shows 氵廿中夫 and 電 shows Mainland 雨电 now. Then the inspect
+      TABLE (hand strokes+glosses) went the same way + `radicals.ts` folded
+      into `inspect.ts` (sole consumer): stroke counts (kTotalStrokes) and
+      Kangxi radicals (kRSUnicode + embedded 214-char map, 辵→辶 display
+      form) now come from Unihan too — card shows Strokes + Radical rows
+      (mdbg-shaped: 通 = 10画, 辶 + 7, verified). Caveat recorded in tests:
+      Unihan counts follow the Kangxi/traditional convention (漢 = 14,
+      Japanese shinjitai counts 13). No release UI claims.)
 
 ## Pile: annotation
 

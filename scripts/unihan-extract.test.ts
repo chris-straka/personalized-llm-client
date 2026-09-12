@@ -9,6 +9,8 @@ const FIXTURE = [
 	"U+8A9E\tkJapaneseOn\tGO GYO",
 	"U+8A9E\tkJapaneseKun\tKATARU KOTOBA",
 	"U+8A9E\tkCantonese\tjyu5",
+	"U+8A9E\tkTotalStrokes\t14",
+	"U+8A9E\tkRSUnicode\t149.7",
 	"U+597D\tkDefinition\tgood, excellent, fine; well",
 	"U+597D\tkMandarin\thǎo",
 	"U+3400\tkDefinition\t(same as 丘) hillock or mound",
@@ -36,14 +38,16 @@ describe("inBundledRange", () => {
 });
 
 describe("parseUnihanReadings", () => {
-	it("collects the four wanted fields per character", () => {
+	it("collects the six wanted fields per character", () => {
 		const entries = parseUnihanReadings(FIXTURE);
 		expect(entries.get("語")).toEqual({
 			char: "語",
 			d: "language, words; saying, expression",
 			m: "yǔ",
 			on: "GO GYO",
-			kun: "KATARU KOTOBA"
+			kun: "KATARU KOTOBA",
+			t: "14",
+			rs: "149.7"
 		});
 		expect(entries.get("好")).toMatchObject({ d: "good, excellent, fine; well", m: "hǎo" });
 	});

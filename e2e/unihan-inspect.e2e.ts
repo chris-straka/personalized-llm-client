@@ -44,8 +44,8 @@ test("Inspect overlay shows Unihan definition and readings for a covered char", 
 	await openInspectForSingleChar(page);
 	const modal = page.locator(".inspect-modal");
 	await expect(modal).toBeVisible();
-	// Curated gloss still wins for table-covered characters.
-	await expect(modal).toContainText("language; to speak");
+	// Unihan definition (no curated overrides remain).
+	await expect(modal).toContainText("language, words; saying, expression");
 	// Unihan enrichment: Mandarin pinyin + Japanese on/kun readings.
 	await expect(modal).toContainText("Mandarin");
 	await expect(modal).toContainText("yǔ");
@@ -53,6 +53,11 @@ test("Inspect overlay shows Unihan definition and readings for a covered char", 
 	await expect(modal).toContainText("GO GYO");
 	await expect(modal).toContainText("Japanese kun");
 	await expect(modal).toContainText("KATARU");
+	// Unihan strokes + Kangxi radical (語: 14 strokes, 言 + 7).
+	await expect(modal).toContainText("Strokes:");
+	await expect(modal).toContainText("14");
+	await expect(modal).toContainText("Radical:");
+	await expect(modal).toContainText("言 + 7");
 	await page.keyboard.press("Escape");
 	await expect(modal).toHaveCount(0);
 });

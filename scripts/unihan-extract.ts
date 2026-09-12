@@ -4,16 +4,20 @@
  * Downloads nothing itself: fetch the public UCD archive once, then run:
  *
  *   curl -sL -o /tmp/Unihan.zip https://www.unicode.org/Public/UCD/latest/ucd/Unihan.zip
- *   unzip -p /tmp/Unihan.zip Unihan_Readings.txt > /tmp/Unihan_Readings.txt
- *   bun scripts/unihan-extract.ts --src /tmp/Unihan_Readings.txt --out src/lib/unihan.generated.ts
+ *   bun scripts/unihan-extract.ts --src /tmp/Unihan.zip --out src/lib/unihan.generated.ts
  *
- * A `.zip` path also works directly for --src (reads
- * Unihan_Readings.txt out of it via `unzip -p`). `--include-ext-a`
- * additionally bundles CJK Extension A (U+3400–U+4DBF); the default
- * is CJK Unified Ideographs only (U+4E00–U+9FFF).
+ * A `.zip` path reads Unihan_Readings.txt + Unihan_IRGSources.txt out
+ * of it via `unzip -p`. A plain-text path reads Unihan_Readings.txt
+ * from the file and Unihan_IRGSources.txt from the sibling file of
+ * the same name in the same directory. `--include-ext-a` additionally
+ * bundles CJK Extension A (U+3400–U+4DBF); the default is CJK Unified
+ * Ideographs only (U+4E00–U+9FFF).
  *
  * Extracted fields per character: kDefinition, kMandarin, kJapaneseOn,
- * kJapaneseKun. Everything else in Unihan_Readings.txt is dropped.
+ * kJapaneseKun (from Unihan_Readings.txt) plus kTotalStrokes and
+ * kRSUnicode (from Unihan_IRGSources.txt — both live there, not in
+ * Unihan_RadicalStrokeCounts.txt, which only holds kRSAdobe_Japan1_6).
+ * Everything else is dropped.
  *
  * License: the source data is © Unicode, Inc. under the Unicode
  * License V3 (https://www.unicode.org/license.txt), which permits
@@ -39,7 +43,9 @@ export const UNIHAN_FIELD_MAP = {
 	kDefinition: "d",
 	kMandarin: "m",
 	kJapaneseOn: "on",
-	kJapaneseKun: "kun"
+	kJapaneseKun: "kun",
+	kTotalStrokes: "t",
+	kRSUnicode: "rs"
 } as const;
 
 export type UnihanField = keyof typeof UNIHAN_FIELD_MAP;
@@ -56,6 +62,10 @@ export interface ExtractedEntry {
 	m?: string;
 	on?: string;
 	kun?: string;
+	/** Total stroke count, as written (e.g. "14"). */
+	t?: string;
+	/** Kangxi radical + residual strokes (e.g. "149.7"). */
+	rs?: string;
 }
 
 const FIELD_BY_NAME = new Map<string, keyof ExtractedEntry>(
@@ -132,6 +142,8 @@ export function formatGeneratedModule(entries: Map<string, ExtractedEntry>, meta
 		if (entry.m !== undefined) parts.push(`m:${JSON.stringify(entry.m)}`);
 		if (entry.on !== undefined) parts.push(`on:${JSON.stringify(entry.on)}`);
 		if (entry.kun !== undefined) parts.push(`kun:${JSON.stringify(entry.kun)}`);
+		if (entry.t !== undefined) parts.push(`t:${JSON.stringify(entry.t)}`);
+		if (entry.rs !== undefined) parts.push(`rs:${JSON.stringify(entry.rs)}`);
 		return `\t${JSON.stringify(entry.char)}:{${parts.join(",")}},`;
 	});
 	return `/**
@@ -142,7 +154,7 @@ export function formatGeneratedModule(entries: Map<string, ExtractedEntry>, meta
  *
  * Source: ${meta.sourceUrl} (Unicode ${meta.unicodeVersion},
  * Unihan_Readings.txt: kDefinition + kMandarin + kJapaneseOn +
- * kJapaneseKun for ${
+ * kJapaneseKun; Unihan_IRGSources.txt: kTotalStrokes + kRSUnicode; for ${
 		meta.includeExtA
 			? "CJK Unified Ideographs (U+4E00-U+9FFF) + Extension A (U+3400-U+4DBF)"
 			: "CJK Unified Ideographs (U+4E00-U+9FFF)"
@@ -160,6 +172,8 @@ export interface UnihanEntry {
 	m?: string;
 	on?: string;
 	kun?: string;
+	t?: string;
+	rs?: string;
 }
 /** Bundled Unihan readings + definitions keyed by character. */
 export const UNIHAN: Record<string, UnihanEntry> = {
@@ -168,18 +182,19 @@ ${lines.join("\n")}
 `;
 }
 
-function readSource(src: string): string {
+function readMember(src: string, member: string): string {
 	if (src.endsWith(".zip")) {
-		const out = spawnSync("unzip", ["-p", src, "Unihan_Readings.txt"], {
+		const out = spawnSync("unzip", ["-p", src, member], {
 			encoding: "utf-8",
-			maxBuffer: 64 * 1024 * 1024
+			maxBuffer: 256 * 1024 * 1024
 		});
 		if (out.status !== 0 || out.stdout === "") {
-			throw new Error(`could not read Unihan_Readings.txt from ${src}: ${out.stderr.trim()}`);
+			throw new Error(`could not read ${member} from ${src}: ${out.stderr.trim()}`);
 		}
 		return out.stdout as string;
 	}
-	return readFileSync(src, "utf-8");
+	const sibling = src.slice(0, src.lastIndexOf("/") + 1) + member;
+	return readFileSync(sibling, "utf-8");
 }
 
 function argValue(args: string[], name: string): string | undefined {
@@ -197,8 +212,14 @@ if (import.meta.main) {
 		const src = argValue(args, "src") ?? "Unihan_Readings.txt";
 		const out = argValue(args, "out") ?? "src/lib/unihan.generated.ts";
 		const includeExtA = args.includes("--include-ext-a");
-		const text = readSource(src);
-		const entries = parseUnihanReadings(text, { includeExtA });
+		const entries = parseUnihanReadings(readMember(src, "Unihan_Readings.txt"), { includeExtA });
+		for (const [char, extra] of parseUnihanReadings(readMember(src, "Unihan_IRGSources.txt"), {
+			includeExtA
+		})) {
+			const base = entryFor(entries, char.codePointAt(0) ?? 0);
+			if (extra.t !== undefined) base.t = extra.t;
+			if (extra.rs !== undefined) base.rs = extra.rs;
+		}
 		const module = formatGeneratedModule(entries, {
 			unicodeVersion: UNIHAN_UNICODE_VERSION,
 			sourceUrl: UNIHAN_SOURCE_URL,

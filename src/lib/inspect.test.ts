@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { getInspectData, isSingleHanChar, shouldShowInspect } from "./inspect";
+import {
+	decomposeChar,
+	decomposeText,
+	getInspectData,
+	isHanChar,
+	isSingleHanChar,
+	parseKangxi,
+	shouldShowInspect
+} from "./inspect";
 import { defaultSettings, loadSettings, saveSettings, memoryStore } from "./settings";
 
 describe("isSingleHanChar", () => {
@@ -40,16 +48,24 @@ describe("shouldShowInspect", () => {
 });
 
 describe("getInspectData", () => {
-	it("returns radicals, stroke count, and definition offline", () => {
+	it("returns radicals, stroke count, radical, and definition offline", () => {
 		expect(getInspectData("語")).toEqual({
 			char: "語",
 			components: ["言", "吾"],
 			strokeCount: 14,
-			definition: "language; to speak",
+			radical: "言",
+			radicalRest: 7,
+			definition: "language, words; saying, expression",
 			mandarin: "yǔ",
 			japaneseOn: "GO GYO",
 			japaneseKun: "KATARU KOTOBA TSUGERU",
 			hasStrokePaths: false
+		});
+		// mdbg ground truth: 通 is 10 strokes, radical 162 (辶) + 7.
+		expect(getInspectData("通")).toMatchObject({
+			strokeCount: 10,
+			radical: "辶",
+			radicalRest: 7
 		});
 		expect(getInspectData("好")).toMatchObject({
 			components: ["女", "子"],
@@ -59,29 +75,31 @@ describe("getInspectData", () => {
 
 	it("trims the input before lookup", () => {
 		expect(getInspectData(" 漢 ").char).toBe("漢");
-		expect(getInspectData(" 漢 ").strokeCount).toBe(13);
+		// Unihan kTotalStrokes counts 14 (Kangxi/traditional convention;
+		// Japanese shinjitai counts 13 — data wins by decision).
+		expect(getInspectData(" 漢 ").strokeCount).toBe(14);
 	});
 
-	it("falls back honestly outside the compact table", () => {
-		// 鬱 is Han but outside the hand table: the vendored subset
-		// supplies components; Unihan still enriches readings.
-		const out = getInspectData("鬱");
+	it("falls back honestly outside the subset table", () => {
+		// 鬰 (U+9B30) is Han with Unihan coverage but no subset split:
+		// components stay empty while everything else enriches.
+		const out = getInspectData("鬰");
 		expect(out).toEqual({
-			char: "鬱",
-			components: ["林", "缶", "冖", "鬯", "彡"],
-			strokeCount: null,
+			char: "鬰",
+			components: [],
+			strokeCount: 27,
+			radical: "鬯",
+			radicalRest: 17,
 			definition: "luxuriant; dense, thick; moody",
 			mandarin: "yù",
 			japaneseOn: "UTSU",
-			japaneseKun: "SHIGERU",
+			japaneseKun: "SHIGERU MURAGARI",
 			hasStrokePaths: false
 		});
 	});
 
-	it("prefers the curated gloss over the Unihan definition", () => {
-		// The curated table's short gloss wins; Unihan's longer
-		// "language, words; saying, expression" stays the fallback.
-		expect(getInspectData("語").definition).toBe("language; to speak");
+	it("uses Unihan definitions with no curated override", () => {
+		expect(getInspectData("語").definition).toBe("language, words; saying, expression");
 	});
 
 	it("reports null readings for characters outside Unihan coverage", () => {
@@ -124,5 +142,94 @@ describe("inspect setting", () => {
 		(junk as unknown as Record<string, unknown>).inspectEnabled = "yes";
 		saveSettings(junk, memoryStore);
 		expect(loadSettings(memoryStore).inspectEnabled).toBe(false);
+	});
+});
+
+describe("isHanChar", () => {
+	it("accepts CJK unified characters", () => {
+		expect(isHanChar("漢")).toBe(true);
+		expect(isHanChar("語")).toBe(true);
+	});
+
+	it("rejects kana, latin, and multi-char strings", () => {
+		expect(isHanChar("あ")).toBe(false);
+		expect(isHanChar("ア")).toBe(false);
+		expect(isHanChar("a")).toBe(false);
+		expect(isHanChar("漢字")).toBe(false);
+		expect(isHanChar("")).toBe(false);
+	});
+});
+
+describe("decomposeChar", () => {
+	it("splits common characters into components", () => {
+		expect(decomposeChar("好")).toEqual({ char: "好", components: ["女", "子"] });
+		expect(decomposeChar("語")).toEqual({ char: "語", components: ["言", "吾"] });
+		// No hand table anymore: 漢 comes from the vendored subset
+		// (finer grain than the old hand split 氵+堇).
+		expect(decomposeChar("漢")).toEqual({ char: "漢", components: ["氵", "廿", "中", "夫"] });
+	});
+
+	it("returns null for unknown or non-Han input", () => {
+		// 㐀 is Han but in neither the hand table nor the data subset.
+		expect(decomposeChar("㐀")).toBeNull();
+		expect(decomposeChar("あ")).toBeNull();
+	});
+});
+
+describe("decomposeText", () => {
+	it("dedupes Han characters in order and skips kana", () => {
+		const out = decomposeText("今日は語学");
+		expect(out.map((e) => e.char)).toEqual(["今", "日", "語", "学"]);
+		expect(out.find((e) => e.char === "語")?.components).toEqual(["言", "吾"]);
+	});
+
+	it("marks unknown Han characters with empty components", () => {
+		const out = decomposeText("㐀");
+		expect(out).toEqual([{ char: "㐀", components: [] }]);
+	});
+
+	it("returns nothing for text without Han characters", () => {
+		expect(decomposeText("hello ひらがな")).toEqual([]);
+	});
+});
+
+describe("vendored subset splits", () => {
+	it("covers common characters from data", () => {
+		// 館 resolves from the subset (variants normalized at
+		// build time: 飠→食).
+		expect(decomposeChar("館")).toEqual({ char: "館", components: ["食", "官"] });
+		// 鬱 used to be the honest-null example; the subset covers it now.
+		expect(decomposeChar("鬱")).toEqual({
+			char: "鬱",
+			components: ["林", "缶", "冖", "鬯", "彡"]
+		});
+	});
+
+	it("uses the vendored data everywhere, Mainland forms included", () => {
+		// No hand overrides left: 電 resolves to the subset's Mainland
+		// form (雨+电, not the old hand split 日乚土).
+		expect(decomposeChar("電")).toEqual({ char: "電", components: ["雨", "电"] });
+		expect(decomposeChar("好")).toEqual({ char: "好", components: ["女", "子"] });
+	});
+});
+
+describe("parseKangxi", () => {
+	it("resolves radical numbers cross-checked against Unihan values", () => {
+		// Each pair below is an independent Unihan kRSUnicode reading
+		// (語 149.7, 通 162.7, 好 38.3, 明 72.4, 漢 85.11, 館 184.8):
+		// a transcription slip in the 214-char string fails loudly.
+		expect(parseKangxi("149.7")).toEqual({ radical: "言", rest: 7 });
+		expect(parseKangxi("162.7")).toEqual({ radical: "辶", rest: 7 });
+		expect(parseKangxi("38.3")).toEqual({ radical: "女", rest: 3 });
+		expect(parseKangxi("72.4")).toEqual({ radical: "日", rest: 4 });
+		expect(parseKangxi("85.11")).toEqual({ radical: "水", rest: 11 });
+		expect(parseKangxi("184.8")).toEqual({ radical: "食", rest: 8 });
+	});
+
+	it("rejects missing and malformed values", () => {
+		expect(parseKangxi(undefined)).toBeNull();
+		expect(parseKangxi("149")).toBeNull();
+		expect(parseKangxi("x.7")).toBeNull();
+		expect(parseKangxi("999.1")).toBeNull();
 	});
 });

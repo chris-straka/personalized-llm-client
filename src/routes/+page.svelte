@@ -7071,13 +7071,14 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	{/if}
 	{#if inspectChar && inspectData}
 		<!-- Character Inspect overlay: same modal-veil/modal pattern as
-		the shortcuts overlay. Components come from the offline curated
-		table (radicals.ts); count + short gloss from the compact table
-		(inspect.ts), definition fallback + readings (Mandarin, Japanese
-		on/kun) from the generated Unihan bundle. The stroke preview is schematic (stepped by
-		stroke count) until per-character vector data lands. The
-		JP/中文 toggle flips the predicted reading locale (kana =
-		Japanese, else Chinese) for genuinely ambiguous Han text. -->
+		the shortcuts overlay. Component splits come from the vendored
+		cjk-decomp subset; count, radical, definition, and readings
+		(Mandarin, Japanese on/kun) from the generated Unihan bundle —
+		all offline, no hand-curated entries. The stroke preview is
+		schematic (stepped by stroke count) until per-character vector
+		data lands. The JP/中文 toggle flips the predicted reading
+		locale (kana = Japanese, else Chinese) for genuinely ambiguous
+		Han text. -->
 		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 		<!-- Backdrop click only; keyboard users get Esc and the × button. -->
 		<div
@@ -7128,6 +7129,9 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 							<p><strong>Strokes:</strong> {inspectData.strokeCount}</p>
 						{:else}
 							<p class="note">Stroke count unavailable offline for this character.</p>
+						{/if}
+						{#if inspectData.radical !== null && inspectData.radicalRest !== null}
+							<p><strong>Radical:</strong> {inspectData.radical} + {inspectData.radicalRest}</p>
 						{/if}
 						{#if inspectData.definition !== null}
 							<p><strong>Definition:</strong> {inspectData.definition}</p>
