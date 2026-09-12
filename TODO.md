@@ -6,6 +6,14 @@ Those files are deleted; history lives in git. Done items were dropped —
 what's below is all remaining work. Spec is `README.md`; agent handoff
 (commands, gates, architecture) is `AGENTS.md`.
 
+Bots: checkboxes are terse on purpose. The full verbatim request behind any
+item lives in the deleted logs — recover with:
+`git show HEAD~1:PROMPT.md`, `git show HEAD~1:PROMPT2.md`,
+`git show HEAD~1:PROMPT3.md`, `git show HEAD~1:PLAN.md`,
+`git show HEAD~1:PLAN2.md`, or the pre-merge `TODO.md` at the same ref.
+Composer/message items pair with screenshots under `imgs/`. When picking up
+an item, expand it with acceptance criteria first; don't guess.
+
 ## Goal + constraints
 
 macOS desktop chatbot (BYOK: DeepSeek + Muse Spark): clean chat with
@@ -47,6 +55,8 @@ cut; release chain outcome still unconfirmed (see Now).
 - [ ] Annotation draft restore on return is broken — fix first.
 - [ ] `e2e/annotation-chat-scope.e2e.ts` failing — fix.
 - [ ] Confirm v0.2.5 rename/verify/publish outcome (`gh release view v0.2.5`).
+- [ ] Review + resolve the moderate Dependabot alert on the default branch
+  (flagged at push time, 2026-09-12).
 
 ## Pile: composer
 
