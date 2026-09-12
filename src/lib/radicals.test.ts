@@ -21,7 +21,9 @@ describe("decomposeChar", () => {
 	it("splits common characters into components", () => {
 		expect(decomposeChar("好")).toEqual({ char: "好", components: ["女", "子"] });
 		expect(decomposeChar("語")).toEqual({ char: "語", components: ["言", "吾"] });
-		expect(decomposeChar("漢")).toEqual({ char: "漢", components: ["氵", "堇"] });
+		// No hand table anymore: 漢 comes from the vendored subset
+		// (finer grain than the old hand split 氵+堇).
+		expect(decomposeChar("漢")).toEqual({ char: "漢", components: ["氵", "廿", "中", "夫"] });
 	});
 
 	it("returns null for unknown or non-Han input", () => {
@@ -48,10 +50,10 @@ describe("decomposeText", () => {
 	});
 });
 
-describe("cjk-decomp subset fallback", () => {
-	it("covers common characters outside the hand table", () => {
-		// 館 is not hand-curated; the vendored subset resolves it
-		// (variants normalized at build time: 飠→食).
+describe("vendored subset splits", () => {
+	it("covers common characters from data", () => {
+		// 館 resolves from the subset (variants normalized at
+		// build time: 飠→食).
 		expect(decomposeChar("館")).toEqual({ char: "館", components: ["食", "官"] });
 		// 鬱 used to be the honest-null example; the subset covers it now.
 		expect(decomposeChar("鬱")).toEqual({
@@ -60,9 +62,10 @@ describe("cjk-decomp subset fallback", () => {
 		});
 	});
 
-	it("hand table wins on conflict (learner coarse beats Mainland fine)", () => {
-		// The subset says 雨+电 (simplified); the hand split stands.
-		expect(decomposeChar("電")).toEqual({ char: "電", components: ["日", "乚", "土"] });
+	it("uses the vendored data everywhere, Mainland forms included", () => {
+		// No hand overrides left: 電 resolves to the subset's Mainland
+		// form (雨+电, not the old hand split 日乚土).
+		expect(decomposeChar("電")).toEqual({ char: "電", components: ["雨", "电"] });
 		expect(decomposeChar("好")).toEqual({ char: "好", components: ["女", "子"] });
 	});
 });

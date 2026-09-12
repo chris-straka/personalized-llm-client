@@ -1,5 +1,11 @@
 # cjk-decomp evaluation (U2 split-data source)
 
+> SUPERSEDED in part Sep 2026: the 57 hand entries this report measures
+> against are deleted — splits now come solely from the vendored subset
+> (`src/lib/cjkdecomp-subset.generated.ts`, regen via the cjkdecomp-subset
+> script). The license verdict (MIT), sizes, and Mainland-typeface caveat
+> below still stand.
+
 Prototype: `scripts/cjkdecomp.ts` (pure parser/expander) + `scripts/cjkdecomp-eval.ts` (CLI)
 + `scripts/cjkdecomp.test.ts` (14 colocated Vitest tests, inline fixtures only).
 Reproduce (data file is NOT vendored):

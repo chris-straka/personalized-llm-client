@@ -247,7 +247,10 @@ cut; release chain outcome still unconfirmed (see Now).
       finer-grain modeling — documented caveat on fallback chars). `radicals`
       + `inspect` suites pin hand-wins + fallback + honest-null. The open
       question above is answered: Unihan for readings/meanings, cjk-decomp
-      subset for splits. No release UI claims.)
+      subset for splits. REVISED again Sep 2026 per user call — the 57 hand
+      entries are deleted as arbitrary (they were common characters, never
+      Kangxi radicals): splits come solely from the vendored subset, so
+      漢 shows 氵廿中夫 and 電 shows Mainland 雨电 now. No release UI claims.)
 
 ## Pile: annotation
 
