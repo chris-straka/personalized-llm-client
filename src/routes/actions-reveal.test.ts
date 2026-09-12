@@ -83,6 +83,18 @@ describe("hover-only message actions", () => {
 		expect(source).not.toContain("Copied as plain text");
 	});
 
+	it("scales the icon glyphs with the text-size opt-in", () => {
+		const css = pageStyle();
+		expect(css).toContain("main.scale-actions .actions button");
+		// Text buttons already grow under the opt-in; the logo icons
+		// must follow, or larger text leaves tiny icons.
+		const glyph = css.match(
+			/main\.scale-actions \.actions \.icon-btn[^{]*\{([^}]*)\}/
+		);
+		expect(glyph, "scale-actions glyph rule is gone — move it with the text rule").toBeTruthy();
+		expect(glyph![1]).toMatch(/height\s*:\s*calc\(1\.05rem \* var\(--font-scale/);
+	});
+
 	it("never moves the buttons with transform, translate, or animation", () => {
 		const css = pageStyle();
 		// The tooltip bubble (::after) intentionally rises; everything else

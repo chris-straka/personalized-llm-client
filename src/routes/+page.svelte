@@ -9146,6 +9146,11 @@ import { isPromptIdle } from "$lib/chrome";
 	main.scale-actions .actions button {
 		font-size: calc(0.75rem * var(--font-scale, 1));
 	}
+	/* Same opt-in for the logo icons: the glyph holds its fixed
+	1.05rem height otherwise, so larger text leaves tiny icons. */
+	main.scale-actions .actions .icon-btn :global(.action-glyph) {
+		height: calc(1.05rem * var(--font-scale, 1));
+	}
 	/* Loading buttons hold their look while the dots pulse. */
 	.actions button:disabled {
 		cursor: default;
