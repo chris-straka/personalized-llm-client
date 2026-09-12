@@ -79,3 +79,23 @@ test("right-click on empty space stays silent", async ({ page }) => {
 	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
 	expect(selected).toBe("");
 });
+
+/** Bullet markers never enter the highlight: ::marker is a
+pseudo-element outside the DOM, so native selection (which the
+annotation quote reads) skips it — no annotation-side carve-out. */
+test("list-item selection excludes the bullet marker", async ({ page }) => {
+	await seedChat(page, [{ role: "assistant", content: "- alpha item\n- beta item" }]);
+	await page.goto("/");
+	const item = page.locator("article .rendered li").first();
+	await expect(item).toBeVisible({ timeout: 60_000 });
+	const box = await item.boundingBox();
+	if (!box) throw new Error("list item has no box");
+	// Start left of the text, over the marker gutter, drag mid-item.
+	await page.mouse.move(box.x - 12, box.y + box.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(box.x + box.width * 0.5, box.y + box.height / 2, { steps: 5 });
+	await page.mouse.up();
+	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+	expect(selected).toContain("alpha");
+	expect(selected).not.toContain("•");
+});
