@@ -353,35 +353,37 @@
 			}
 			return;
 		}
-		const button = (event.target as HTMLElement).closest<HTMLElement>("[data-code-action]");
-		if (!button || !rendered) return;
-		const block = button.closest<HTMLElement>(".ccez-code");
-		const index = Number(block?.dataset.codeIndex ?? -1);
+		// Buttonless code chrome, same contract as math: the head bar
+		// folds, the body copies with a toast.
+		const codeBlock = (event.target as HTMLElement).closest<HTMLElement>(".ccez-code");
+		if (!codeBlock || !rendered) return;
+		const index = Number(codeBlock.dataset.codeIndex ?? -1);
 		const entry = rendered.codes[index];
 		if (!entry) return;
-		if (button.dataset.codeAction === "copy") {
-			// No toast down here: the button itself reports the outcome,
-			// restoring its label after a beat (harmless on a detached
-			// node if the body re-renders meanwhile).
-			const label = button.textContent ?? "Copy";
-			const restore = () => {
-				button.textContent = label;
-			};
-			const report = (ok: boolean) => {
-				button.textContent = ok ? "Copied" : "Copy failed";
-				setTimeout(restore, 1500);
-			};
-			if (!navigator.clipboard) report(false);
-			else void navigator.clipboard.writeText(entry.code).then(
-				() => report(true),
-				() => report(false)
-			);
-		} else {
-			const pre = block?.querySelector("pre");
-			if (!pre) return;
-			const collapsed = pre.style.display !== "none";
-			pre.style.display = collapsed ? "none" : "";
-			button.textContent = collapsed ? "Unfold" : "Fold";
+		const bar = (event.target as HTMLElement).closest<HTMLElement>(".ccez-code-head");
+		if (bar) {
+			const folded = codeBlock.dataset.folded === "1";
+			if (folded) {
+				codeBlock.removeAttribute("data-folded");
+				bar.setAttribute("aria-expanded", "true");
+			} else {
+				codeBlock.dataset.folded = "1";
+				bar.setAttribute("aria-expanded", "false");
+			}
+			return;
+		}
+		// Body click copies the code plus a toast — never while a
+		// selection is live, so drag-selects don't clobber the clipboard.
+		if (
+			(event.target as HTMLElement).closest("pre") &&
+			window.getSelection()?.isCollapsed !== false
+		) {
+			if (!navigator.clipboard) onToast?.("Couldn't copy to the clipboard.");
+			else
+				void navigator.clipboard.writeText(entry.code).then(
+					() => onToast?.("Copied"),
+					() => onToast?.("Couldn't copy to the clipboard.")
+				);
 		}
 	}
 </script>
@@ -600,32 +602,32 @@
 		max-width: 100%;
 		min-width: min(12rem, 100%);
 	}
-	.rendered :global(.ccez-code-head) {
+	/* Buttonless code chrome: the language-label bar folds, the body
+	copies. The bar is a real button so keyboard still folds. */
+	.rendered :global(button.ccez-code-head) {
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
+		width: 100%;
+		border: 0;
 		padding: 0.25rem 0.6rem;
 		background: #f1f1f4;
 		font-size: 0.75rem;
+		text-align: left;
+		cursor: pointer;
+		color: inherit;
 	}
 	.rendered :global(.ccez-code-lang) {
 		font-weight: 650;
-	}
-	.rendered :global(.ccez-code-head button) {
-		border: 1px solid #c7c7cc;
-		border-radius: 6px;
-		background: #fff;
-		cursor: pointer;
-		font-size: 0.75rem;
-		padding: 0.05rem 0.5rem;
-	}
-	.rendered :global(.ccez-code-head button:first-of-type) {
-		margin-left: auto;
 	}
 	.rendered :global(.ccez-code pre) {
 		margin: 0;
 		border-radius: 0;
 		background: #fff;
+		cursor: pointer;
+	}
+	.rendered :global(.ccez-code[data-folded="1"] pre) {
+		display: none;
 	}
 	/* LaTeX math (main chat only): buttonless chrome — display blocks
 	get a fold bar (chevron plus TeX preview, no labels), and clicking

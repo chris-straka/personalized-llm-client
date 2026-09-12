@@ -44,6 +44,15 @@ describe("quoteFragmentText", () => {
 		);
 		expect(text).toBe("E");
 	});
+
+	it("drops code chrome heads, keeping the code body", () => {
+		const text = quoteFragmentText(
+			fragment(
+				'<div class="ccez-code" data-code-index="0"><button class="ccez-code-head"><span class="ccez-code-lang">python</span></button><pre><code>x = 1</code></pre></div>'
+			)
+		);
+		expect(text).toBe("x = 1");
+	});
 });
 
 describe("equationBodyOf", () => {

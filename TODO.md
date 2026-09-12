@@ -116,7 +116,14 @@ cut; release chain outcome still unconfirmed (see Now).
   labels; bar-click folds via `data-folded`, body-click copies TeX with a
   "Copied" toast (skipped while a selection is live); inline math renders
   bare. Unit-locked in `render.test.ts`; behavior pinned in `latex.e2e.ts`.)
-- [ ] AI code fences: no copy/fold buttons; language logos if cheap.
+- [x] AI code fences: no copy/fold buttons; language logos if cheap.
+  (Done Sep 2026 on work/stream-annotation2: code head is a language-label
+  fold bar with no buttons (bar-click folds via `data-folded`, body-click
+  copies code with a "Copied" toast, skipped while selecting); logos
+  dropped as not cheap — no glyph set exists and Shiki already colors
+  blocks apart. Heads strip from quotes like math. Unit-locked in
+  `render.test.ts` + `annotations-dom.test.ts`; behavior pinned in
+  `message-code.e2e.ts`, `textai.e2e.ts` assertion updated.)
 - [ ] Right-click on latex/code folds must never start TTS.
 - [ ] Right-click (even empty space) must never start audio.
 - [ ] Copy toasts: latex copy shows toast; wording is "Copied" everywhere

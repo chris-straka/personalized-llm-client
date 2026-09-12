@@ -352,7 +352,7 @@ export interface AnnotationMark {
  */
 export function quoteFragmentText(frag: DocumentFragment): string {
 	frag
-		.querySelectorAll("[data-ann-badge], rt, rp, .frt, .ccez-math-head")
+		.querySelectorAll("[data-ann-badge], rt, rp, .frt, .ccez-math-head, .ccez-code-head")
 		.forEach((el) => el.remove());
 	return frag.textContent?.trim() ?? "";
 }

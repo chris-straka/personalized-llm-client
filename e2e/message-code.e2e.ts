@@ -13,6 +13,7 @@ def hi():
 Run it with \`python hello.py\`.`;
 
 test.beforeEach(async ({ page }) => {
+	await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
 	await seedChat(page, [
 		{ role: "user", content: "give me python" },
 		{ role: "assistant", content: ASSISTANT }
@@ -75,6 +76,35 @@ test("dark code stays contrasted", async ({ page }) => {
 	expect(ratio.inline).toBeGreaterThanOrEqual(4.5);
 	expect(ratio.tokens).toBeGreaterThan(0);
 	expect(ratio.worstToken).toBeGreaterThanOrEqual(4.5);
+});
+
+/** AI code blocks carry a language-label fold bar and no buttons. */
+test("assistant code block has a label bar with no buttons", async ({ page }) => {
+	const block = page.locator(".ccez-code").first();
+	await expect(block.locator(".ccez-code-lang")).toHaveText("python");
+	await expect(block.locator("button[data-code-action]")).toHaveCount(0);
+	expect(await block.locator("button.ccez-code-head").count()).toBeGreaterThan(0);
+});
+
+/** Bar-click folds the code body and unfolds it back. */
+test("code bar click folds the body", async ({ page }) => {
+	const block = page.locator(".ccez-code").first();
+	const bar = block.locator(".ccez-code-head");
+	const pre = block.locator("pre");
+	await expect(pre).toBeVisible();
+	await bar.click();
+	await expect(pre).toBeHidden();
+	await expect(block).toHaveAttribute("data-folded", "1");
+	await bar.click();
+	await expect(pre).toBeVisible();
+});
+
+/** Body-click copies the code with a toast. */
+test("code body click copies with a toast", async ({ page }) => {
+	const block = page.locator(".ccez-code").first();
+	await block.locator("pre").click();
+	await expect(page.locator(".toast")).toHaveText("Copied", { timeout: 10_000 });
+	expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('print("hi")');
 });
 
 /** Thoughts grow with the message font scale instead of stranding at 0.8rem. */

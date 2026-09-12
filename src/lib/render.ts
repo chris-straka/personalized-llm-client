@@ -375,13 +375,15 @@ function renderInto(
 				const language = (lang ?? "").trim() || "text";
 				const index = codes.length;
 				codes.push({ lang: language, code: text });
+				// Buttonless chrome like math: the head bar (language
+				// label only) folds, the body copies. Per-language logos
+				// stay out: no glyph set exists and Shiki already colors
+				// blocks apart, so artwork per language isn't cheap.
 				return (
 					`<div class="ccez-code" data-code-index="${index}">` +
-					`<div class="ccez-code-head">` +
+					`<button type="button" class="ccez-code-head" aria-label="Fold code block" aria-expanded="true">` +
 					`<span class="ccez-code-lang">${escapeHtml(language)}</span>` +
-					`<button type="button" data-code-action="fold">Fold</button>` +
-					`<button type="button" data-code-action="copy">Copy</button>` +
-					`</div><pre><code data-code-index="${index}">${escapeHtml(text)}</code></pre></div>`
+					`</button><pre><code data-code-index="${index}">${escapeHtml(text)}</code></pre></div>`
 				);
 			}
 		}
@@ -415,7 +417,6 @@ export function sanitize(dirty: string): string {
 			"aria-label",
 			"aria-expanded",
 			"data-code-index",
-			"data-code-action",
 			"data-math-index",
 			"data-paste-fold",
 			"type",

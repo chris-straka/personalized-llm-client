@@ -54,13 +54,15 @@ describe("sources stripping", () => {
 });
 
 describe("markdown rendering", () => {
-	it("renders code blocks with language label, fold and copy buttons", () => {
+	it("renders code blocks with a language-label fold bar, no buttons", () => {
 		const { html, codes } = renderMarkdown("```python\nprint(1)\n```");
 		expect(codes).toEqual([{ lang: "python", code: "print(1)" }]);
 		expect(html).toContain("ccez-code-lang");
 		expect(html).toContain("python");
-		expect(html).toContain('data-code-action="fold"');
-		expect(html).toContain('data-code-action="copy"');
+		expect(html).toContain('aria-label="Fold code block"');
+		expect(html).not.toContain("data-code-action");
+		expect(html).not.toContain(">Fold<");
+		expect(html).not.toContain(">Copy<");
 		expect(html).toContain('data-code-index="0"');
 	});
 
