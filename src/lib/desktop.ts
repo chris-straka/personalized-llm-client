@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { tauriBackendAvailable } from "./secrets";
 
 /**
- * Desktop summon kit + study-sheet output (Stage desktop-kit): thin
+ * Desktop summon kit + study-sheet output: thin
  * frontend over the Rust `desktop.rs` bridge (tray, single instance,
  * global summon, `ccez://` deep links, sleep guard, sheet export) plus
  * the user-visible half — share-out and print-to-PDF of a chat.

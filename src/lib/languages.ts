@@ -1,5 +1,5 @@
 /**
- * Reply languages (Round 2). Choosing one appends a "Reply in X." suffix to
+ * Reply languages. Choosing one appends a "Reply in X." suffix to
  * the system prompt and sets the Latin-script voice locale. Groups keep the
  * requested order; every language renders as its chosen marker (flag emoji
  * for national languages, thematic emoji for classics).
