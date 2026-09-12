@@ -1,5 +1,37 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { seedChat } from "./helpers";
+
+/** Drop a canvas-painted PNG onto the composer (in-page: DataTransfer
+is not serializable across the protocol, so dispatchEvent can't carry
+it from the test runner). */
+async function dropImage(page: Page, name = "blue.png"): Promise<void> {
+	await page.evaluate((fileName) => {
+		const canvas = document.createElement("canvas");
+		canvas.width = 8;
+		canvas.height = 8;
+		const ctx = canvas.getContext("2d");
+		if (!ctx) throw new Error("Canvas 2D unavailable");
+		ctx.fillStyle = "#336699";
+		ctx.fillRect(0, 0, 8, 8);
+		return new Promise<void>((resolve, reject) => {
+			canvas.toBlob((blob) => {
+				try {
+					if (!blob) throw new Error("canvas produced no blob");
+					const transfer = new DataTransfer();
+					transfer.items.add(new File([blob], fileName, { type: "image/png" }));
+					const target = document.querySelector(".prompt");
+					if (!target) throw new Error("missing composer");
+					target.dispatchEvent(
+						new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer })
+					);
+					resolve();
+				} catch (error) {
+					reject(error);
+				}
+			}, "image/png");
+		});
+	}, name);
+}
 
 test.beforeEach(async ({ page }) => {
 	await seedChat(page, [{ role: "assistant", content: "alpha beta gamma delta" }]);
@@ -42,6 +74,43 @@ test("export button downloads the chat as markdown", async ({ page }) => {
 	expect(download.suggestedFilename()).toMatch(/^chat-\d{4}-\d{2}-\d{2}\.md$/);
 	const path = await download.path();
 	expect(path).toBeTruthy();
+});
+
+test("dropped images land as cards with a [Pasted image] tag", async ({ page }) => {
+	await dropImage(page);
+	const card = page.locator(".attachments li.card");
+	await expect(card).toBeVisible({ timeout: 15_000 });
+	await expect(card.locator(".thumb img")).toBeVisible();
+	await expect(card.locator(".tok")).toBeVisible();
+	await expect(card.locator('button[aria-label="Copy attachment"] svg')).toHaveCount(1);
+	await expect(
+		card.locator('button[aria-label="Remove attachment"] svg')
+	).toHaveCount(1);
+	// The tag reads [Pasted image] on its own line, cursor after it.
+	await expect(page.locator(".cm-content")).toContainText("[Pasted image]");
+});
+
+test("image pill and tag remove each other", async ({ page }) => {
+	await dropImage(page);
+	const card = page.locator(".attachments li.card");
+	await expect(card).toBeVisible({ timeout: 15_000 });
+	// Pill → tag: the pill's X takes the marker line with it.
+	await page.locator('.attachments button[aria-label="Remove attachment"]').click();
+	await expect(card).toHaveCount(0);
+	await expect(page.locator(".cm-content")).not.toContainText("[Pasted image]");
+});
+
+test("deleting the tag drops the pill", async ({ page }) => {
+	await dropImage(page);
+	const card = page.locator(".attachments li.card");
+	await expect(card).toBeVisible({ timeout: 15_000 });
+	// Tag → pill: replacing the whole draft (markers included) drops
+	// the image attachment, like hand-deleting the tag line.
+	await page.locator(".cm-content").click();
+	await page.keyboard.press("Control+a");
+	await page.keyboard.type("hello");
+	await expect(card).toHaveCount(0);
+	await expect(page.locator(".cm-content")).toContainText("hello");
 });
 
 test("screenshot button renders where screen capture is supported", async ({ page }) => {
