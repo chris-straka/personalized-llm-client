@@ -150,7 +150,11 @@ cut; release chain outcome still unconfirmed (see Now).
   ""); both overlays gained an icon-only copy button (`copyAnnotation`:
   quote + comment). Unit-locked in `annotations.test.ts`; pinned in
   `annotations.e2e.ts`.)
-- [ ] Thinking text uses the current chat font size.
+- [x] Thinking text uses the current chat font size.
+  (Verified Sep 2026 on work/stream-annotation2: `.ccez-thoughts` reads
+  `calc(0.92rem * var(--font-scale, 1))`, the same size as chat text;
+  pinned by the `thoughts scale with font size` spec in
+  `message-code.e2e.ts`. No code change needed.)
 - [ ] Code Run button + model-version bump + Cloudflare-domain hosting (later).
 - [ ] Character components overlay for Han text (offline table already in
       `src/lib/radicals.ts`): needs a better name than "Radicals"; returns to the
