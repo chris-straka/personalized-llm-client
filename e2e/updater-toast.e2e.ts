@@ -29,7 +29,7 @@ test("update check toasts instead of popping the layout", async ({ page }) => {
 		});
 	const before = await height();
 	await panel.locator('button:has-text("Check for updates")').click();
-	await expect(page.locator(".toast")).toContainText("Updater unavailable");
+	await expect(page.locator(".toast")).toContainText("Dev builds don't check for updates");
 	await expect(panel.locator("p.result")).toHaveCount(0);
 	// No inline status block grew the panel content.
 	await expect.poll(height).toBe(before);

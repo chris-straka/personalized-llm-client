@@ -8421,12 +8421,14 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	main.plain-user article.user .bubble {
 		background: none;
 		/* No bottom pad: the action row below sits as close as the
-		assistant's (its margin is the whole gap). Same 85% wrap cap
-		as the shaded bubble, so plain text keeps its right dock. */
+		assistant's (its margin is the whole gap). 100%, not 85%: the
+		article already caps at min(85%, chat-width), and 85% here
+		resolves against the shrink-wrapped article itself — same early
+		wrap the shaded bubble's rule calls out. */
 		padding: 0.5rem 0 0;
 		text-align: left;
 		width: fit-content;
-		max-width: 85%;
+		max-width: 100%;
 		margin-left: auto;
 	}
 	article.selected {
