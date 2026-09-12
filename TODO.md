@@ -171,9 +171,14 @@ cut; release chain outcome still unconfirmed (see Now).
   (both ends must sit in one equation); `quoteFragmentText` drops
   `.ccez-math-head` chrome; the re-stamp unwraps the stale fragment
   wash with every other mark. Unit-locked in `annotations-dom.test.ts`.)
-- [ ] Undecided: new chats show one past annotation + AI answer (no expletives,
+- [x] Undecided: new chats show one past annotation + AI answer (no expletives,
       trash-can delete, disappears after first message, "What can I do for you?"
   - 3s pause). Decide/build or drop.
+  (Decided Sep 2026 on work/stream-annotation2: DROP. A faked past
+  annotation is either real chat content (pollutes provider context and
+  baked-block parsing) or a lying mock; delete + vanish-after-first-message
+  is fiddly one-time state, and the empty hero already teaches the blank
+  slate. Revisit only with a real first-run cue, never a fake history.)
 
 ## Pile: reading aids + voice
 
