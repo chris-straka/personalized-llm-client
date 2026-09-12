@@ -10,8 +10,15 @@
 //! deliberately match it so shell and preview agree.
 //!
 //! Pure and unit-tested on any host.
+//!
+//! Decision (Sep 2026): WIRED UP, not dead code — `tts_identify_lang`
+//! in `tts.rs` calls `identify_lang_offline` on every non-Apple target,
+//! and `MIN_WORDS` / `MIN_SCORE` / the helpers are all used below. The
+//! module still compiles on macOS/iOS (so its unit tests run on the
+//! dev host), where nothing calls it — hence the Apple-only allow.
 
-#![allow(dead_code)] // Non-Apple shim: compiled everywhere, called off macOS/iOS.
+//! Non-Apple shim: compiled everywhere, called off macOS/iOS.
+#![cfg_attr(any(target_os = "macos", target_os = "ios"), allow(dead_code))]
 
 /// Minimum Latin tokens before a sample counts as classifiable.
 pub const MIN_WORDS: usize = 10;
