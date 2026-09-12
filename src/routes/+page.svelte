@@ -1673,6 +1673,39 @@ import { isPromptIdle } from "$lib/chrome";
 	let markerSyncMuted = false;
 	let prevMarkerCount = 0;
 
+	/**
+	 * Attachment-card copy (icon-only, reusing the message-button copy
+	 * glyph): text attachments copy their inlined text; images copy the
+	 * image bytes (ClipboardItem) so a paste lands the picture, not a
+	 * data URL. Toasts read "Copied" like every other copy path.
+	 */
+	function copyAttachment(att: Attachment): void {
+		if (att.kind === "text" && att.text !== null) {
+			copyPlain(att.text, "Copied");
+			return;
+		}
+		if (att.kind === "image" && att.dataUrl) {
+			const failed = "Couldn't copy to the clipboard.";
+			if (!navigator.clipboard?.write) {
+				flashToast(failed);
+				return;
+			}
+			void (async () => {
+				try {
+					const blob = await (await fetch(att.dataUrl as string)).blob();
+					await navigator.clipboard.write([
+						new ClipboardItem({ [blob.type || "image/jpeg"]: blob })
+					]);
+					flashToast("Copied");
+				} catch {
+					flashToast(failed);
+				}
+			})();
+			return;
+		}
+		flashToast("Nothing to copy yet.");
+	}
+
 	function removeAttachment(id: string): void {
 		const removed = attachments.find((a) => a.id === id);
 		attachments = attachments.filter((a) => a.id !== id);
@@ -5782,24 +5815,36 @@ import { isPromptIdle } from "$lib/chrome";
 		{#if attachments.length > 0 || attachError}
 			<ul class="attachments" class:composer-idle={promptIdle}>
 				{#each attachments as att (att.id)}
-					<li>
-						{#if att.kind === "image"}
+					<li class:card={att.kind === "image" && !!att.dataUrl}>
+						{#if att.kind === "image" && att.dataUrl}
 							<button
 								type="button"
 								class="thumb"
 								title="Toggle preview"
+								aria-label="Toggle image preview"
+								aria-pressed={previewId === att.id}
 								onclick={() => (previewId = previewId === att.id ? null : att.id)}
 							>
-								IMG
+								<img src={att.dataUrl} alt="" />
 							</button>
 						{:else}
 							<span class="file-kind" aria-hidden="true">FILE</span>
 						{/if}
 						<span class="name" title="{att.name} · ~{att.tokens} tokens">{att.name}</span>
 						<span class="tok">~{att.tokens}</span>
+						<button
+							type="button"
+							class="card-btn"
+							aria-label="Copy attachment"
+							title="Copy attachment"
+							onclick={() => copyAttachment(att)}
+						>
+							<ActionIcon kind="copy" />
+						</button>
 						{#if att.kind === "image" && att.dataUrl}
 							<button
 								type="button"
+								class="ocr-btn"
 								aria-label="Recognize text in image"
 								title="Recognize text in image"
 								disabled={ocrBusyId === att.id}
@@ -5808,8 +5853,14 @@ import { isPromptIdle } from "$lib/chrome";
 								{ocrBusyId === att.id ? "…" : "OCR"}
 							</button>
 						{/if}
-						<button type="button" aria-label="Remove attachment" onclick={() => removeAttachment(att.id)}>
-							×
+						<button
+							type="button"
+							class="card-btn"
+							aria-label="Remove attachment"
+							title="Remove attachment"
+							onclick={() => removeAttachment(att.id)}
+						>
+							<ActionIcon kind="close" />
 						</button>
 					</li>
 				{/each}
@@ -8316,8 +8367,54 @@ import { isPromptIdle } from "$lib/chrome";
 		color: #3a3a3c;
 	}
 	.attachments .thumb {
-		font-size: 0.9rem;
+		border: 0;
+		background: none;
+		cursor: pointer;
+		line-height: 0;
 		padding: 0;
+	}
+	/* Image cards: thumbnail preview up top, token/copy/OCR/X footer
+	below (the strip itself stays one scrolling row — only the card
+	wraps internally). */
+	.attachments li.card {
+		flex-wrap: wrap;
+		row-gap: 0.3rem;
+		border-radius: 12px;
+		padding: 0.4rem 0.5rem;
+		max-width: 12rem;
+		align-items: center;
+	}
+	.attachments li.card .thumb {
+		flex: 1 1 100%;
+	}
+	.attachments .thumb img {
+		display: block;
+		width: 100%;
+		height: 4.5rem;
+		object-fit: cover;
+		border-radius: 8px;
+	}
+	/* Card buttons are icon-only (message-button copy glyph, close
+	glyph), sized to the card's font so they track it. */
+	.attachments .card-btn {
+		display: inline-flex;
+		align-items: center;
+		padding: 0.15rem;
+		font-size: 0.78rem;
+	}
+	.attachments .card-btn :global(.action-glyph) {
+		height: 1em;
+	}
+	.attachments .ocr-btn {
+		font-size: 0.72rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		padding: 0.15rem 0.3rem;
+		border-radius: 6px;
+	}
+	.attachments .ocr-btn:disabled {
+		opacity: 0.45;
+		cursor: default;
 	}
 	.preview {
 		display: block;
