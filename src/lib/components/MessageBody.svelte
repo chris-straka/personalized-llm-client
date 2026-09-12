@@ -13,6 +13,7 @@
 		foldSegments,
 		pasteFoldButton,
 		highlightRendered,
+		mathCopyText,
 		type RenderedMessage
 	} from "$lib/render";
 	import type { ChatMsg, ChatMsgId } from "$lib/chat";
@@ -316,29 +317,18 @@
 			onFoldToggle?.(Number(fold.dataset.pasteFold ?? -1));
 			return;
 		}
-		// Buttonless math chrome: the bar folds, the body copies. Clicks
-		// resolve against the wrapper (the buttons are gone).
+		// Headless math chrome: display blocks are body-only (folding
+		// rides `data-folded`, wired to right-click elsewhere).
 		const mathWrap = (event.target as HTMLElement).closest<HTMLElement>("[data-math-index]");
 		if (mathWrap && rendered) {
 			const index = Number(mathWrap.dataset.mathIndex ?? -1);
 			const entry = rendered.maths[index];
 			if (!entry) return;
-			const bar = (event.target as HTMLElement).closest<HTMLElement>(".ccez-math-head");
-			if (bar) {
-				const folded = mathWrap.dataset.folded === "1";
-				if (folded) {
-					mathWrap.removeAttribute("data-folded");
-					bar.setAttribute("aria-expanded", "true");
-				} else {
-					mathWrap.dataset.folded = "1";
-					bar.setAttribute("aria-expanded", "false");
-				}
-				return;
-			}
-			// Display body click copies the TeX plus a toast. Inline
-			// math stays bare and copies nothing (its TeX is one
-			// message-copy away). A live selection means the click ends
-			// a drag — never clobber the clipboard for it.
+			// Display body click copies the TeX with its `$$`
+			// delimiters plus a toast. Inline math stays bare and
+			// copies nothing (its TeX is one message-copy away). A live
+			// selection means the click ends a drag — never clobber the
+			// clipboard for it.
 			if (
 				mathWrap.classList.contains("ccez-math") &&
 				(event.target as HTMLElement).closest(".ccez-math-body") &&
@@ -346,52 +336,36 @@
 			) {
 				if (!navigator.clipboard) onToast?.("Couldn't copy to the clipboard.");
 				else
-					void navigator.clipboard.writeText(entry.tex).then(
+					void navigator.clipboard.writeText(mathCopyText(entry.tex)).then(
 						() => onToast?.("Copied"),
 						() => onToast?.("Couldn't copy to the clipboard.")
 					);
 			}
 			return;
 		}
-		// Buttonless code chrome, same contract as math: the head bar
-		// folds, the body copies with a toast.
+		// Headless code chrome: the pre is a native selection surface,
+		// so clicks there never copy. Copy lives on the icon button
+		// alone (folding rides `data-folded`, wired elsewhere).
 		const codeBlock = (event.target as HTMLElement).closest<HTMLElement>(".ccez-code");
 		if (!codeBlock || !rendered) return;
-		const index = Number(codeBlock.dataset.codeIndex ?? -1);
+		const copyButton = (event.target as HTMLElement).closest<HTMLElement>("[data-code-copy]");
+		if (!copyButton) return;
+		const index = Number(copyButton.dataset.codeCopy ?? -1);
 		const entry = rendered.codes[index];
 		if (!entry) return;
-		const bar = (event.target as HTMLElement).closest<HTMLElement>(".ccez-code-head");
-		if (bar) {
-			const folded = codeBlock.dataset.folded === "1";
-			if (folded) {
-				codeBlock.removeAttribute("data-folded");
-				bar.setAttribute("aria-expanded", "true");
-			} else {
-				codeBlock.dataset.folded = "1";
-				bar.setAttribute("aria-expanded", "false");
-			}
-			return;
-		}
-		// Body click copies the code plus a toast — never while a
-		// selection is live, so drag-selects don't clobber the clipboard.
-		if (
-			(event.target as HTMLElement).closest("pre") &&
-			window.getSelection()?.isCollapsed !== false
-		) {
-			if (!navigator.clipboard) onToast?.("Couldn't copy to the clipboard.");
-			else
-				void navigator.clipboard.writeText(entry.code).then(
-					() => onToast?.("Copied"),
-					() => onToast?.("Couldn't copy to the clipboard.")
-				);
-		}
+		if (!navigator.clipboard) onToast?.("Couldn't copy to the clipboard.");
+		else
+			void navigator.clipboard.writeText(entry.code).then(
+				() => onToast?.("Copied"),
+				() => onToast?.("Couldn't copy to the clipboard.")
+			);
 	}
 </script>
 
 {#if folded}
 	<div class="folded-preview">{foldPreview ?? (message.content.split("\n")[0] ?? "").slice(0, 140)}</div>
 {:else}
-	<!-- Delegated code fold/copy buttons live inside the sanitized HTML. -->
+	<!-- Delegated in-block code copy buttons live inside the sanitized HTML. -->
 	<!-- The key swaps only for pinned model-aid text: previews and local
 	ruby render in place (readings fading in) so hovering never flashes
 	the body or moves the row. -->
@@ -592,6 +566,7 @@
 		color: #6e6e73;
 	}
 	.rendered :global(.ccez-code) {
+		position: relative;
 		margin: 0.5em 0;
 		border: 1px solid #e5e5ea;
 		border-radius: 8px;
@@ -602,36 +577,61 @@
 		max-width: 100%;
 		min-width: min(12rem, 100%);
 	}
-	/* Buttonless code chrome: the language-label bar folds, the body
-	copies. The bar is a real button so keyboard still folds. */
-	.rendered :global(button.ccez-code-head) {
-		display: flex;
+	/* Headless code chrome: the pre is a native selection surface
+	(I-beam, selectable text, never copy-on-click). Copy lives on the
+	icon button alone — ghosted like the message-button copy control,
+	pinned top-right inside the block. */
+	.rendered :global(.ccez-code-copy) {
+		position: absolute;
+		top: 0.3rem;
+		right: 0.3rem;
+		display: inline-flex;
 		align-items: center;
-		gap: 0.5rem;
-		width: 100%;
 		border: 0;
-		padding: 0.25rem 0.6rem;
-		background: #f1f1f4;
-		font-size: 0.75rem;
-		text-align: left;
+		background: none;
+		padding: 0.15rem;
+		line-height: 0;
+		color: #6e6e73;
+		color: var(--muted);
 		cursor: pointer;
-		color: inherit;
 	}
-	.rendered :global(.ccez-code-lang) {
-		font-weight: 650;
+	.rendered :global(.ccez-code-copy:hover) {
+		color: #1c1c1e;
+		color: var(--ink);
+	}
+	.rendered :global(.ccez-code-copy .action-glyph) {
+		height: 1rem;
+		width: 1rem;
 	}
 	.rendered :global(.ccez-code pre) {
 		margin: 0;
 		border-radius: 0;
 		background: #fff;
-		cursor: pointer;
+		cursor: text;
+		user-select: text;
+		-webkit-user-select: text;
+	}
+	/* Folded code swaps the pre for its collapsed label
+	(`python · 13 LOC`), so the fold still reads as code. */
+	.rendered :global(.ccez-code-foldedlabel) {
+		display: none;
+		padding: 0.4rem 0.6rem;
+		background: #fff;
+		font-family:
+			ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+		font-size: 0.75rem;
+		color: #6e6e73;
+		white-space: nowrap;
 	}
 	.rendered :global(.ccez-code[data-folded="1"] pre) {
 		display: none;
 	}
-	/* LaTeX math (main chat only): buttonless chrome — display blocks
-	get a fold bar (chevron plus TeX preview, no labels), and clicking
-	the body copies the TeX. Inline math renders bare. */
+	.rendered :global(.ccez-code[data-folded="1"] .ccez-code-foldedlabel) {
+		display: block;
+	}
+	/* LaTeX math (main chat only): body-only display blocks (folding
+	rides `data-folded`), and clicking the body copies the TeX with its
+	delimiters. Inline math renders bare. */
 	.rendered :global(.ccez-math) {
 		margin: 0.5em 0;
 		border: 1px solid #e5e5ea;
@@ -640,37 +640,6 @@
 		width: fit-content;
 		max-width: 100%;
 		min-width: min(12rem, 100%);
-	}
-	.rendered :global(button.ccez-math-head) {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		width: 100%;
-		border: 0;
-		padding: 0.25rem 0.6rem;
-		background: #f1f1f4;
-		font-size: 0.75rem;
-		text-align: left;
-		cursor: pointer;
-		color: inherit;
-	}
-	.rendered :global(.ccez-math-chev) {
-		flex: none;
-		color: #6e6e73;
-		transition: transform 0.15s ease;
-	}
-	.rendered :global(.ccez-math[data-folded="1"] .ccez-math-chev) {
-		transform: rotate(90deg);
-	}
-	.rendered :global(.ccez-math-tex) {
-		font-family:
-			ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-		font-size: 0.85em;
-		color: #6e6e73;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		min-width: 0;
 	}
 	.rendered :global(.ccez-math-body) {
 		padding: 0.6rem 0.8rem;
@@ -697,6 +666,9 @@
 		overflow: visible;
 		cursor: text;
 	}
+	/* KaTeX inherits the theme ink and is never colorized: a second
+	math palette would fight the theme and hurt readability, so
+	equations follow the message color in both themes for free. */
 	.rendered :global(.ccez-math .katex),
 	.rendered :global(.ccez-math-inline .katex) {
 		color: inherit;
@@ -907,25 +879,15 @@
 	:global(html[data-theme="dark"]) .rendered :global(.ccez-code) {
 		border-color: #38383a;
 	}
-	:global(html[data-theme="dark"]) .rendered :global(.ccez-code-head) {
-		background: #2c2c2e;
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-code-copy) {
+		color: #98989f;
 	}
-	:global(html[data-theme="dark"]) .rendered :global(.ccez-code-head button) {
-		background: #1c1c1e;
-		border-color: #48484a;
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-code-copy:hover) {
 		color: #f2f2f7;
 	}
 	:global(html[data-theme="dark"]) .rendered :global(.ccez-math),
 	:global(html[data-theme="dark"]) .rendered :global(.ccez-math-inline) {
 		border-color: #38383a;
-	}
-	:global(html[data-theme="dark"]) .rendered :global(.ccez-math-head) {
-		background: #2c2c2e;
-	}
-	:global(html[data-theme="dark"]) .rendered :global(.ccez-math-head button) {
-		background: #1c1c1e;
-		border-color: #48484a;
-		color: #f2f2f7;
 	}
 	:global(html[data-theme="dark"]) .rendered :global(.ccez-math-body),
 	:global(html[data-theme="dark"]) .rendered :global(.ccez-math-inline) {
@@ -933,6 +895,10 @@
 	}
 	:global(html[data-theme="dark"]) .rendered :global(.ccez-code pre) {
 		background: #101013;
+	}
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-code-foldedlabel) {
+		background: #101013;
+		color: #98989f;
 	}
 	/* Inline code pills: the light background has no dark twin, so
 	filenames read white-on-white without this. */

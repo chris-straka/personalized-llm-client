@@ -14,7 +14,9 @@ import {
 	highlightRendered,
 	extractMath,
 	mathHtml,
-	mathTexPreview
+	mathTexPreview,
+	foldedCodeLabel,
+	mathCopyText
 } from "./render";
 
 describe("thoughts", () => {
@@ -54,22 +56,37 @@ describe("sources stripping", () => {
 });
 
 describe("markdown rendering", () => {
-	it("renders code blocks with a language-label fold bar, no buttons", () => {
+	it("renders headless code blocks: copy icon button plus folded label, no fold bar", () => {
 		const { html, codes } = renderMarkdown("```python\nprint(1)\n```");
 		expect(codes).toEqual([{ lang: "python", code: "print(1)" }]);
-		expect(html).toContain("ccez-code-lang");
-		expect(html).toContain("python");
-		expect(html).toContain('aria-label="Fold code block"');
+		expect(html).not.toContain("ccez-code-head");
+		expect(html).not.toContain("ccez-code-lang");
 		expect(html).not.toContain("data-code-action");
 		expect(html).not.toContain(">Fold<");
 		expect(html).not.toContain(">Copy<");
 		expect(html).toContain('data-code-index="0"');
+		// Copy icon button: accessible name, per-block index, shared glyph.
+		expect(html).toContain('class="ccez-code-copy"');
+		expect(html).toContain('data-code-copy="0"');
+		expect(html).toContain('aria-label="Copy code block"');
+		expect(html).toContain("<svg");
+		expect(html).toContain("action-glyph");
+		// Folded label ships in the markup (stylesheet reveals it on fold).
+		expect(html).toContain("ccez-code-foldedlabel");
+		expect(html).toContain("python · 1 LOC");
 	});
 
-	it("sanitizer keeps fold-bar a11y attributes", () => {
+	it("labels multi-line blocks with their line count", () => {
+		const { html } = renderMarkdown("```js\na\nb\nc\n```");
+		expect(html).toContain("js · 3 LOC");
+	});
+
+	it("renders body-only display math: no fold bar, body kept for fold/copy", () => {
 		const { html } = renderMarkdown("Here:\n\n$$x^2$$\n\ndone");
-		expect(html).toContain('aria-label="Fold equation"');
-		expect(html).toContain('aria-expanded="true"');
+		expect(html).not.toContain("ccez-math-head");
+		expect(html).toContain('data-math-index="0"');
+		expect(html).toContain("ccez-math-body");
+		expect(html).toContain("katex");
 	});
 
 	it("strips scripts and dangerous attributes", () => {
@@ -161,12 +178,14 @@ describe("highlighting", () => {
 });
 
 describe("latex math", () => {
-	it("renders display math with a chevron bar plus TeX preview, no labels or buttons", () => {
+	it("renders display math body-only, with no chrome at all", () => {
 		const { html, maths } = renderMarkdown("Here:\n\n$$x^2 + y^2$$\n\ndone");
 		expect(maths).toEqual([{ kind: "display", tex: "x^2 + y^2", raw: "$$x^2 + y^2$$" }]);
 		expect(html).toContain('data-math-index="0"');
-		expect(html).toContain("ccez-math-chev");
-		expect(html).toContain("x^2 + y^2");
+		expect(html).toContain("ccez-math-body");
+		expect(html).not.toContain("ccez-math-head");
+		expect(html).not.toContain("ccez-math-chev");
+		expect(html).not.toContain("ccez-math-tex");
 		expect(html).not.toContain("ccez-math-lang");
 		expect(html).not.toContain("data-math-action");
 		expect(html).not.toContain(">Fold<");
@@ -277,6 +296,22 @@ describe("token estimates", () => {
 		expect(estimateTextTokens("")).toBe(1);
 		expect(estimateTextTokens("abcd")).toBe(1);
 		expect(estimateTextTokens("abcde")).toBe(2);
+	});
+});
+
+describe("foldedCodeLabel", () => {
+	it("names the language and line count with a middle dot", () => {
+		expect(foldedCodeLabel("python", 13)).toBe("python · 13 LOC");
+		expect(foldedCodeLabel("text", 1)).toBe("text · 1 LOC");
+		expect(foldedCodeLabel("js", 0)).toBe("js · 0 LOC");
+	});
+});
+
+describe("mathCopyText", () => {
+	it("wraps TeX in $$ delimiters, verbatim", () => {
+		expect(mathCopyText("x^2 + y^2")).toBe("$$x^2 + y^2$$");
+		expect(mathCopyText("\nx\n")).toBe("$$\nx\n$$");
+		expect(mathCopyText("")).toBe("$$$$");
 	});
 });
 
