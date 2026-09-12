@@ -71,7 +71,7 @@ test("Inspect opens the overlay with radicals, strokes, and definition", async (
 	await expect(modal).toHaveCount(0);
 });
 
-test("multi-character highlight shows Parts instead of Inspect", async ({ page }) => {
+test("multi-character highlight shows Annotate alone", async ({ page }) => {
 	await seedWithInspect(page, true, "漢字のテストを確認しました");
 	// Triple-click selects the whole paragraph (multi-char by construction).
 	const body = page.locator("article .rendered").first();
@@ -80,9 +80,22 @@ test("multi-character highlight shows Parts instead of Inspect", async ({ page }
 	await page.mouse.click(box.x + 20, box.y + box.height / 2, { clickCount: 3 });
 	const menu = page.locator(".sel-menu");
 	await expect(menu).toBeVisible();
-	await expect(menu.locator("button")).toHaveCount(2);
+	// Annotate is alone: Inspect is single-Han-char only, and the
+	// multi-char Parts companion is gone by decision.
+	await expect(menu.locator("button")).toHaveCount(1);
+	await expect(menu.locator('button:has-text("Annotate")')).toBeVisible();
 	await expect(menu.locator('button:has-text("Inspect")')).toHaveCount(0);
-	await expect(menu.locator('button:has-text("Parts")')).toBeVisible();
+	await expect(menu.locator('button:has-text("Parts")')).toHaveCount(0);
+});
+
+test("single kana highlight shows Annotate alone", async ({ page }) => {
+	await seedWithInspect(page, true, "あ");
+	await selectWord(page);
+	const menu = page.locator(".sel-menu");
+	await expect(menu).toBeVisible();
+	await expect(menu.locator("button")).toHaveCount(1);
+	await expect(menu.locator('button:has-text("Annotate")')).toBeVisible();
+	await expect(menu.locator('button:has-text("Inspect")')).toHaveCount(0);
 });
 
 test("settings panel gates the feature behind a checkbox", async ({ page }) => {

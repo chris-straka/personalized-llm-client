@@ -137,7 +137,6 @@
 	import { hoverTranslateWithProvider } from "$lib/builtinAi";
 	import { switchChatWithTransition } from "$lib/viewTransitions";
 	import { getInspectData, shouldShowInspect } from "$lib/inspect";
-	import { openHanPartsOverlay, shouldShowHanParts } from "$lib/radicals";
 	import {
 		clampSideviewWidth,
 		hideSideview,
@@ -758,10 +757,10 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	 */
 	let inspectChar = $state<string | null>(null);
 	/**
-	 * Reading locale for the Han overlays (Inspect + Parts): kana
-	 * present reads as Japanese, else Chinese — the same rule as
-	 * `ttsLangFor`. Han-only text is genuinely ambiguous, so both
-	 * overlays offer a small JP/中文 toggle that writes this state.
+	 * Reading locale for the Inspect overlay: kana present reads as
+	 * Japanese, else Chinese — the same rule as `ttsLangFor`.
+	 * Han-only text is genuinely ambiguous, so the overlay offers a
+	 * small JP/中文 toggle that writes this state.
 	 */
 	let inspectLang = $state<HanOverlayLang>("zh");
 	/** Current step of the schematic stroke preview (1-based). */
@@ -793,16 +792,6 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		if (!shouldShowInspect(quote, settings.inspectEnabled)) return;
 		inspectChar = quote;
 		inspectLang = hanOverlayLangFor(quote);
-		clearSelection();
-		selMenu = null;
-	}
-	/** Open the character components overlay (Parts) for a multi-char Han highlight. */
-	function openHanParts(): void {
-		if (!selMenu) return;
-		const quote = selMenu.quote.trim();
-		if (!shouldShowHanParts(quote, settings.inspectEnabled)) return;
-		inspectLang = hanOverlayLangFor(quote);
-		openHanPartsOverlay({ x: selMenu.x, y: selMenu.y }, quote);
 		clearSelection();
 		selMenu = null;
 	}
@@ -6438,8 +6427,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 					click-away exemption in onMouseUp, or the tap collapses
 					the highlight and clears the menu before onclick fires.
 					Inspect docks beside Annotate for single Han characters
-					with the setting on; Parts docks there for
-					multi-character Han highlights. -->
+					with the setting on; anything else gets Annotate alone. -->
 					<button
 						type="button"
 						class="ann-dock"
@@ -6462,18 +6450,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 							onclick={openInspect}
 						>Inspect</button>
 					{/if}
-					{#if shouldShowHanParts(selMenu.quote, settings.inspectEnabled)}
-						<button
-							type="button"
-							class="ann-dock"
-							aria-label="Show character components"
-							transition:fade={{ duration: 150 }}
-							onmousedown={noteMenuPress}
-							ontouchstart={noteMenuBtnTouch}
-							ontouchend={inspectTouch}
-							onclick={openHanParts}
-						>Parts</button>
-					{/if}
+
 				{/if}
 				{#if annotations.length > 0}
 					<div class="ann-wrap" class:pinned={reviewOpen}>
@@ -6801,8 +6778,8 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			composer instead (the native callout owns the text space).
 			Copy and Read Aloud live on the message action rows
 			instead of doubling here. Inspect joins Annotate only for
-			a single kanji/hanzi highlight with the setting on; Parts
-			joins it for multi-character Han highlights. -->
+			a single kanji/hanzi highlight with the setting on;
+			everything else gets Annotate alone. -->
 			<button
 				type="button"
 				onclick={annotate}
@@ -6819,16 +6796,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 					onclick={openInspect}
 				>Inspect</button>
 			{/if}
-			{#if shouldShowHanParts(selMenu.quote, settings.inspectEnabled)}
-				<button
-					type="button"
-					aria-label="Show character components"
-					onmousedown={noteMenuPress}
-					ontouchstart={noteMenuBtnTouch}
-					ontouchend={inspectTouch}
-					onclick={openHanParts}
-				>Parts</button>
-			{/if}
+
 		</div>
 	{/if}
 

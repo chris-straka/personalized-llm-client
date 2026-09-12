@@ -228,17 +228,18 @@ cut; release chain outcome still unconfirmed (see Now).
       Open question: offline dictionary for radical/stroke/Unihan — what source,
       how big? (Inspect currently reports unavailable offline.)
       (Done Sep 2026 on work/h1-han: overlay named "Character components",
-      sel-menu button "Parts" (short, neutral across the Han block — "Radicals"
-      is a misnomer for immediate-component splits); kana = Japanese else
-      Chinese default with a JP/中文 toggle on ambiguous Han-only text;
-      dict decision measured, not bundled — Unihan.zip 8,518,517 B,
+      sel-menu button "Parts"; kana = Japanese else Chinese default with a
+      JP/中文 toggle. REVISED Sep 2026 per user rule — Annotate travels
+      alone except single-Han-char highlights, whose only friend is Inspect:
+      Parts button + multi-char overlay removed (Inspect already shows
+      components for single chars, toggle included); `han-parts.e2e.ts`
+      deleted, `inspect.e2e.ts` pins Annotate-alone + single-kana-alone.
+      Dict decision measured, not bundled — Unihan.zip 8,518,517 B,
       CC-CEDICT export zip 3,974,014 B, KANJIDIC2 xml.gz 1,488,576 B,
-      cjkvi-ids ids.txt 2,161,631 B GPLv2 (needs an IDS parser) — all over
-      the ~300KB budget or copyleft, so the curated table stays with a
-      build-time per-character extraction as follow-up. Inspect keeps its
-      name; its "Radicals:" fact is now "Components:". `radicals.test.ts`
-      x19 + `reading.test.ts` x34 + `han-parts.e2e.ts` 5/5 + `inspect.e2e.ts`
-      5/5 green. No release UI claims.)
+      cjkvi-ids ids.txt 2,161,631 B GPLv2 via CHISE (needs an IDS parser);
+      MIT alternative spotted for research: amake/cjk-decomp (84,269
+      records, `char:type(part,part)`). Curated 57-entry table stays as
+      Inspect's data layer. No release UI claims.)
 
 ## Pile: annotation
 

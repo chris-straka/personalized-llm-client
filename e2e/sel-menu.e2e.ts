@@ -27,7 +27,7 @@ test.describe("desktop", () => {
 	/** The menu is Annotate alone here (the Han aids stay off by
 	default): the OS bubble owns Copy/Translate, and whole-message
 	copy/speak live on the action rows. With the Inspect setting on,
-	Han highlights add Inspect (single char) or Parts (multi-char). */
+	Only a single-Han-char highlight adds Inspect; everything else is Annotate alone. */
 	test("selection menu offers Annotate alone", async ({ page }) => {
 		await selectWord(page);
 		const menu = page.locator(".sel-menu");
