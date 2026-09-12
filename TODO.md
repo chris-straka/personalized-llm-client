@@ -379,7 +379,10 @@ to whole words` in `annotations-ux.e2e.ts`. No code change needed.)
       header button. ("sidebar row export downloads markdown" e2e green.)
 - [x] Idle-hide: skip when chat empty or content shorter than viewport.
       ("empty chat never hides" + "short thread keeps the composer" e2e green.)
-- [ ] Settings checkbox gap inconsistency (find + fix).
+- [x] Settings checkbox gap inconsistency (find + fix).
+      (Verified Sep 2026 on work/w1-waypoint: already fixed —
+      `.check + .check` gives stacked boxes one 0.55rem rhythm in and out
+      of fieldsets, with the in-row hover toggles explicitly zeroed.)
 - [x] Remove CJK font + lesson-audio settings sections (lesson-audio froze app).
       (Done on work/stream-chrome2: "settings show no study-fonts or
       lesson-audio sections" voice-data e2e green.)
