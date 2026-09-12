@@ -167,6 +167,7 @@
 		LOCAL_AID_ADD_TITLE,
 		MODEL_AIDS,
 		MODEL_AID_FOR_SCRIPT,
+		extractWordAt,
 		ttsLangFor,
 		runModelAid,
 		aidTargetLines,
@@ -5397,9 +5398,24 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			}
 			onSelectEnd(event, event.clientX);
 		};
-		// Desktop right-click reads aloud (the selection, else the whole
-		// message; a playing message stops) AND opens the native menu:
-		// no preventDefault here, so Copy stays available beside speech.
+		// Word under the cursor, or "" on open space / non-text.
+		function wordUnderCursor(event: MouseEvent, body: Element): string {
+			let range: Range | null = null;
+			try {
+				if (typeof document.caretRangeFromPoint === "function") {
+					range = document.caretRangeFromPoint(event.clientX, event.clientY);
+				}
+			} catch {
+				range = null;
+			}
+			const node = range?.startContainer;
+			if (!node || node.nodeType !== Node.TEXT_NODE || !body.contains(node)) return "";
+			return extractWordAt(node.textContent ?? "", range?.startOffset ?? 0);
+		}
+		// Desktop right-click reads aloud (the selection, else the word
+		// under the cursor, else the whole message; a playing message
+		// stops) AND opens the native menu: no preventDefault here, so
+		// Copy stays available beside speech.
 		// (Android long-press never starts audio — it summons the menu.)
 		const onContextMenu = (event: MouseEvent) => {
 			const target = event.target as HTMLElement | null;
@@ -5458,12 +5474,19 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 				void speakQuote(quoted.quote, quoted.messageId);
 				return;
 			}
-			// No selection: the whole message reads (the word-under-cursor
-			// path is gone by decision). speakReply gates the voice.
+			// No selection: a word under the cursor reads just that word
+			// (same per-quote path as a selection, so a second
+			// right-click stops it); open message space reads the whole
+			// message. speakReply gates the voice.
 			const article = body.closest('article[id^="msg-"]');
 			const msg = article ? chat.messages[Number(article.id.slice(4))] : undefined;
 			if (!msg) return;
 			if (stopIfPlaying(msg.id)) return;
+			const word = wordUnderCursor(event, body);
+			if (word) {
+				void speakQuote(word, msg.id);
+				return;
+			}
 			void speakReply(msg);
 		};
 		// Holding Option morphs the send button into "Add +" (stage).

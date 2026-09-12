@@ -64,10 +64,9 @@ test("right-click with a selection reads the selection, menu unblocked", async (
 		.toEqual([false]);
 });
 
-test("right-click with no selection reads the whole message", async ({ page }) => {
+test("right-click on a word reads just that word", async ({ page }) => {
 	const para = page.locator("article.assistant .rendered p").first();
-	// Aim at the first word's own pixels: the paragraph box is wider
-	// than its text, and blank space rightly reads nothing.
+	// Aim at the first word's own pixels ("alpha").
 	const point = await para.evaluate((el) => {
 		const text = el.firstChild;
 		if (!text || text.nodeType !== Node.TEXT_NODE) throw new Error("no text node");
@@ -77,8 +76,34 @@ test("right-click with no selection reads the whole message", async ({ page }) =
 		const rect = range.getBoundingClientRect();
 		return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
 	});
-	// No selection: the entire message goes out, not one word.
 	await page.mouse.click(point.x, point.y, { button: "right" });
+	await expect.poll(() => spoken(page), { timeout: 10_000 }).not.toHaveLength(0);
+	const texts = await spoken(page);
+	expect(texts.join(" ").replace(/\s+/g, " ").trim()).toBe("alpha");
+	// Word speech rides the per-quote path: the article marks
+	// speaking-sel, and a second right-click stops it silently.
+	await expect(page.locator("article.assistant.speaking-sel")).toBeVisible({
+		timeout: 10_000
+	});
+	const count = (await spoken(page)).length;
+	await page.mouse.click(point.x, point.y, { button: "right" });
+	await expect(page.locator("article.assistant.speaking-sel")).toBeHidden({
+		timeout: 10_000
+	});
+	expect(await spoken(page)).toHaveLength(count);
+});
+
+test("right-click on message open space reads the whole message", async ({
+	page
+}) => {
+	const para = page.locator("article.assistant .rendered p").first();
+	// The paragraph box is wider than its text: its far-right padding
+	// is message space with no word under the cursor.
+	const box = await para.boundingBox();
+	if (!box) throw new Error("missing para box");
+	await page.mouse.click(box.x + box.width - 4, box.y + box.height / 2, {
+		button: "right"
+	});
 	await expect.poll(() => spoken(page), { timeout: 10_000 }).not.toHaveLength(0);
 	const texts = await spoken(page);
 	expect(texts.join(" ").replace(/\s+/g, " ")).toContain("alpha beta gamma delta");
@@ -86,15 +111,11 @@ test("right-click with no selection reads the whole message", async ({ page }) =
 
 test("right-click a playing message stops it instead", async ({ page }) => {
 	const para = page.locator("article.assistant .rendered p").first();
-	const point = await para.evaluate((el) => {
-		const text = el.firstChild;
-		if (!text || text.nodeType !== Node.TEXT_NODE) throw new Error("no text node");
-		const range = document.createRange();
-		range.setStart(text, 0);
-		range.setEnd(text, 5);
-		const rect = range.getBoundingClientRect();
-		return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
-	});
+	// Open message space starts the whole-message read (word pixels
+	// would take the per-quote path instead).
+	const box = await para.boundingBox();
+	if (!box) throw new Error("missing para box");
+	const point = { x: box.x + box.width - 4, y: box.y + box.height / 2 };
 	await page.mouse.click(point.x, point.y, { button: "right" });
 	await expect(page.locator("article.assistant.speaking")).toBeVisible({ timeout: 10_000 });
 	const count = (await spoken(page)).length;

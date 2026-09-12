@@ -177,7 +177,10 @@ cut; release chain outcome still unconfirmed (see Now).
       no word, so both stay silent — `sel-menu.e2e.ts` still green after
       the Sep 2026 restore. REVERSED in part Sep 2026: right-click on
       message text speaks again (selection first, else hovered word) with
-      the native menu unblocked — pinned by `right-click-speak.e2e.ts`.)
+      the native menu unblocked — pinned by `right-click-speak.e2e.ts`.
+      Sep 2026 (post-merge-batch): word path restored per user call as
+      selection > word-under-cursor > open-message-space reads whole
+      message; true empty space (no `.rendered` ancestor) stays silent.)
 - [x] Copy toasts: latex copy shows toast; wording is "Copied" everywhere
       (not "Copied as plain text").
       (Done Sep 2026 on work/stream-annotation2: message copy now toasts
