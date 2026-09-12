@@ -23,28 +23,13 @@ test.beforeEach(async ({ page }) => {
 	await expect(page.locator(".ccez-math").first()).toBeVisible({ timeout: 60_000 });
 });
 
-/** Display math renders KaTeX under a chevron bar with a TeX preview — no labels, no buttons. */
-test("display block renders with buttonless chrome", async ({ page }) => {
+/** Display math renders KaTeX in a headless body-only block: no fold bar, no buttons. */
+test("display block renders headless with KaTeX", async ({ page }) => {
 	const block = page.locator(".ccez-math").first();
-	await expect(block.locator(".ccez-math-chev")).toBeVisible();
-	await expect(block.locator(".ccez-math-tex")).toContainText("E_n");
-	await expect(block.locator(".ccez-math-lang")).toHaveCount(0);
-	await expect(block.locator("button[data-math-action]")).toHaveCount(0);
+	await expect(block.locator(".ccez-math-head")).toHaveCount(0);
+	await expect(block.locator("button")).toHaveCount(0);
+	await expect(block.locator(".ccez-math-body")).toBeVisible();
 	expect(await block.locator(".katex").count()).toBeGreaterThan(0);
-});
-
-/** Bar-click folds the rendered math body and unfolds it back. */
-test("bar click folds the math body", async ({ page }) => {
-	const block = page.locator(".ccez-math").first();
-	const bar = block.locator(".ccez-math-head");
-	const body = block.locator(".ccez-math-body");
-	await expect(body).toBeVisible();
-	await bar.click();
-	await expect(body).toBeHidden();
-	await expect(block).toHaveAttribute("data-folded", "1");
-	await bar.click();
-	await expect(body).toBeVisible();
-	await expect(block).not.toHaveAttribute("data-folded", "1");
 });
 
 /** Body-click copies the TeX wrapped in $$ delimiters (a paste re-renders as display math) plus a toast. */
@@ -100,8 +85,8 @@ test("composer does not render latex", async ({ page }) => {
 	await expect(composer.locator(".ccez-math-inline")).toHaveCount(0);
 });
 
-/** Right-clicking the fold bar toggles the fold and never starts audio: zero speaking classes and the live highlight keeps. */
-test("right-click on the math fold bar toggles the fold and stays silent", async ({
+/** Right-clicking the math block toggles the fold and never starts audio: zero speaking classes and the live highlight keeps. */
+test("right-click on the math block toggles the fold and stays silent", async ({
 	page
 }) => {
 	const para = page.locator("article .rendered p").first();
@@ -115,14 +100,14 @@ test("right-click on the math fold bar toggles the fold and stays silent", async
 	const block = page.locator(".ccez-math").first();
 	const body = block.locator(".ccez-math-body");
 	await expect(body).toBeVisible();
-	await block.locator(".ccez-math-head").click({ button: "right" });
+	await body.click({ button: "right" });
 	await expect(block).toHaveAttribute("data-folded", "1");
 	await expect(body).toBeHidden();
 	await page.waitForTimeout(500);
 	await expect(page.locator("article.speaking, article.speaking-sel")).toHaveCount(0);
 	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
 	expect(selected).not.toBe("");
-	await block.locator(".ccez-math-head").click({ button: "right" });
+	await block.click({ button: "right" });
 	await expect(body).toBeVisible();
 });
 

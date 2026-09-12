@@ -78,25 +78,16 @@ test("dark code stays contrasted", async ({ page }) => {
 	expect(ratio.worstToken).toBeGreaterThanOrEqual(4.5);
 });
 
-/** AI code blocks carry a language-label fold bar and no buttons. */
-test("assistant code block has a label bar with no buttons", async ({ page }) => {
+/** AI code blocks carry a copy icon button plus a folded label, and no fold bar. */
+test("assistant code block has a copy button with no fold bar", async ({ page }) => {
 	const block = page.locator(".ccez-code").first();
-	await expect(block.locator(".ccez-code-lang")).toHaveText("python");
-	await expect(block.locator("button[data-code-action]")).toHaveCount(0);
-	expect(await block.locator("button.ccez-code-head").count()).toBeGreaterThan(0);
-});
-
-/** Bar-click folds the code body and unfolds it back. */
-test("code bar click folds the body", async ({ page }) => {
-	const block = page.locator(".ccez-code").first();
-	const bar = block.locator(".ccez-code-head");
-	const pre = block.locator("pre");
-	await expect(pre).toBeVisible();
-	await bar.click();
-	await expect(pre).toBeHidden();
-	await expect(block).toHaveAttribute("data-folded", "1");
-	await bar.click();
-	await expect(pre).toBeVisible();
+	await expect(block.locator(".ccez-code-head")).toHaveCount(0);
+	await expect(block.locator("button.ccez-code-copy")).toHaveCount(1);
+	await expect(block.locator("button.ccez-code-copy")).toHaveAttribute(
+		"aria-label",
+		"Copy code block"
+	);
+	await expect(block.locator(".ccez-code-foldedlabel")).toContainText("python");
 });
 
 /** Body clicks select natively and never copy: no toast, clipboard untouched. */
@@ -120,20 +111,19 @@ test("code body click selects without copying", async ({ page }) => {
 	expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("SENTINEL");
 });
 
-/** Right-clicking the code fold bar toggles the fold and never starts audio. */
-test("right-click on the code fold bar toggles the fold and stays silent", async ({
+/** Right-clicking the code block toggles the fold and never starts audio. */
+test("right-click on the code block toggles the fold and stays silent", async ({
 	page
 }) => {
 	const block = page.locator(".ccez-code").first();
-	const bar = block.locator(".ccez-code-head");
 	const pre = block.locator("pre");
 	await expect(pre).toBeVisible();
-	await bar.click({ button: "right" });
+	await pre.click({ button: "right" });
 	await expect(block).toHaveAttribute("data-folded", "1");
 	await expect(pre).toBeHidden();
 	await page.waitForTimeout(500);
 	await expect(page.locator("article.speaking, article.speaking-sel")).toHaveCount(0);
-	await bar.click({ button: "right" });
+	await block.click({ button: "right" });
 	await expect(pre).toBeVisible();
 });
 
