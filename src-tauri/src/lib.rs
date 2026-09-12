@@ -3,6 +3,7 @@
 #[cfg(all(target_os = "macos", debug_assertions))]
 mod dev_icon;
 mod annotate;
+mod coderun;
 mod desktop;
 mod dictation;
 mod ocr;
@@ -196,7 +197,8 @@ pub fn run() {
             ocr::ocr_supported,
             ocr::ocr_recognize,
             dictate_start,
-            dictate_stop
+            dictate_stop,
+            coderun::run_code
         ])
         .setup(|_app| {
             // External-text bridge (Android PROCESS_TEXT / action-mode):

@@ -420,6 +420,7 @@ function renderInto(
 					`<div class="ccez-code" data-code-index="${index}">` +
 					`<button type="button" class="ccez-code-copy" data-code-copy="${index}" ` +
 					`aria-label="Copy code block" title="Copy">${CODE_COPY_GLYPH}</button>` +
+					`<button type="button" class="ccez-code-run" data-code-run="${index}" data-code-lang="${escapeHtml(language)}" aria-label="Run code block" title="Run locally">Run</button>` +
 					`<span class="ccez-code-foldedlabel">${escapeHtml(foldedCodeLabel(language, loc))}</span>` +
 					`<pre><code data-code-index="${index}">${escapeHtml(text)}</code></pre></div>`
 				);
@@ -455,6 +456,9 @@ export function sanitize(dirty: string): string {
 			"aria-label",
 			"aria-expanded",
 			"data-code-copy",
+			"data-code-run",
+			"data-code-lang",
+			"data-code-output",
 			"data-code-index",
 			"data-math-index",
 			"data-paste-fold",

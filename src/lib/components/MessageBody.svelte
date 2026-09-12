@@ -16,6 +16,7 @@
 		mathCopyText,
 		type RenderedMessage
 	} from "$lib/render";
+	import { codeRunSummary, runCodeBlock } from "$lib/coderun";
 	import type { ChatMsg, ChatMsgId } from "$lib/chat";
 	import { applyMarks, annRefsFor, type AnnotationMark, type AnnotationId } from "$lib/annotations";
 
@@ -114,6 +115,10 @@
 
 	let html = $state("");
 	let bodyEl: HTMLElement | undefined = $state();
+	/** Captured Code Run output per block index (re-stamped after each render). */
+	let runOutputs = $state<Record<number, string>>({});
+	/** Block indexes with a run in flight (stamped as Running). */
+	let runningBlocks = $state<Record<number, boolean>>({});
 	let rendered: RenderedMessage | null = null;
 	let highlightRun = 0;
 	let aidRun = 0;
@@ -177,7 +182,12 @@
 		const furigana = localAids.includes("furigana");
 		const pinyin = localAids.includes("pinyin");
 		// Marks apply after Svelte flushes the new HTML (see applyMarks).
-		const stamp = () => void tick().then(() => bodyEl && applyMarks(bodyEl, items, skipMarks, wash));
+		const stamp = () =>
+		void tick().then(() => {
+			if (!bodyEl) return;
+			applyMarks(bodyEl, items, skipMarks, wash);
+			stampRunOutputs();
+		});
 		if (pinyin && !furigana) {
 			rendered = null;
 			furiganaKey = null;
@@ -349,6 +359,11 @@
 		const codeBlock = (event.target as HTMLElement).closest<HTMLElement>(".ccez-code");
 		if (!codeBlock || !rendered) return;
 		const copyButton = (event.target as HTMLElement).closest<HTMLElement>("[data-code-copy]");
+		const runButton = (event.target as HTMLElement).closest<HTMLElement>("[data-code-run]");
+		if (runButton) {
+			onRunBlock(Number(runButton.dataset.codeRun ?? -1));
+			return;
+		}
 		if (!copyButton) return;
 		const index = Number(copyButton.dataset.codeCopy ?? -1);
 		const entry = rendered.codes[index];
@@ -359,6 +374,57 @@
 				() => onToast?.("Copied"),
 				() => onToast?.("Couldn't copy to the clipboard.")
 			);
+	}
+
+	/**
+	 * Local Code Run output stamping: captured stdout/stderr live in
+	 * component state (the sanitized HTML owns the block, not Svelte),
+	 * so every post-flush stamp re-attaches them after re-renders
+	 * (e.g. Shiki enhancement) wipe the DOM. Text-only, never HTML.
+	 */
+	function stampRunOutputs(): void {
+		if (!bodyEl) return;
+		for (const block of bodyEl.querySelectorAll(".ccez-code")) {
+			const el = block as HTMLElement;
+			const run = el.querySelector("[data-code-run]");
+			const index = Number(run?.getAttribute("data-code-run") ?? -1);
+			if (Number.isNaN(index) || index < 0) continue;
+			const output = runOutputs[index];
+			if (runningBlocks[index] !== true && output === undefined) continue;
+			let out = el.querySelector<HTMLElement>(":scope > .ccez-code-output");
+			if (!out) {
+				out = document.createElement("div");
+				out.className = "ccez-code-output";
+				out.dataset.codeOutput = String(index);
+				el.appendChild(out);
+			}
+			const text = output ?? "Running\u2026";
+			if (out.textContent !== text) out.textContent = text;
+		}
+	}
+
+	/**
+	 * Run-button click (user-initiated only): executes the block
+	 * locally via the backend, or stamps the disabled/no-runner
+	 * reason where no shell exists. Never throws into teardown.
+	 */
+	function onRunBlock(index: number): void {
+		const entry = rendered?.codes[index];
+		if (!entry || runningBlocks[index] === true) return;
+		runningBlocks[index] = true;
+		stampRunOutputs();
+		void runCodeBlock(entry.lang, entry.code).then((outcome) => {
+			const shown = codeRunSummary(entry.lang, outcome);
+			const body =
+				outcome.kind === "ok"
+					? [shown, outcome.result.stdout, outcome.result.stderr]
+						.filter((part) => part.trim() !== "")
+						.join("\n")
+				: shown;
+			delete runningBlocks[index];
+			runOutputs[index] = body;
+			stampRunOutputs();
+		});
 	}
 </script>
 
@@ -602,6 +668,40 @@
 	.rendered :global(.ccez-code-copy .action-glyph) {
 		height: 1rem;
 		width: 1rem;
+	}
+	/* Code Run: text button pinned top-right beside copy (top-left stays
+	a clean selection surface for drag-selects),
+	plus the captured-output tray under the pre. */
+	.rendered :global(.ccez-code-run) {
+		position: absolute;
+		top: 0.3rem;
+		right: 2rem;
+		border: 0;
+		background: none;
+		padding: 0.15rem 0.35rem;
+		font: inherit;
+		font-size: 0.72rem;
+		line-height: 1.2;
+		color: #6e6e73;
+		color: var(--muted);
+		cursor: pointer;
+	}
+	.rendered :global(.ccez-code-run:hover) {
+		color: #1c1c1e;
+		color: var(--ink);
+	}
+	.rendered :global(.ccez-code-output) {
+		border-top: 1px solid #e5e5ea;
+		background: #f7f7f8;
+		padding: 0.4rem 0.6rem;
+		font-family:
+			ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+		font-size: 0.75rem;
+		line-height: 1.45;
+		white-space: pre-wrap;
+		word-break: break-word;
+		max-height: 16rem;
+		overflow: auto;
 	}
 	.rendered :global(.ccez-code pre) {
 		margin: 0;
@@ -884,6 +984,16 @@
 	}
 	:global(html[data-theme="dark"]) .rendered :global(.ccez-code-copy:hover) {
 		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-code-run) {
+		color: #98989f;
+	}
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-code-run:hover) {
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-code-output) {
+		border-color: #38383a;
+		background: #101013;
 	}
 	:global(html[data-theme="dark"]) .rendered :global(.ccez-math),
 	:global(html[data-theme="dark"]) .rendered :global(.ccez-math-inline) {

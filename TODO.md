@@ -210,7 +210,16 @@ cut; release chain outcome still unconfirmed (see Now).
       `calc(0.92rem * var(--font-scale, 1))`, the same size as chat text;
       pinned by the `thoughts scale with font size` spec in
       `message-code.e2e.ts`. No code change needed.)
-- [ ] Code Run button + model-version bump + Cloudflare-domain hosting (later).
+ - [ ] Code Run button + model-version bump + Cloudflare-domain hosting (later).
+      (Code Run DONE Sep 2026 on work/h2-coderun: local Run button on assistant
+      code blocks Code-Runner-style — `run_code` Tauri command (PATH-resolved
+      python3/node/bun/bash/ruby/deno, per-run temp cwd, 10s kill, 64 KiB cap,
+      no shell/network; browser/jsdom gets a disabled-with-reason note, unknown
+      labels an honest no-runner note. `coderun.test.ts` x8 + `code-run.e2e.ts`
+      4/4 + `message-code.e2e.ts` 6/6 green. Model bump: NOT needed — the
+      `local-gemma` pin is already the floating `gemma4:latest`, verified present
+      locally (`ollama list`: gemma4:latest = e4b 9.6GB). Hosting: still OPEN —
+      needs the user’s Cloudflare account, not code; see handoff report.)
 - [ ] Character components overlay for Han text (offline table already in
       `src/lib/radicals.ts`): needs a better name than "Radicals"; returns to the
       selection menu only after LaTeX + code rendering above; no release UI until then.
