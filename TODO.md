@@ -148,9 +148,18 @@ cut; release chain outcome still unconfirmed (see Now).
 
 ## Pile: reading aids + voice
 
-- [ ] Pinyin/furigana: script-segment detection (no pinyin on Japanese words).
-- [ ] Pinyin hover flicker: reserve annotation space up front (visibility, not
-      layout); if unfixable, drop the on-hover-show-pinyin tradeoff deliberately.
+- [x] Pinyin/furigana: script-segment detection (no pinyin on Japanese words).
+      Line gating (kana lines never reach the engine) plus an engine-level
+      kana bail in `pinyinRuby`, same kana class as the classifier.
+      Accept: `pinyinBlock`/`pinyinRuby` unit tests + ruby-wrap
+      "pinyin stays off Japanese lines" e2e green.
+- [x] Pinyin hover flicker: reserve annotation space up front (visibility, not
+      layout). Fixed by construction: `aid-space` leading reserves ruby's room
+      whenever a local aid is offered (MessageBody), readings are absolute
+      overlay (`.frt`) + native ruby, hover previews only cached kinds
+      (`isFuriganaCached` gate, never fetch on hover).
+      Accept: furigana-hover e2e (hover fetches nothing, boxes stable) +
+      furigana pin bbox e2e green.
 - [ ] Furigana offset further left on macOS desktop.
 - [ ] Message-button icons scale with the text-size setting (pill buttons
       already do; logos/icons don't).
