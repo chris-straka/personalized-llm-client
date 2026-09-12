@@ -285,8 +285,22 @@
 			if (selection && !selection.isCollapsed) event.preventDefault();
 		};
 		document.addEventListener("click", keepSelectionWithoutToggle, true);
+		// Slider rows: the reset button is the row label's first
+		// labelable descendant, so clicking the label text or row
+		// would forward-activate the button and reset by accident.
+		// Cancel that forwarded activation unless the click landed on
+		// the button or slider itself (same capture pattern as above).
+		const guardSliderLabel = (event: MouseEvent): void => {
+			const target = event.target;
+			if (!(target instanceof HTMLElement)) return;
+			if (!target.closest(".settings-panel label.slider-row")) return;
+			if (target.closest("button, input")) return;
+			event.preventDefault();
+		};
+		document.addEventListener("click", guardSliderLabel, true);
 		return () => {
 			document.removeEventListener("click", keepSelectionWithoutToggle, true);
+			document.removeEventListener("click", guardSliderLabel, true);
 		};
 	});
 
@@ -873,7 +887,7 @@
 			}}
 		/>
 	</div>
-	<label>
+	<label class="slider-row">
 		Text Size
 		<button
 			type="button"
@@ -899,7 +913,7 @@
 		</span>
 	</label>
 	{#if !androidUI}
-		<label>
+		<label class="slider-row">
 			Chat width
 			<button
 				type="button"
@@ -926,7 +940,7 @@
 			</span>
 		</label>
 	{/if}
-	<label>
+	<label class="slider-row">
 		Hide prompt after idle
 		<button
 			type="button"

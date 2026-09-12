@@ -1324,36 +1324,120 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	})();
 	/**
 	 * Idle-hide for the main prompt: any mouse, keyboard, touch, or
-	 * wheel input stamps lastInputAt and shows the composer instantly;
-	 * a 500ms ticker hides it (slides down out of view) once the
-	 * effective timeout elapses with no input. The timeout and mobile
-	 * reads subscribe the effect, so a settings change or the phone
-	 * detection landing re-arms the ticker. An empty chat never hides,
-	 * and neither does a thread shorter than the viewport
-	 * (contentFitsViewport, contract-tested in chrome.test.ts): with
-	 * nothing to uncover, the prompt and its attachment strip stay put.
+	 * wheel input stamps lastInputAt (delaying the hide); a 500ms
+	 * ticker hides it (slides down out of view) once the effective
+	 * timeout elapses with no input. Restoring is allowlisted: only
+	 * the i / Enter / Space keys (see idleRestoreKey, wired at the top
+	 * of onKey) or a real left click (see onIdleClick below) bring the
+	 * prompt back — pointer travel, wheel, and other keys merely
+	 * re-arm the timer, so selection drags never summon it. The
+	 * timeout and mobile reads subscribe the effect, so a settings
+	 * change or the phone detection landing re-arms the ticker. An
+	 * empty chat never hides, and neither does a thread shorter than
+	 * the viewport (contentFitsViewport, contract-tested in
+	 * chrome.test.ts): with nothing to uncover, the prompt and its
+	 * attachment strip stay put.
 	 */
 	let lastInputAt = $state(Date.now());
 	let promptIdle = $state(false);
-	function noteInput(): void {
+	/** Any activity delays the hide; restoring is allowlisted below. */
+	function stampInput(): void {
 		lastInputAt = Date.now();
+	}
+	/** Allowlisted restore: show the hidden prompt again. */
+	function restorePrompt(): void {
+		stampInput();
 		promptIdle = false;
+	}
+	/**
+	 * Blind keystrokes into the hidden composer that die silently:
+	 * printable characters and deletions without modifiers. Anything
+	 * with a modifier (copy/paste/undo chords), IME, and control keys
+	 * (Tab, arrows, Escape) keeps its behavior; the allowlist below
+	 * owns restore. Typing blind would strand text in an invisible
+	 * box and drop focus (the hidden subtree's restyle unfocuses it),
+	 * so swallow instead — the timer still re-arms via the stamp
+	 * listener.
+	 */
+	function swallowHiddenKeystroke(event: KeyboardEvent): boolean {
+		if (event.metaKey || event.ctrlKey || event.altKey) return false;
+		if (event.isComposing) return false;
+		if (event.key === "Backspace" || event.key === "Delete") return true;
+		return event.key.length === 1;
+	}
+	/**
+	 * Whether a keydown restores the hidden prompt: bare i, Enter, or
+	 * Space only (no modifiers), and never out of another field,
+	 * control, or overlay — typing in find, the sidebars, or a modal
+	 * owns its keystrokes. The prompt's own editor always qualifies:
+	 * focus can sit in the hidden composer, and typing there means
+	 * the prompt.
+	 */
+	function idleRestoreKey(event: KeyboardEvent): boolean {
+		if (event.isComposing) return false;
+		if (event.metaKey || event.ctrlKey || event.altKey) return false;
+		if (event.key !== "i" && event.key !== "I" && event.key !== "Enter" && event.key !== " ") {
+			return false;
+		}
+		const target = event.target as HTMLElement | null;
+		if (target?.closest(".prompt .cm-content, .prompt .ta-input")) return true;
+		// An open overlay owns bare keys (Enter activates, Space
+		// clicks a focused control): never yank focus to the prompt.
+		if (shortcutsOpen || searchOpen || inspectChar !== null || findOpen) return false;
+		if (
+			target?.closest(
+				"input, textarea, select, [contenteditable], button, a, summary, aside, .modal, .modal-veil, .find-bar, .search-palette, .sel-menu, .review, .translate-panel, .lang-menu"
+			)
+		) {
+			return false;
+		}
+		return true;
 	}
 	$effect(() => {
 		const setting = settings.promptIdleSec ?? 6;
 		const idleSec = !androidUI ? setting : idleTimeoutCustomized ? setting : 0;
-		const on = (): void => noteInput();
+		const on = (): void => stampInput();
 		// A pointer press is a distinct gesture from the filing Enter,
 		// so it ends the anti-double-send window (see sendGuardUntil).
 		const onDown = (): void => {
 			sendGuardUntil = 0;
 		};
+		// Press point for the drag-vs-click read in onIdleClick: a
+		// press that traveled is a selection drag, never a restore.
+		let idleDown: { x: number; y: number } | null = null;
+		const onIdleDown = (event: PointerEvent): void => {
+			idleDown = event.button === 0 ? { x: event.clientX, y: event.clientY } : null;
+		};
+		/**
+		 * Click restore for the hidden prompt: a real left click
+		 * brings it back (plain surfaces also focus the composer, via
+		 * the prompt floor's own control guard). Selection drags
+		 * never restore, and latex-math taps never summon the
+		 * keyboard back: the math body is its own copy affordance.
+		 */
+		const onIdleClick = (event: MouseEvent): void => {
+			if (!promptIdle) return;
+			if (event.button !== 0) return;
+			const down = idleDown;
+			idleDown = null;
+			if (down && Math.hypot(event.clientX - down.x, event.clientY - down.y) > 6) return;
+			const target = event.target instanceof Element ? event.target : null;
+			if (target?.closest("[data-math-index]")) return;
+			restorePrompt();
+			if (target?.closest("aside, .modal, .modal-veil, .find-bar, .search-palette")) return;
+			// Same deferred landing as the key path: the composer is
+			// only focusable once the visibility flip flushes.
+			const floorEvent = event;
+			void tick().then(() => focusPromptFloor(floorEvent));
+		};
 		window.addEventListener("pointermove", on, { passive: true });
 		window.addEventListener("pointerdown", on, { passive: true });
+		window.addEventListener("pointerdown", onIdleDown, { passive: true });
 		window.addEventListener("pointerdown", onDown);
 		window.addEventListener("keydown", on);
 		window.addEventListener("wheel", on, { passive: true });
 		window.addEventListener("touchstart", on, { passive: true });
+		window.addEventListener("click", onIdleClick);
 		window.addEventListener("offline", handleOffline);
 		window.addEventListener("online", handleOnline);
 		// Boot already offline (plane, dead wifi): park on Gemma now
@@ -1366,15 +1450,26 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			// prompt only strands itself (see contentFitsViewport).
 			const box = scrollBox;
 			if (box && contentFitsViewport(box.scrollHeight, box.clientHeight)) return;
+			if (promptIdle) return;
 			promptIdle = true;
+			// The hidden prompt leaves the flow (see .prompt-idle), so
+			// the column grows into its room: pin stuck readers to the
+			// bottom so the uncovered tail lands fully in view instead
+			// of parked half cut off. Readers scrolled up keep their
+			// spot — history never yanks.
+			if (stick && !holding && box) {
+				box.scrollTo({ top: box.scrollHeight, behavior: "instant" });
+			}
 		}, 500);
 		return () => {
 			window.removeEventListener("pointermove", on);
 			window.removeEventListener("pointerdown", on);
+			window.removeEventListener("pointerdown", onIdleDown);
 			window.removeEventListener("pointerdown", onDown);
 			window.removeEventListener("keydown", on);
 			window.removeEventListener("wheel", on);
 			window.removeEventListener("touchstart", on);
+			window.removeEventListener("click", onIdleClick);
 			window.removeEventListener("offline", handleOffline);
 			window.removeEventListener("online", handleOnline);
 			window.clearInterval(timer);
@@ -4414,6 +4509,28 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		requestAnimationFrame(() => requestAnimationFrame(() => editor?.remeasure()));
 
 		const onKey = (event: KeyboardEvent) => {
+			// Idle-prompt restore allowlist: while hidden, only bare
+			// i / Enter / Space bring the prompt back (never typed —
+			// the key is a summon, like scroll mode's i). Every other
+			// key merely re-arms the hide timer via the stamp listener.
+			if (promptIdle) {
+				if (idleRestoreKey(event)) {
+					event.preventDefault();
+					restorePrompt();
+					// The visibility flip flushes async: focusing now
+					// would hit a still-hidden composer (a no-op), so
+					// land once the tick makes it focusable again.
+					void tick().then(() => enterEditMode());
+					return;
+				}
+				const inHiddenEditor = (event.target as HTMLElement | null)?.closest(
+					".prompt .cm-content, .prompt .ta-input"
+				);
+				if (inHiddenEditor && swallowHiddenKeystroke(event)) {
+					event.preventDefault();
+					return;
+				}
+			}
 			// Fullscreen-hold tracking rides above every Escape path:
 			// the keydown dismiss behavior below is untouched (a tap
 			// still dismisses exactly as today); the keyup handler
@@ -5080,13 +5197,14 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			return true;
 		};
 		/**
-		 * Middle-click opens the shortcuts modal from anywhere (links
-		 * included — the app has no external links worth a new tab).
+		 * Middle-click toggles the shortcuts modal from anywhere
+		 * (links included — the app has no external links worth a
+		 * new tab): open when closed, close when open.
 		 */
 		const onMiddleClick = (event: MouseEvent) => {
 			if (event.button !== 1) return;
 			event.preventDefault();
-			shortcutsOpen = true;
+			shortcutsOpen = !shortcutsOpen;
 		};
 		const onDoubleClick = (event: MouseEvent) => {
 			if (!clickGuardsPass(event)) return;
@@ -6209,6 +6327,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			class:has-mic={canMic && settings.micEnabled}
 			class:prompt-hidden={!!annPop && androidUI && !iosUI}
 			class:prompt-idle={promptIdle}
+			data-empty={!hasText}
 			bind:this={promptEl}
 			onclick={focusPromptFloor}
 			ondragover={(e) => e.preventDefault()}
@@ -7538,6 +7657,9 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		display: flex;
 		flex-direction: column;
 		min-width: 0;
+		/* Anchor for the idle prompt's out-of-flow hide (see
+		.prompt-idle): the hidden composer parks against the column. */
+		position: relative;
 	}
 	/* Slim title strip: an empty drag surface, no bar. Tall enough to
 	clear the traffic lights, borderless so it reads as window chrome
@@ -9867,6 +9989,15 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		opacity: 0;
 		visibility: hidden;
 		pointer-events: none;
+		/* Out of flow while hidden: the messages column grows into the
+		freed room, so the hide uncovers the tail instead of fading in
+		place (see the idle ticker's stick-scroll). Anchored where it
+		sat, so the slide still reads from the right spot. */
+		position: absolute;
+		left: 1.2rem;
+		right: 1.2rem;
+		bottom: 1.1rem;
+		margin: 0;
 	}
 	.prompt {
 		position: relative;
@@ -10068,6 +10199,20 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		padding-right: calc(var(--tools-pad) + var(--tools-extra));
 		caret-color: #1c1c1e;
 		caret-color: var(--ink);
+	}
+	/* Emptied composer: no stray caret. Clearing the draft (paste
+	then delete-all, or a send) leaves focus in place, and both the
+	native caret and CodeMirror's drawn cursor would keep blinking
+	in the empty box — hide both until text returns (data-empty rides
+	hasText, which onDocChange maintains on every edit). */
+	.prompt[data-empty="true"] :global(.cm-content) {
+		caret-color: transparent;
+	}
+	.prompt[data-empty="true"] :global(.cm-cursor) {
+		display: none;
+	}
+	.prompt[data-empty="true"] :global(.ta-input) {
+		caret-color: transparent;
 	}
 	/* The mic icon widens the tools cluster: hold the first line clear
 	of it, but only while it is actually mounted. */
