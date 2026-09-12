@@ -161,7 +161,10 @@ cut; release chain outcome still unconfirmed (see Now).
   lives on the base rule, `reviewEditKey` saves on Enter / cancels on
   Escape (unit-locked), popover + textarea are near-black `#1c1c1e`;
   all locked in `annotations-ux.test.ts`. No code change needed.)
-- [ ] Annotation pencil hover: glow color, not disappear.
+- [x] Annotation pencil hover: glow color, not disappear.
+  (Done Sep 2026 on work/stream-annotation2: `.review-pencil:hover` glows
+  accent-blue with a drop-shadow (symmetric transition on the base rule)
+  instead of going ink; locked in `annotations-ux.test.ts`.)
 - [ ] Math annotation: normalize selection to whole equation; clear stale wash.
 - [ ] Undecided: new chats show one past annotation + AI answer (no expletives,
       trash-can delete, disappears after first message, "What can I do for you?"

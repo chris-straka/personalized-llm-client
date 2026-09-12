@@ -8602,12 +8602,20 @@ import { isPromptIdle } from "$lib/chrome";
 		color: #6e6e73;
 		padding: 0.15rem;
 		border-radius: 6px;
+		/* On the base (not :hover) so the glow animates symmetrically
+		in and back out, instead of snapping one way. */
+		transition:
+			color 0.15s ease,
+			filter 0.15s ease;
 	}
 	.review-head button.review-pencil :global(.action-glyph) {
 		height: 0.8rem;
 	}
+	/* Hover glows accent-blue instead of going ink: the pencil is small
+	and quiet-gray, so an ink hover read as disappearing. */
 	.review-head button.review-pencil:hover {
-		color: #1c1c1e;
+		color: #5a9bf7;
+		filter: drop-shadow(0 0 3px rgba(90, 155, 247, 0.8));
 		text-decoration: none;
 	}
 	/* Annotation popover: collapsed to the pill, expands on hover,

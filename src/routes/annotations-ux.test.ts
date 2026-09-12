@@ -74,6 +74,14 @@ describe("annotations-only messages", () => {
 	});
 });
 
+describe("review pencil hover", () => {
+	it("glows accent-blue instead of going ink", () => {
+		const css = pageStyle();
+		expect(css).toMatch(/button\.review-pencil\s*\{[^}]*transition:/);
+		expect(css).toMatch(/button\.review-pencil:hover\s*\{[^}]*drop-shadow/);
+	});
+});
+
 describe("sent-message annotation count", () => {
 	it("scales the refs count with the message font size", () => {
 		const css = pageStyle();
