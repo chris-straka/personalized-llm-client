@@ -71,7 +71,7 @@ test("Inspect opens the overlay with radicals, strokes, and definition", async (
 	await expect(modal).toHaveCount(0);
 });
 
-test("multi-character highlight never shows Inspect", async ({ page }) => {
+test("multi-character highlight shows Parts instead of Inspect", async ({ page }) => {
 	await seedWithInspect(page, true, "漢字のテストを確認しました");
 	// Triple-click selects the whole paragraph (multi-char by construction).
 	const body = page.locator("article .rendered").first();
@@ -80,8 +80,9 @@ test("multi-character highlight never shows Inspect", async ({ page }) => {
 	await page.mouse.click(box.x + 20, box.y + box.height / 2, { clickCount: 3 });
 	const menu = page.locator(".sel-menu");
 	await expect(menu).toBeVisible();
-	await expect(menu.locator("button")).toHaveCount(1);
+	await expect(menu.locator("button")).toHaveCount(2);
 	await expect(menu.locator('button:has-text("Inspect")')).toHaveCount(0);
+	await expect(menu.locator('button:has-text("Parts")')).toBeVisible();
 });
 
 test("settings panel gates the feature behind a checkbox", async ({ page }) => {

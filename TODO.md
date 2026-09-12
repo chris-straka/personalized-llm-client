@@ -220,11 +220,23 @@ cut; release chain outcome still unconfirmed (see Now).
       `local-gemma` pin is already the floating `gemma4:latest`, verified present
       locally (`ollama list`: gemma4:latest = e4b 9.6GB). Hosting: still OPEN —
       needs the user’s Cloudflare account, not code; see handoff report.)
-- [ ] Character components overlay for Han text (offline table already in
+- [x] Character components overlay for Han text (offline table already in
       `src/lib/radicals.ts`): needs a better name than "Radicals"; returns to the
       selection menu only after LaTeX + code rendering above; no release UI until then.
       Open question: offline dictionary for radical/stroke/Unihan — what source,
       how big? (Inspect currently reports unavailable offline.)
+      (Done Sep 2026 on work/h1-han: overlay named "Character components",
+      sel-menu button "Parts" (short, neutral across the Han block — "Radicals"
+      is a misnomer for immediate-component splits); kana = Japanese else
+      Chinese default with a JP/中文 toggle on ambiguous Han-only text;
+      dict decision measured, not bundled — Unihan.zip 8,518,517 B,
+      CC-CEDICT export zip 3,974,014 B, KANJIDIC2 xml.gz 1,488,576 B,
+      cjkvi-ids ids.txt 2,161,631 B GPLv2 (needs an IDS parser) — all over
+      the ~300KB budget or copyleft, so the curated table stays with a
+      build-time per-character extraction as follow-up. Inspect keeps its
+      name; its "Radicals:" fact is now "Components:". `radicals.test.ts`
+      x19 + `reading.test.ts` x34 + `han-parts.e2e.ts` 5/5 + `inspect.e2e.ts`
+      5/5 green. No release UI claims.)
 
 ## Pile: annotation
 

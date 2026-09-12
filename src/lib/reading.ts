@@ -73,6 +73,36 @@ export function hasAmbiguousAidLine(text: string): boolean {
 		.some((line) => /\p{Script=Han}/u.test(line) && !KANA_RE.test(line));
 }
 
+// --- Han character overlay language (components overlay) ---
+
+/**
+ * Overlay reading locale for a Han selection: kana present means
+ * Japanese, anything else defaults to Chinese — the same rule as
+ * `ttsLangFor` (kana → ja-JP, Han → zh-CN) and `classifyAidLine`
+ * (kana lines → furigana, Han-only → pinyin).
+ */
+export type HanOverlayLang = "ja" | "zh";
+
+/** BCP-47 tag per overlay locale (matches `ttsLangFor` outputs). */
+export const HAN_OVERLAY_LANG_TAG: Record<HanOverlayLang, string> = {
+	ja: "ja-JP",
+	zh: "zh-CN"
+};
+
+/** Kana present = Japanese, else Chinese default. */
+export function hanOverlayLangFor(text: string): HanOverlayLang {
+	return KANA_RE.test(text) ? "ja" : "zh";
+}
+
+/**
+ * True when the guess is uncertain: the text holds Han but no kana,
+ * so kanji and hanzi are indistinguishable and the overlay offers a
+ * small JP/中文 toggle to flip a wrong prediction.
+ */
+export function isHanOverlayLangUncertain(text: string): boolean {
+	return /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/.test(text) && !KANA_RE.test(text);
+}
+
 /**
  * The chat reply pill's local aid, if it has one: Japanese owns
  * kanji-only lines, Chinese and Cantonese keep the default. Anything

@@ -1,29 +1,46 @@
 /**
- * Offline Han character decomposition (radicals/components overlay).
+ * Offline Han character decomposition (character components overlay).
  *
  * Fully bundled: no fetch, no worker, no network at runtime. The table
  * is a small hand-curated subset (common kanji/hanzi + their immediate
  * components), so it stays far under budget (~6KB source) and carries
  * no third-party license obligations.
  *
- * Data decision (see track report):
- * - kradfile2 (Jim Breen EDICT project, CC-BY-SA 4.0): full coverage
- *   but share-alike licensing + ~200KB+ unpacked — heavier than the
- *   ~300KB budget allows once unpacked alongside lindera, and every
- *   app update would redistribute a CC-BY-SA file.
- * - cjk-decomp (MIT, IDS-based): full coverage and a permissive
- *   license, but the IDS corpus is ~1MB+ and needs an IDS parser to
- *   render components — overkill for a glance overlay.
+ * The overlay is deliberately NOT called "Radicals": most splits are
+ * immediate components, not Kangxi radicals. The selection-menu
+ * button reads "Parts" — one short English word with no
+ * Chinese-or-Japanese reading, neutral across the shared Han block.
+ *
+ * Offline-dictionary decision (measured Sep 2026, see track report):
+ * - Unihan.zip (unicode.org, UCD path): 8,518,517 bytes zipped —
+ *   full definitions/strokes but ~30x the ~300KB budget.
+ * - CC-CEDICT (mdbg.net export zip): 3,974,014 bytes zipped —
+ *   Chinese-only glosses, still ~13x over budget unpacked.
+ * - KANJIDIC2 (edrdg.org xml.gz): 1,488,576 bytes compressed —
+ *   Japanese-only, XML needs a parser, unpacked multi-MB.
+ * - cjkvi-ids ids.txt (GitHub, CHISE-derived): 2,161,631 bytes
+ *   plain text (~88k entries) — the right shape (component splits)
+ *   but GPLv2 copyleft plus an IDS-operator parser (⿰⿱…)
+ *   to render — overkill for a glance overlay.
  * - No npm package in the tree provides decomposition (deps are
  *   wanakana, pinyin-pro, lindera-wasm, shiki, marked, … — verified
  *   by searching package.json/bun.lock for decomp/krad/radical).
- * - Choice: this curated immediate-component table (MIT, this repo).
- *   Unknown Han characters fall back to an honest "unavailable"
- *   entry instead of guessing.
+ * - Choice: keep this curated immediate-component table (own
+ *   copyright, this repo). Unknown Han characters fall back to an
+ *   honest "unavailable" entry instead of guessing. A build-time
+ *   extraction (per-character slices of Unihan kDefinition/kMandarin
+ *   or cjkvi-ids for covered characters) stays a follow-up.
  */
 
+import {
+	HAN_OVERLAY_LANG_TAG,
+	hanOverlayLangFor,
+	isHanOverlayLangUncertain,
+	type HanOverlayLang
+} from "./reading";
+
 /** One character and its immediate components. */
-export interface RadicalEntry {
+export interface ComponentEntry {
 	char: string;
 	components: string[];
 	/** Optional note (e.g. traditional variant, reading hint). */
@@ -100,7 +117,7 @@ export function isHanChar(ch: string): boolean {
 }
 
 /** Immediate components for one character, or null when unknown. */
-export function decomposeChar(ch: string): RadicalEntry | null {
+export function decomposeChar(ch: string): ComponentEntry | null {
 	const hit = TABLE[ch];
 	if (!hit || hit.c.length === 0) return null;
 	return { char: ch, components: [...hit.c], ...(hit.n ? { note: hit.n } : {}) };
@@ -111,9 +128,9 @@ export function decomposeChar(ch: string): RadicalEntry | null {
  * Non-Han characters are skipped. Unknown Han characters are reported
  * with an empty component list so the overlay can say so honestly.
  */
-export function decomposeText(text: string): RadicalEntry[] {
+export function decomposeText(text: string): ComponentEntry[] {
 	const seen = new Set<string>();
-	const out: RadicalEntry[] = [];
+	const out: ComponentEntry[] = [];
 	for (const ch of text) {
 		if (!isHanChar(ch) || seen.has(ch)) continue;
 		seen.add(ch);
@@ -125,8 +142,8 @@ export function decomposeText(text: string): RadicalEntry[] {
 
 // --- Overlay controller (plain DOM, reuses the .ann-pop card style) ---
 
-const OVERLAY_ID = "radicals-overlay";
-const STYLE_ID = "radicals-overlay-style";
+const OVERLAY_ID = "han-parts-overlay";
+const STYLE_ID = "han-parts-overlay-style";
 
 function reducedMotion(): boolean {
 	return (
@@ -141,15 +158,18 @@ function ensureStyle(): void {
 	const style = document.createElement("style");
 	style.id = STYLE_ID;
 	style.textContent = [
-		".ann-pop.radicals-pop { width: 20rem; }",
-		".radicals-pop h2 { margin: 0 0 0.5rem; font-size: 1rem; }",
-		".radicals-pop ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.45rem; }",
-		".radicals-pop li { display: flex; gap: 0.6rem; align-items: baseline; }",
-		".radicals-pop .rad-char { font-size: 1.6rem; line-height: 1.2; }",
-		".radicals-pop .rad-parts { font-size: 1.05rem; }",
-		".radicals-pop .rad-missing { opacity: 0.65; font-size: 0.9rem; }",
-		".radicals-pop .ann-pop-row { margin-top: 0.9rem; }",
-		"@media (prefers-reduced-motion: reduce) { .ann-pop.radicals-pop { animation: none; } }"
+		".ann-pop.han-parts-pop { width: 20rem; }",
+		".han-parts-pop h2 { margin: 0 0 0.5rem; font-size: 1rem; }",
+		".han-parts-pop ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.45rem; }",
+		".han-parts-pop li { display: flex; gap: 0.6rem; align-items: baseline; }",
+		".han-parts-pop .hp-char { font-size: 1.6rem; line-height: 1.2; }",
+		".han-parts-pop .hp-parts { font-size: 1.05rem; }",
+		".han-parts-pop .hp-missing { opacity: 0.65; font-size: 0.9rem; }",
+		".han-parts-pop .hp-toggle { display: flex; gap: 0.35rem; margin: 0 0 0.6rem; }",
+		".han-parts-pop .hp-toggle button { font-size: 0.8rem; padding: 0.15rem 0.5rem; }",
+		".han-parts-pop .hp-toggle button[aria-pressed=\"true\"] { font-weight: 700; }",
+		".han-parts-pop .ann-pop-row { margin-top: 0.9rem; }",
+		"@media (prefers-reduced-motion: reduce) { .ann-pop.han-parts-pop { animation: none; } }"
 	].join("\n");
 	document.head.appendChild(style);
 }
@@ -164,53 +184,108 @@ function clampPos(x: number, y: number, width: number): { x: number; y: number }
 }
 
 /**
- * Open the radicals overlay at an anchor point (e.g. the selection
- * menu position). Reuses the existing .ann-pop card styling — no new
- * visual language. Returns the overlay element. Reopening replaces
- * the previous overlay. Respects prefers-reduced-motion (no
- * fade/slide animation when reduced motion is requested).
+ * Whether the Parts button may appear for a highlight: the feature
+ * toggle is on AND the highlight holds more than one character with
+ * at least one Han character in it. Single Han characters belong to
+ * Inspect; single non-Han characters get no Han UI at all.
  */
-export function openRadicalsOverlay(
+export function shouldShowHanParts(quote: string, enabled: boolean): boolean {
+	if (!enabled) return false;
+	const trimmed = quote.trim();
+	if ([...trimmed].length <= 1) return false;
+	return decomposeText(trimmed).length > 0;
+}
+
+/**
+ * Open the character components overlay at an anchor point (e.g. the
+ * selection menu position). Reuses the existing .ann-pop card
+ * styling — no new visual language. Returns the overlay element.
+ * Reopening replaces the previous overlay. Respects
+ * prefers-reduced-motion (no fade/slide animation when reduced
+ * motion is requested).
+ *
+ * Language: kana present reads as Japanese, else Chinese (same rule
+ * as `ttsLangFor`). Han-only text is genuinely ambiguous, so the
+ * overlay offers a small JP/中文 toggle to flip a wrong prediction;
+ * the toggle sets the `lang` of every shown character.
+ */
+export function openHanPartsOverlay(
 	anchor: { x: number; y: number },
 	text: string
 ): HTMLElement {
-	closeRadicalsOverlay();
+	closeHanPartsOverlay();
 	ensureStyle();
 	const entries = decomposeText(text);
+	let lang: HanOverlayLang = hanOverlayLangFor(text);
 	const el = document.createElement("div");
 	el.id = OVERLAY_ID;
-	el.className = "ann-pop radicals-pop";
+	el.className = "ann-pop han-parts-pop";
 	el.setAttribute("role", "dialog");
-	el.setAttribute("aria-label", "Character radicals");
+	el.setAttribute("aria-label", "Character components");
 	const pos = clampPos(anchor.x, anchor.y, 320);
 	el.style.left = `${pos.x}px`;
 	el.style.top = `${pos.y}px`;
 	if (reducedMotion()) el.style.animation = "none";
 
 	const title = document.createElement("h2");
-	title.textContent = "Radicals";
+	title.textContent = "Character components";
 	el.appendChild(title);
+
+	const applyLang = (): void => {
+		for (const node of el.querySelectorAll(".hp-char")) {
+			(node as HTMLElement).lang = HAN_OVERLAY_LANG_TAG[lang];
+		}
+		for (const node of el.querySelectorAll(".hp-toggle button")) {
+			const btn = node as HTMLButtonElement;
+			btn.setAttribute("aria-pressed", String(btn.dataset.lang === lang));
+		}
+	};
+
+	if (isHanOverlayLangUncertain(text)) {
+		const toggle = document.createElement("div");
+		toggle.className = "hp-toggle";
+		toggle.setAttribute("role", "group");
+		toggle.setAttribute("aria-label", "Reading language");
+		for (const choice of [
+			{ value: "ja", label: "JP", tip: "Show Japanese reading" },
+			{ value: "zh", label: "中文", tip: "Show Chinese reading" }
+		] as const) {
+			const btn = document.createElement("button");
+			btn.type = "button";
+			btn.dataset.lang = choice.value;
+			btn.textContent = choice.label;
+			btn.title = choice.tip;
+			btn.setAttribute("aria-label", choice.tip);
+			btn.setAttribute("aria-pressed", String(choice.value === lang));
+			btn.addEventListener("click", () => {
+				lang = choice.value;
+				applyLang();
+			});
+			toggle.appendChild(btn);
+		}
+		el.appendChild(toggle);
+	}
 
 	const list = document.createElement("ul");
 	if (entries.length === 0) {
 		const li = document.createElement("li");
-		li.className = "rad-missing";
+		li.className = "hp-missing";
 		li.textContent = "No Han characters in the selection.";
 		list.appendChild(li);
 	}
 	for (const entry of entries) {
 		const li = document.createElement("li");
 		const char = document.createElement("span");
-		char.className = "rad-char";
-		char.lang = "ja";
+		char.className = "hp-char";
+		char.lang = HAN_OVERLAY_LANG_TAG[lang];
 		char.textContent = entry.char;
 		li.appendChild(char);
 		const parts = document.createElement("span");
 		if (entry.components.length > 0) {
-			parts.className = "rad-parts";
+			parts.className = "hp-parts";
 			parts.textContent = entry.components.join(" + ");
 		} else {
-			parts.className = "rad-missing";
+			parts.className = "hp-missing";
 			parts.textContent = "components unavailable offline";
 		}
 		li.appendChild(parts);
@@ -227,15 +302,15 @@ export function openRadicalsOverlay(
 	closeBtn.type = "button";
 	closeBtn.className = "ann-save";
 	closeBtn.textContent = "Close";
-	closeBtn.setAttribute("aria-label", "Close radicals overlay");
-	closeBtn.addEventListener("click", () => closeRadicalsOverlay());
+	closeBtn.setAttribute("aria-label", "Close character components overlay");
+	closeBtn.addEventListener("click", () => closeHanPartsOverlay());
 	row.appendChild(closeBtn);
 	el.appendChild(row);
 
 	el.addEventListener("keydown", (event) => {
 		if (event.key === "Escape") {
 			event.stopPropagation();
-			closeRadicalsOverlay();
+			closeHanPartsOverlay();
 		}
 	});
 	document.body.appendChild(el);
@@ -243,12 +318,12 @@ export function openRadicalsOverlay(
 	return el;
 }
 
-/** Close the radicals overlay if one is open. */
-export function closeRadicalsOverlay(): void {
+/** Close the character components overlay if one is open. */
+export function closeHanPartsOverlay(): void {
 	document.getElementById(OVERLAY_ID)?.remove();
 }
 
-/** True while the radicals overlay is open. */
-export function isRadicalsOverlayOpen(): boolean {
+/** True while the character components overlay is open. */
+export function isHanPartsOverlayOpen(): boolean {
 	return document.getElementById(OVERLAY_ID) !== null;
 }

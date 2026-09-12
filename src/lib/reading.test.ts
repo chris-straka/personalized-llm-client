@@ -5,6 +5,9 @@ import {
 	detectScripts,
 	classifyAidLine,
 	hasAmbiguousAidLine,
+	hanOverlayLangFor,
+	isHanOverlayLangUncertain,
+	HAN_OVERLAY_LANG_TAG,
 	preferredLocalAid,
 	extractWordAt,
 	ttsLangFor,
@@ -85,6 +88,29 @@ describe("script detection", () => {
 		expect(hasAmbiguousAidLine("こんにちは！\n交通規則")).toBe(true);
 		expect(hasAmbiguousAidLine("漢字を読む")).toBe(false);
 		expect(hasAmbiguousAidLine("Hello world")).toBe(false);
+	});
+
+	it("predicts the components-overlay language like ttsLangFor", () => {
+		// Kana present = Japanese, else Chinese default.
+		expect(hanOverlayLangFor("漢字を読む")).toBe("ja");
+		expect(hanOverlayLangFor("テストtest测试")).toBe("ja");
+		expect(hanOverlayLangFor("你好世界")).toBe("zh");
+		expect(hanOverlayLangFor("「警察官、交通規則違反者検挙中」")).toBe("zh");
+		expect(hanOverlayLangFor("hello")).toBe("zh");
+		// Same locale tags the speech path uses.
+		expect(HAN_OVERLAY_LANG_TAG[hanOverlayLangFor("漢字を読む")]).toBe("ja-JP");
+		expect(HAN_OVERLAY_LANG_TAG[hanOverlayLangFor("你好世界")]).toBe("zh-CN");
+		expect(HAN_OVERLAY_LANG_TAG[hanOverlayLangFor("漢字を読む")]).toBe(
+			ttsLangFor("読む", "en-US")
+		);
+	});
+
+	it("marks Han-only text as an uncertain guess", () => {
+		expect(isHanOverlayLangUncertain("漢字")).toBe(true);
+		expect(isHanOverlayLangUncertain("你好世界")).toBe(true);
+		expect(isHanOverlayLangUncertain("漢字を読む")).toBe(false);
+		expect(isHanOverlayLangUncertain("hello")).toBe(false);
+		expect(isHanOverlayLangUncertain("ひらがな")).toBe(false);
 	});
 
 	it("maps reply-language pills to their local aid", () => {

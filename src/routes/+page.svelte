@@ -137,6 +137,7 @@
 	import { hoverTranslateWithProvider } from "$lib/builtinAi";
 	import { switchChatWithTransition } from "$lib/viewTransitions";
 	import { getInspectData, shouldShowInspect } from "$lib/inspect";
+	import { openHanPartsOverlay, shouldShowHanParts } from "$lib/radicals";
 	import {
 		clampSideviewWidth,
 		hideSideview,
@@ -174,11 +175,15 @@
 		MODEL_AID_FOR_SCRIPT,
 		extractWordAt,
 		ttsLangFor,
+		hanOverlayLangFor,
+		isHanOverlayLangUncertain,
+		HAN_OVERLAY_LANG_TAG,
 		runModelAid,
 		aidTargetLines,
 		spliceAidResult,
 		resolveAidKinds,
-		type LocalAid
+		type LocalAid,
+		type HanOverlayLang
 	} from "$lib/reading";
 	import { isFuriganaCached } from "$lib/furigana";
 	import { buildSearchDocs, chatMatchesQuery, findMessageIndices, type SearchHit } from "$lib/chatSearch";
@@ -752,6 +757,13 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	 * backdrop click, or the × button.
 	 */
 	let inspectChar = $state<string | null>(null);
+	/**
+	 * Reading locale for the Han overlays (Inspect + Parts): kana
+	 * present reads as Japanese, else Chinese — the same rule as
+	 * `ttsLangFor`. Han-only text is genuinely ambiguous, so both
+	 * overlays offer a small JP/中文 toggle that writes this state.
+	 */
+	let inspectLang = $state<HanOverlayLang>("zh");
 	/** Current step of the schematic stroke preview (1-based). */
 	let inspectStroke = $state(1);
 	const inspectData = $derived(inspectChar ? getInspectData(inspectChar) : null);
@@ -780,6 +792,17 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		const quote = selMenu.quote.trim();
 		if (!shouldShowInspect(quote, settings.inspectEnabled)) return;
 		inspectChar = quote;
+		inspectLang = hanOverlayLangFor(quote);
+		clearSelection();
+		selMenu = null;
+	}
+	/** Open the character components overlay (Parts) for a multi-char Han highlight. */
+	function openHanParts(): void {
+		if (!selMenu) return;
+		const quote = selMenu.quote.trim();
+		if (!shouldShowHanParts(quote, settings.inspectEnabled)) return;
+		inspectLang = hanOverlayLangFor(quote);
+		openHanPartsOverlay({ x: selMenu.x, y: selMenu.y }, quote);
 		clearSelection();
 		selMenu = null;
 	}
@@ -6415,7 +6438,8 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 					click-away exemption in onMouseUp, or the tap collapses
 					the highlight and clears the menu before onclick fires.
 					Inspect docks beside Annotate for single Han characters
-					with the setting on. -->
+					with the setting on; Parts docks there for
+					multi-character Han highlights. -->
 					<button
 						type="button"
 						class="ann-dock"
@@ -6437,6 +6461,18 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 							ontouchend={inspectTouch}
 							onclick={openInspect}
 						>Inspect</button>
+					{/if}
+					{#if shouldShowHanParts(selMenu.quote, settings.inspectEnabled)}
+						<button
+							type="button"
+							class="ann-dock"
+							aria-label="Show character components"
+							transition:fade={{ duration: 150 }}
+							onmousedown={noteMenuPress}
+							ontouchstart={noteMenuBtnTouch}
+							ontouchend={inspectTouch}
+							onclick={openHanParts}
+						>Parts</button>
 					{/if}
 				{/if}
 				{#if annotations.length > 0}
@@ -6765,7 +6801,8 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			composer instead (the native callout owns the text space).
 			Copy and Read Aloud live on the message action rows
 			instead of doubling here. Inspect joins Annotate only for
-			a single kanji/hanzi highlight with the setting on. -->
+			a single kanji/hanzi highlight with the setting on; Parts
+			joins it for multi-character Han highlights. -->
 			<button
 				type="button"
 				onclick={annotate}
@@ -6781,6 +6818,16 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 					ontouchend={inspectTouch}
 					onclick={openInspect}
 				>Inspect</button>
+			{/if}
+			{#if shouldShowHanParts(selMenu.quote, settings.inspectEnabled)}
+				<button
+					type="button"
+					aria-label="Show character components"
+					onmousedown={noteMenuPress}
+					ontouchstart={noteMenuBtnTouch}
+					ontouchend={inspectTouch}
+					onclick={openHanParts}
+				>Parts</button>
 			{/if}
 		</div>
 	{/if}
@@ -7056,10 +7103,12 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	{/if}
 	{#if inspectChar && inspectData}
 		<!-- Character Inspect overlay: same modal-veil/modal pattern as
-		the shortcuts overlay. Radicals come from the offline curated
+		the shortcuts overlay. Components come from the offline curated
 		table (radicals.ts); count + definition from the compact offline
 		table (inspect.ts). The stroke preview is schematic (stepped by
-		stroke count) until per-character vector data lands. -->
+		stroke count) until per-character vector data lands. The
+		JP/中文 toggle flips the predicted reading locale (kana =
+		Japanese, else Chinese) for genuinely ambiguous Han text. -->
 		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 		<!-- Backdrop click only; keyboard users get Esc and the × button. -->
 		<div
@@ -7070,7 +7119,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		>
 			<div class="modal inspect-modal" role="dialog" aria-modal="true" aria-labelledby="inspect-heading" data-fade-scroll>
 				<div class="modal-head">
-					<h2 id="inspect-heading">Inspect <span lang="ja">{inspectData.char}</span></h2>
+					<h2 id="inspect-heading">Inspect <span lang={HAN_OVERLAY_LANG_TAG[inspectLang]}>{inspectData.char}</span></h2>
 					<button
 						type="button"
 						aria-label="Close character inspect"
@@ -7080,13 +7129,31 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 						×
 					</button>
 				</div>
+				{#if inspectChar && isHanOverlayLangUncertain(inspectChar)}
+					<div class="inspect-lang" role="group" aria-label="Reading language">
+						<button
+							type="button"
+							aria-pressed={inspectLang === "ja"}
+							aria-label="Show Japanese reading"
+							title="Show Japanese reading"
+							onclick={() => (inspectLang = "ja")}
+						>JP</button>
+						<button
+							type="button"
+							aria-pressed={inspectLang === "zh"}
+							aria-label="Show Chinese reading"
+							title="Show Chinese reading"
+							onclick={() => (inspectLang = "zh")}
+						>中文</button>
+					</div>
+				{/if}
 				<div class="inspect-body">
-					<div class="inspect-char" lang="ja" aria-hidden="true">{inspectData.char}</div>
+					<div class="inspect-char" lang={HAN_OVERLAY_LANG_TAG[inspectLang]} aria-hidden="true">{inspectData.char}</div>
 					<div class="inspect-facts">
 						{#if inspectData.components.length > 0}
-							<p><strong>Radicals:</strong> {inspectData.components.join(" + ")}</p>
+							<p><strong>Components:</strong> {inspectData.components.join(" + ")}</p>
 						{:else}
-							<p class="note">Radical breakdown unavailable offline for this character.</p>
+							<p class="note">Component breakdown unavailable offline for this character.</p>
 						{/if}
 						{#if inspectData.strokeCount !== null}
 							<p><strong>Strokes:</strong> {inspectData.strokeCount}</p>
@@ -7622,6 +7689,19 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	facts, schematic stroke progress below. */
 	.inspect-modal {
 		width: min(28rem, calc(100vw - 3rem));
+	}
+	/* Reading-locale toggle: small JP/中文 pair for ambiguous Han text. */
+	.inspect-lang {
+		display: flex;
+		gap: 0.35rem;
+		margin: 0.2rem 0 0.1rem;
+	}
+	.inspect-lang button {
+		font-size: 0.8rem;
+		padding: 0.15rem 0.5rem;
+	}
+	.inspect-lang button[aria-pressed="true"] {
+		font-weight: 700;
 	}
 	.inspect-body {
 		display: flex;

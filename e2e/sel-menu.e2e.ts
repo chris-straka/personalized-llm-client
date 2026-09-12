@@ -24,9 +24,10 @@ test.describe("desktop", () => {
 		await page.locator(".toast").waitFor({ state: "hidden", timeout: 15000 }).catch(() => {});
 	}
 
-	/** The menu is Annotate alone: the OS bubble owns Copy/Translate,
-	and whole-message copy/speak live on the action rows. (Character
-	components come back as a later TODO, after latex/code rendering.) */
+	/** The menu is Annotate alone here (the Han aids stay off by
+	default): the OS bubble owns Copy/Translate, and whole-message
+	copy/speak live on the action rows. With the Inspect setting on,
+	Han highlights add Inspect (single char) or Parts (multi-char). */
 	test("selection menu offers Annotate alone", async ({ page }) => {
 		await selectWord(page);
 		const menu = page.locator(".sel-menu");
