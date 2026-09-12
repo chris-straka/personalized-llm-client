@@ -71,17 +71,25 @@ cut; release chain outcome still unconfirmed (see Now).
 
 ## Pile: waypoint + sidebar chrome (added Sep 2026, user pile-on)
 
-- [ ] Waypoint jump icon in the main text prompt must not appear on desktop
+- [x] Waypoint jump icon in the main text prompt must not appear on desktop
       or web (the far-right waypoint control already covers it there).
-- [ ] Far-right waypoint overlay opens at the MIDDLE option, not the top.
-- [ ] After jumping via a waypoint option, hovering outside the overlay
+      (Done on work/merge-batch 62e56f1; `waypoint-sidebar.e2e.ts` 5/5 green at b3cc2d5.)
+- [x] Far-right waypoint overlay opens at the MIDDLE option, not the top.
+      (Done on work/merge-batch 62e56f1; `waypoint-sidebar.e2e.ts` 5/5 green at b3cc2d5.)
+- [x] After jumping via a waypoint option, hovering outside the overlay
       closes it.
-- [ ] Space with nothing selected always focuses the main text prompt
+      (Done on work/merge-batch 62e56f1; `waypoint-sidebar.e2e.ts` 5/5 green at b3cc2d5.)
+- [x] Space with nothing selected always focuses the main text prompt
       (never selects the top chat).
-- [ ] Sidebar message counter caps at two digits: 99+ past 99 messages.
-- [ ] Export button must not shift on hover (layout shift).
-- [ ] Sidebar X button: smaller button (same size as export), larger X
+      (Done on work/merge-batch 62e56f1; `resolveSidebarSpaceEnter` unit +
+      `waypoint-sidebar.e2e.ts` green at b3cc2d5.)
+- [x] Sidebar message counter caps at two digits: 99+ past 99 messages.
+      (Done on work/merge-batch 62e56f1; `waypoint-sidebar.e2e.ts` 5/5 green at b3cc2d5.)
+- [x] Export button must not shift on hover (layout shift).
+      (Done on work/merge-batch 62e56f1; `waypoint-sidebar.e2e.ts` 5/5 green at b3cc2d5.)
+- [x] Sidebar X button: smaller button (same size as export), larger X
       glyph; the saved space goes left of the export button.
+      (Done on work/merge-batch 62e56f1; `waypoint-sidebar.e2e.ts` 5/5 green at b3cc2d5.)
 
 ## Pile: composer
 
