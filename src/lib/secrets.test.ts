@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { readFile } from "node:fs/promises";
 import { describe, it, expect, beforeEach } from "vitest";
 import {
 	getSecret,
@@ -8,7 +9,8 @@ import {
 	persistSecrets,
 	withBlankedKeys,
 	secretAccount,
-	tauriBackendAvailable
+	tauriBackendAvailable,
+	KEYCHAIN_SERVICE
 } from "./secrets";
 import { defaultSettings } from "./settings";
 
@@ -80,6 +82,26 @@ describe("secrets fallback (no Tauri shell)", () => {
 		settings.providers["deepseek"]!.apiKey = "keep";
 		await expect(hydrateSecrets(settings)).resolves.toEqual([]);
 		expect(settings.providers["deepseek"]!.apiKey).toBe("keep");
+	});
+
+	it("freezes the secretAccount format (renaming orphans stored secrets)", () => {
+		expect(secretAccount("deepseek")).toBe("provider:deepseek");
+		expect(secretAccount("openai")).toBe("provider:openai");
+	});
+
+	it("keeps one keychain identity across frontend, Rust, and bundle id", async () => {
+		// Ad-hoc dev rebuilds change code identity and macOS re-prompts;
+		// a service/identifier drift would orphan entries the same way,
+		// so all three spellings are locked together here.
+		// Vitest runs from the repo root, so these stay CWD-relative.
+		const [confRaw, libRs] = await Promise.all([
+			readFile("src-tauri/tauri.conf.json", "utf8"),
+			readFile("src-tauri/src/lib.rs", "utf8")
+		]);
+		const identifier = (JSON.parse(confRaw) as { identifier?: unknown }).identifier;
+		expect(identifier).toBe(KEYCHAIN_SERVICE);
+		const service = /const KEYCHAIN_SERVICE: &str = "([^"]+)"/.exec(libRs)?.[1];
+		expect(service).toBe(KEYCHAIN_SERVICE);
 	});
 
 	it("persists keys and blanks copies for shell storage", async () => {

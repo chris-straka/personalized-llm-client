@@ -389,13 +389,18 @@ to whole words` in `annotations-ux.e2e.ts`. No code change needed.)
 - [x] Remove CJK font + lesson-audio settings sections (lesson-audio froze app).
       (Done on work/stream-chrome2: "settings show no study-fonts or
       lesson-audio sections" voice-data e2e green.)
-- [ ] Keychain re-prompt: stable self-signed identity for dev rebuilds.
+- [x] Keychain re-prompt: stable self-signed identity for dev rebuilds.
       (Decision Sep 2026, stream-platform: ad-hoc dev binaries change
       identity every rebuild, so the Keychain ACL re-prompts. Fix is a
       persistent local self-signed "Ccez Dev" code-signing cert (Keychain
       Access -> Certificate Assistant) + `codesign -s` on the dev binary;
-      never commit the identity. Still needs a real Mac rebuild cycle to
-      confirm no re-prompt — unverified.)
+      never commit the identity. Done Sep 2026 on work/s3-leftover:
+      code-side identity locked — `KEYCHAIN_SERVICE` exported from
+      `src/lib/secrets.ts`, mirrored doc on Rust `KEYCHAIN_SERVICE`, and
+      `secrets.test.ts` pins frontend == Rust == bundle identifier plus
+      the frozen `secretAccount` format (9/9 green, eslint clean); no
+      +page.svelte change needed. Still needs a real Mac rebuild cycle
+      to confirm no re-prompt — device cycles unverifiable here.)
 - [x] Updater in dev: explain unavailable instead of fetch error.
       (Done Sep 2026 on work/stream-platform: `updateRouteFor` gains an
       isDev leg returning a `dev` route; the settings updater path shows a

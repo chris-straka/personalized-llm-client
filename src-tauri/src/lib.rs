@@ -71,7 +71,19 @@ use dictate_unsupported::{dictate_start, dictate_stop};
 /// `sync-secret-service` features in `Cargo.toml`); Android Keystore
 /// via `secrets_android` (keyring has no Android backend — it falls
 /// back to an in-memory mock). Service name matches the Tauri bundle
-/// identifier.
+/// identifier (`identifier` in `tauri.conf.json`, mirrored as
+/// `KEYCHAIN_SERVICE` in `src/lib/secrets.ts` — a Vitest
+/// identity-stability test locks all three together). Keep it frozen:
+/// renaming orphans every stored key, the same mass re-prompt symptom
+/// as the dev-rebuild issue below.
+///
+/// Dev-rebuild re-prompt: ad-hoc-signed dev binaries change code
+/// identity every rebuild, so the Keychain ACL re-prompts. Sign the
+/// dev binary with the persistent local self-signed "Ccez Dev"
+/// code-signing cert instead (Keychain Access -> Certificate
+/// Assistant, then `codesign -s "Ccez Dev" <dev binary>`); that
+/// identity lives only on the dev machine and is never committed.
+/// Confirming the re-prompt is gone needs a real Mac rebuild cycle.
 const KEYCHAIN_SERVICE: &str = "studio.ccez.app";
 
 /// Read a secret; `None` when nothing is stored under `account`.

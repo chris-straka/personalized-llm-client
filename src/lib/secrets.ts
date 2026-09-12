@@ -23,6 +23,21 @@ const FALLBACK_PREFIX = "ccez-keychain:";
 /** Prefix marking an AES-GCM envelope (see above). */
 const ENVELOPE_V1 = "gcm1:";
 
+/**
+ * Keychain identity shared with the Rust backend: the service name for
+ * every `keychain_*` entry. Must stay identical to `KEYCHAIN_SERVICE`
+ * in `src-tauri/src/lib.rs` and the bundle `identifier` in
+ * `src-tauri/tauri.conf.json` (locked by the identity-stability test
+ * below in `secrets.test.ts`). macOS looks stored secrets up by
+ * service and gates them on the binary's code identity, so a service
+ * drift silently orphans every stored API key — the same mass
+ * re-prompt symptom as the ad-hoc dev-rebuild issue. Dev rebuilds
+ * must be re-signed with the persistent local self-signed "Ccez Dev"
+ * cert (`codesign -s`); that identity lives only on the dev machine
+ * and is never committed.
+ */
+export const KEYCHAIN_SERVICE = "studio.ccez.app";
+
 export function secretAccount(providerId: string): string {
 	return `provider:${providerId}`;
 }
