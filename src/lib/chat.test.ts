@@ -5,6 +5,8 @@ import {
 	newChat,
 	selectChat,
 	setChatReplyLang,
+	chatVoiceReadback,
+	setChatVoice,
 	deleteChat,
 	deleteAllChats,
 	deleteMessage,
@@ -480,6 +482,40 @@ describe("chat", () => {
 		store.setItem("ccez-studio-chats-v1", JSON.stringify(raw));
 		const healed = createChatState(store);
 		expect(healed.chats[1]?.replyLang).toBeNull();
+	});
+
+	it("keeps a voice-readback override per chat, following the global default when unset", async () => {
+		const { state, store } = stateWith(freshStore());
+		newChat(state, store);
+		const [first, second] = state.chats;
+		// No override anywhere: both follow the global default.
+		expect(chatVoiceReadback(first!, false)).toBe(false);
+		expect(chatVoiceReadback(second!, true)).toBe(true);
+		setChatVoice(state, first!.id, true, store);
+		setChatVoice(state, second!.id, false, store);
+		// Overrides win over the default in both directions.
+		expect(chatVoiceReadback(first!, false)).toBe(true);
+		expect(chatVoiceReadback(second!, true)).toBe(false);
+		// Switching chats surfaces each chat's own override.
+		selectChat(state, first!.id);
+		expect(chatVoiceReadback(activeChat(state), false)).toBe(true);
+		selectChat(state, second!.id);
+		expect(chatVoiceReadback(activeChat(state), false)).toBe(false);
+		// Overrides persist; clearing one returns to follow-global.
+		const again = createChatState(store);
+		expect(chatVoiceReadback(again.chats[0]!, false)).toBe(true);
+		expect(chatVoiceReadback(again.chats[1]!, true)).toBe(false);
+		setChatVoice(again, again.chats[0]!.id, null, store);
+		expect(chatVoiceReadback(again.chats[0]!, true)).toBe(true);
+		// Pre-override stores carry no flag: they follow the default.
+		const raw = JSON.parse(store.getItem("ccez-studio-chats-v1") as string) as Array<{
+			voice: unknown;
+		}>;
+		for (const c of raw) delete c.voice;
+		store.setItem("ccez-studio-chats-v1", JSON.stringify(raw));
+		const healed = createChatState(store);
+		expect(healed.chats[0]?.voice).toBeNull();
+		expect(chatVoiceReadback(healed.chats[0]!, true)).toBe(true);
 	});
 
 	it("persists across instances and tolerates corruption", async () => {

@@ -9,6 +9,8 @@
 		newChat,
 		selectChat,
 		setChatReplyLang,
+		chatVoiceReadback,
+		setChatVoice,
 		deleteChat,
 		deleteAllChats,
 		deleteMessage,
@@ -2691,7 +2693,7 @@ import { isPromptIdle } from "$lib/chrome";
 	}
 
 	function maybeSpeakReply(inChat = chat): void {
-		if (!settings.voice) return;
+		if (!chatVoiceReadback(inChat, settings.voice)) return;
 		// Pinned to the chat that was sent from: completing while the
 		// user looks elsewhere must not read back some other chat's
 		// last message.
@@ -2718,10 +2720,21 @@ import { isPromptIdle } from "$lib/chrome";
 		if (notifyReplyDone("Reply finished", body)) setStudyBadge(1);
 	}
 
+	/**
+	 * Effective readback for the visible chat: its own override when
+	 * set, else the global default (off at every launch). Reactive —
+	 * switching chats re-renders the toggle with that chat's state.
+	 */
+	function voiceOn(): boolean {
+		return chatVoiceReadback(chat, settings.voice);
+	}
+
 	function setVoiceEnabled(on: boolean): void {
-		settings.voice = on;
+		// Per-chat setting: the toggle writes this chat's override
+		// (persisted with the chats), never the global default — other
+		// chats keep theirs.
+		setChatVoice(chatState, chatState.activeChatId, on);
 		if (!on) stopVoice();
-		persistSettings();
 	}
 
 	function toggleVoice(): void {
@@ -2733,7 +2746,7 @@ import { isPromptIdle } from "$lib/chrome";
 			stopVoice();
 			return;
 		}
-		setVoiceEnabled(!settings.voice);
+		setVoiceEnabled(!voiceOn());
 	}
 
 	/** Raw speech-recognition errors translated into something actionable. */
@@ -4279,7 +4292,7 @@ import { isPromptIdle } from "$lib/chrome";
 			if (event.ctrlKey && event.altKey && event.code === "KeyS") {
 				event.preventDefault();
 				event.stopPropagation();
-				setVoiceEnabled(!settings.voice);
+				setVoiceEnabled(!voiceOn());
 				return;
 			}
 			if (
@@ -5969,10 +5982,10 @@ import { isPromptIdle } from "$lib/chrome";
 				<button
 					type="button"
 					class="voice-float"
-					class:on={settings.voice}
+					class:on={voiceOn()}
 					title={speakingId !== null ? "Stop reading aloud" : tip(`Toggle voice readback (Ctrl+${altm}+S)`, "Toggle voice readback")}
 					aria-label={speakingId !== null ? "Stop reading aloud" : "Toggle voice readback"}
-					aria-pressed={settings.voice}
+					aria-pressed={voiceOn()}
 					onclick={toggleVoice}
 				>
 					<ActionIcon kind="speak" />
@@ -9145,6 +9158,11 @@ import { isPromptIdle } from "$lib/chrome";
 	setting instead of holding their fixed 0.75rem. */
 	main.scale-actions .actions button {
 		font-size: calc(0.75rem * var(--font-scale, 1));
+	}
+	/* Same opt-in for the logo icons: the glyph holds its fixed
+	1.05rem height otherwise, so larger text leaves tiny icons. */
+	main.scale-actions .actions .icon-btn :global(.action-glyph) {
+		height: calc(1.05rem * var(--font-scale, 1));
 	}
 	/* Loading buttons hold their look while the dots pulse. */
 	.actions button:disabled {

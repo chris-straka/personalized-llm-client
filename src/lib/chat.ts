@@ -49,6 +49,12 @@ export interface Chat {
 	messages: ChatMsg[];
 	/** Reply-language pill code for this chat only (null = off). */
 	replyLang: string | null;
+	/**
+	 * Voice-readback override for this chat only: true/false wins over
+	 * the global default, null follows it. Null for every chat written
+	 * before the override existed (see loadChats healing).
+	 */
+	voice: boolean | null;
 }
 
 /**
@@ -80,7 +86,7 @@ export function newChatMsgId(): ChatMsgId {
 }
 
 function blankChat(): Chat {
-	return { id: newChatId(), createdAt: Date.now(), messages: [], replyLang: null };
+	return { id: newChatId(), createdAt: Date.now(), messages: [], replyLang: null, voice: null };
 }
 
 function browserStore(): KeyValueStore | null {
@@ -176,6 +182,27 @@ export function setChatReplyLang(
 	const target = state.chats.find((c) => c.id === id);
 	if (!target) return;
 	target.replyLang = code;
+	persistChats(state, store);
+}
+
+/**
+ * Effective voice readback for one chat: its own override when set,
+ * else the global default. Pure so the page and tests share it.
+ */
+export function chatVoiceReadback(chat: Chat, globalDefault: boolean): boolean {
+	return chat.voice ?? globalDefault;
+}
+
+/** Set (or clear back to follow-global) one chat's readback override. Persists like siblings. */
+export function setChatVoice(
+	state: ChatState,
+	id: ChatId,
+	value: boolean | null,
+	store?: KeyValueStore
+): void {
+	const target = state.chats.find((c) => c.id === id);
+	if (!target) return;
+	target.voice = value;
 	persistChats(state, store);
 }
 
@@ -591,6 +618,10 @@ function loadChats(state: ChatState, store: KeyValueStore): void {
 					if (typeof c.replyLang !== "string" || !replyLanguageFor(c.replyLang)) {
 						c.replyLang = null;
 					}
+					// Pre-override chats (and hand-edited stores) carry no
+					// voice flag: they follow the global default, never a
+					// guessed value.
+					if (typeof c.voice !== "boolean") c.voice = null;
 					return c;
 				});
 			if (state.chats.length > 0) {
