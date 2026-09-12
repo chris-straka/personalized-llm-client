@@ -9462,7 +9462,8 @@ import { isPromptIdle } from "$lib/chrome";
 	.attach-btn,
 	.paste-btn,
 	.voice-float,
-	.mic-btn {
+	.mic-btn,
+	.wp-jump {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
@@ -9472,7 +9473,16 @@ import { isPromptIdle } from "$lib/chrome";
 		background: none;
 		cursor: pointer;
 		padding: 0.2rem;
+		/* Pinned seat so the glyph em below resolves against the
+		tools row, not whatever font lands on the button. */
+		font-size: 1rem;
 		transition: color 0.18s ease;
+	}
+	/* Tool glyphs ride the row's font size (em, not the component's
+	fixed rem): paperclip, mic, voice, and jump icons scale with the
+	composer instead of staying tiny at large text. */
+	.prompt-tools :global(.action-glyph) {
+		height: 1.05em;
 	}
 	.paste-btn:disabled {
 		opacity: 0.4;
