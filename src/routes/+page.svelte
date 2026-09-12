@@ -6626,33 +6626,35 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 				<dl class="keys">
 					<div><dt>Shortcuts show/hide</dt><dd>{isMac ? "⇧⌘/" : "Ctrl+Shift+/"} · middle-click</dd></div>
 					<div><dt>New line</dt><dd>Shift+Enter</dd></div>
+					<div><dt>Send message</dt><dd>Enter in the prompt · {isMac ? "⌘Enter" : "Ctrl+Enter"} anywhere</dd></div>
 					<div><dt>Stage message</dt><dd>{altm}+Enter</dd></div>
+					<div><dt>Focus composer</dt><dd>{isMac ? "⇧⌘Space" : "Ctrl+Shift+Space"} from anywhere outside the prompt</dd></div>
 					<div><dt>Switch model / key</dt><dd>Ctrl+{altm}+← / →</dd></div>
-					<div><dt>Thinking level</dt><dd>Ctrl+{altm}+↓ / ↑ (cycles levels)</dd></div>
+					<div><dt>Thinking level</dt><dd>Ctrl+{altm}+↓ / ↑ cycle levels</dd></div>
 					<div><dt>Scroll messages</dt><dd>J / K · gg top · G bottom · Ctrl+U / Ctrl+D skip</dd></div>
 					<div><dt>Scroll chat (nothing selected)</dt><dd>J / K glide on hold · D / U fast · gg top · G bottom · z / Z hovered top / bottom</dd></div>
-					<div><dt>Exit fullscreen</dt><dd>Hold Esc (a tap still closes menus)</dd></div>
+					<div><dt>Exit fullscreen</dt><dd>Hold Esc · a tap still closes menus</dd></div>
 					<div><dt>Chat list</dt><dd>{isMac ? "⌘B or ⇧⌘H" : "Ctrl+B or Ctrl+Shift+H"} · opens on the current chat · J / K walk · Space enters</dd></div>
 					<div><dt>Export chat</dt><dd>Chats-list row icon, left of ×</dd></div>
 					<div><dt>Search chats</dt><dd>{isMac ? "⌘P" : "Ctrl+P"} · J / K move · Esc to list · Enter jumps</dd></div>
 					<div><dt>Find in chat</dt><dd>{isMac ? "⌘F" : "Ctrl+F"} · Enter cycles hits</dd></div>
-					<div><dt>Newer / older chat</dt><dd>{isMac ? "⇧⌘J / ⇧⌘K" : "Ctrl+Shift+J / Ctrl+Shift+K"} (J mints one past the newest)</dd></div>
+					<div><dt>Newer / older chat</dt><dd>{isMac ? "⇧⌘J / ⇧⌘K" : "Ctrl+Shift+J / Ctrl+Shift+K"} · J past newest mints one</dd></div>
+					<div><dt>New chat</dt><dd>{isMac ? "⌘N or ⇧⌘N" : "Ctrl+N or Ctrl+Shift+N"}</dd></div>
 					<div><dt>Voice readback on/off</dt><dd>Ctrl+{altm}+S</dd></div>
-					<div><dt>Speak hovered word</dt><dd>Right click word</dd></div>
-					<div><dt>Speak highlight</dt><dd>Select text, then right click</dd></div>
 					<div><dt>Thoughts show/hide</dt><dd>Ctrl+O</dd></div>
 					<div><dt>Pasted text expand/collapse</dt><dd>Ctrl+O in the prompt</dd></div>
-					<div><dt>Translate selection</dt><dd>{isMac ? "⌘T" : "Ctrl+T"} over message text (to English, feeds annotation)</dd></div>
-					<div><dt>Browser side panel</dt><dd>{isMac ? "⌘T" : "Ctrl+T"} anywhere (address bar takes focus), Esc closes (one tab)</dd></div>
-					<div><dt>Stop voice / close menus</dt><dd>Esc (outside the prompt)</dd></div>
+					<div><dt>Translate selection</dt><dd>{isMac ? "⌘T" : "Ctrl+T"} over message text · to English · feeds annotation</dd></div>
+					<div><dt>Browser side panel</dt><dd>{isMac ? "⌘T" : "Ctrl+T"} anywhere · address bar takes focus · Esc closes · one tab</dd></div>
+					<div><dt>Stop voice / close menus</dt><dd>Esc outside the prompt</dd></div>
 					<!-- ⌘D is meta-only (Ctrl+D skips in scroll mode), so Windows names Delete alone. -->
 					<div><dt>Delete a message</dt><dd>{isMac ? "Hover the message, then ⌘D or Delete" : "Hover the message, then Delete"}</dd></div>
 					<div><dt>Fold / unfold message</dt><dd>Hover the message, then F or {isMac ? "Option" : "Alt"}-click</dd></div>
-					<div><dt>Rerun a prompt</dt><dd>Rerun button (deletes everything after; Branch keeps it)</dd></div>
-					<div><dt>Reply language</dt><dd>{isMac ? "⌘1…⌘0" : "Ctrl+1…Ctrl+0"} (repeat the key to clear)</dd></div>
+					<div><dt>Rerun a prompt</dt><dd>Rerun button · deletes everything after · Branch keeps it</dd></div>
+					<div><dt>Reply language</dt><dd>{isMac ? "⌘1…⌘0" : "Ctrl+1…Ctrl+0"} · repeat a key to clear</dd></div>
 					<div><dt>Delete this chat</dt><dd>{isMac ? "⇧⌘Delete" : "Ctrl+Shift+Delete"}</dd></div>
 					<div><dt>Delete every chat</dt><dd>{isMac ? "⌥⇧⌘Delete" : "Ctrl+Shift+Alt+Delete"}</dd></div>
-					<div><dt>Cut / delete hovered message</dt><dd>X cuts (copies first) · Delete deletes</dd></div>
+					<div><dt>Cut / delete hovered message</dt><dd>X cuts and copies · Delete deletes</dd></div>
+					<div><dt>Edit own message</dt><dd>Hover own message, then E</dd></div>
 					<div><dt>Text size up / down</dt><dd>{mod}+ / {mod}−</dd></div>
 					<div><dt>Chat width + / −</dt><dd>⇧{mod}+ / ⇧{mod}−</dd></div>
 				</dl>
