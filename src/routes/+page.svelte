@@ -90,7 +90,9 @@
 	import {
 		fileToAttachment,
 		stripImageMarkers,
-		IMAGE_MARKER,
+		imageMarkerInsert,
+		countMarkerLines,
+		removeMarkerLine,
 		type Attachment
 	} from "$lib/attachments";
 		import {
@@ -1178,7 +1180,7 @@ import { isPromptIdle } from "$lib/chrome";
 				grabVideoFrame
 			);
 			await addFiles([file]);
-			editor?.insertText(`\n${IMAGE_MARKER}\n`);
+			editor?.insertText(imageMarkerInsert(editor.getText()));
 		} catch (error) {
 			if (!isPermissionDismissal(error)) {
 				attachError = error instanceof Error ? error.message : String(error);
@@ -1571,7 +1573,17 @@ import { isPromptIdle } from "$lib/chrome";
 		annPop = null;
 		annDraft = "";
 		attachments = [];
-		previewId = null;
+		// Pills are gone: their tags go too, or a stale marker would
+		// reconcile away the next chat's first image.
+		markerSyncMuted = true;
+		try {
+			if (editor && countMarkerLines(editor.getText()) > 0) {
+				editor.setText(stripImageMarkers(editor.getText()));
+			}
+			prevMarkerCount = 0;
+		} finally {
+			markerSyncMuted = false;
+		}
 		selMenu = null;
 		translate = null;
 	}
@@ -1639,13 +1651,41 @@ import { isPromptIdle } from "$lib/chrome";
 
 	function onImagePasted(file: File): void {
 		void addFiles([file]).then(() => {
-			editor?.insertText(`\n${IMAGE_MARKER}\n`);
+			if (!editor) return;
+			markerSyncMuted = true;
+			try {
+				editor.insertText(imageMarkerInsert(editor.getText()));
+				prevMarkerCount = countMarkerLines(editor.getText());
+			} finally {
+				markerSyncMuted = false;
+			}
 		});
 	}
 
+	/**
+	 * Image pill <-> `[Pasted image]` tag two-way removal. Pill → tag:
+	 * dropping the pill removes one marker line from the draft. Tag →
+	 * pill lives in `promptOptions().onDocChange`: when the marker count
+	 * falls, the newest image attachments go with it. `markerSyncMuted`
+	 * bridges the two (programmatic edits must not reconcile against
+	 * themselves); `prevMarkerCount` is the last reconciled count.
+	 */
+	let markerSyncMuted = false;
+	let prevMarkerCount = 0;
+
 	function removeAttachment(id: string): void {
+		const removed = attachments.find((a) => a.id === id);
 		attachments = attachments.filter((a) => a.id !== id);
 		if (previewId === id) previewId = null;
+		if (removed?.kind === "image" && editor) {
+			markerSyncMuted = true;
+			try {
+				editor.setText(removeMarkerLine(editor.getText()));
+				prevMarkerCount = countMarkerLines(editor.getText());
+			} finally {
+				markerSyncMuted = false;
+			}
+		}
 	}
 
 	/**
@@ -3081,7 +3121,16 @@ import { isPromptIdle } from "$lib/chrome";
 		highlightAnnId = null;
 		settleAnnPop();
 		annPop = null;
-		editor?.setText(refs ? refs.text : msg.content);
+		// Message content carries no marker lines (send strips them):
+		// recount instead of reconciling, or the just-loaded image
+		// attachments would drop as "deleted tags".
+		markerSyncMuted = true;
+		try {
+			editor?.setText(refs ? refs.text : msg.content);
+			prevMarkerCount = countMarkerLines(editor?.getText() ?? "");
+		} finally {
+			markerSyncMuted = false;
+		}
 		editor?.setPlaceholder(EDIT_PLACEHOLDER);
 		editor?.focus();
 		scrollToBottom();
@@ -3429,6 +3478,26 @@ import { isPromptIdle } from "$lib/chrome";
 			onImagePaste: onImagePasted,
 			onDocChange: (text) => {
 				hasText = text.trim().length > 0;
+				// Tag → pill half of two-way removal: the user deleted
+				// marker lines by hand, so the newest image attachments
+				// go with them (newest first — pastes stack in order).
+				if (markerSyncMuted) return;
+				const now = countMarkerLines(text);
+				if (now < prevMarkerCount) {
+					let drop = prevMarkerCount - now;
+					const kept = [...attachments];
+					for (let i = kept.length - 1; i >= 0 && drop > 0; i--) {
+						if (kept[i]?.kind === "image") {
+							kept.splice(i, 1);
+							drop--;
+						}
+					}
+					attachments = kept;
+					if (previewId && !attachments.some((a) => a.id === previewId)) {
+						previewId = null;
+					}
+				}
+				prevMarkerCount = now;
 			}
 		};
 	}
