@@ -54,7 +54,9 @@ test("right-clicking a hanzi highlight shows its pinyin only", async ({ page }) 
 	await clickOnText(page);
 	const panel = page.locator(".sel-pinyin");
 	await expect(panel).toBeVisible({ timeout: 10_000 });
-	await expect(panel.locator("rt").first()).toHaveText("nǐ");
+	// Readings only: the characters are right there in the highlight.
+	await expect(panel).toContainText("nǐ");
+	await expect(panel).not.toContainText("你好");
 	// Speech always runs too: the panel is a silent extra.
 	await expect.poll(() => spoken(page), { timeout: 10_000 }).toContain(selected);
 	// Escape dismisses the panel.
@@ -67,17 +69,49 @@ test("clicking off dismisses the panel with the highlight live", async ({ page }
 	await clickOnText(page);
 	const panel = page.locator(".sel-pinyin");
 	await expect(panel).toBeVisible({ timeout: 10_000 });
-	// The panel docks at the highlight's start, not left of it.
+	// The panel centers on the highlight and hugs it (above when
+	// there is headroom, else below).
 	const box = await panel.boundingBox();
-	const selLeft = await page.evaluate(() => {
+	const sel = await page.evaluate(() => {
 		const selection = window.getSelection();
-		if (!selection || selection.rangeCount === 0) return -1;
-		return selection.getRangeAt(0).getBoundingClientRect().left;
+		if (!selection || selection.rangeCount === 0) return null;
+		const rect = selection.getRangeAt(0).getBoundingClientRect();
+		return { cx: rect.left + rect.width / 2, top: rect.top, bottom: rect.bottom };
 	});
 	expect(box).not.toBeNull();
-	expect(Math.abs((box?.x ?? -999) - selLeft)).toBeLessThan(8);
+	expect(sel).not.toBeNull();
+	expect(Math.abs((box?.x ?? -999) + (box?.width ?? 0) / 2 - (sel?.cx ?? -999))).toBeLessThan(10);
+	const above = await panel.evaluate((el) => el.classList.contains("above"));
+	const gap = above
+		? (sel?.top ?? -999) - ((box?.y ?? -999) + (box?.height ?? 0))
+		: (box?.y ?? -999) - (sel?.bottom ?? -999);
+	expect(gap).toBeGreaterThanOrEqual(0);
+	expect(gap).toBeLessThan(12);
 	await page.mouse.click(5, 5);
 	await expect(panel).toHaveCount(0);
+});
+
+test("scrolling carries the panel with the highlight", async ({ page }) => {
+	const long = "lorem ipsum dolor sit amet consectetur adipiscing elit ".repeat(60);
+	await seedChat(page, [{ role: "assistant", content: `你好世界\n\n${long}` }]);
+	await page.goto("/");
+	await expect(page.locator("article.assistant .rendered p").first()).toBeVisible({
+		timeout: 60_000
+	});
+	await selectFirstTwo(page);
+	await clickOnText(page);
+	const panel = page.locator(".sel-pinyin");
+	await expect(panel).toBeVisible({ timeout: 10_000 });
+	const before = await panel.boundingBox();
+	await page.evaluate(() => {
+		document.querySelector(".messages")?.scrollBy({ top: 300 });
+	});
+	await page.waitForTimeout(300);
+	const after = await panel.boundingBox();
+	expect(before).not.toBeNull();
+	expect(after).not.toBeNull();
+	// The highlight moved up 300px; the panel rode with it.
+	expect((before?.y ?? 0) - (after?.y ?? 0)).toBeGreaterThan(200);
 });
 
 test("clearing the highlight dismisses the panel", async ({ page }) => {
@@ -167,6 +201,7 @@ test("right-clicking kanji in japanese shows furigana and speaks", async ({ page
 	const panel = page.locator(".sel-pinyin");
 	// Conversion runs in the dictionary worker: slower than pinyin.
 	await expect(panel).toBeVisible({ timeout: 60_000 });
-	await expect(panel.locator(".frt").first()).toHaveText("かんじ", { timeout: 10_000 });
+	await expect(panel).toContainText("かんじ", { timeout: 10_000 });
+	await expect(panel).not.toContainText("漢字");
 	await expect.poll(() => spoken(page), { timeout: 10_000 }).toContain("漢字");
 });

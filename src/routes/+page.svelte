@@ -98,7 +98,7 @@
 	import MessageBody from "$lib/components/MessageBody.svelte";
 	import ActionIcon from "$lib/components/ActionIcon.svelte";
 	import SettingsPanel from "$lib/components/SettingsPanel.svelte";
-	import { plainBody, sourcesAsked } from "$lib/render";
+	import { escapeHtml, plainBody, sourcesAsked } from "$lib/render";
 	import {
 		fileToAttachment,
 		stripImageMarkers,
@@ -591,15 +591,17 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		range: Range | null;
 	} | null>(null);
 	/**
-	 * Selection pinyin overlay: right-clicking a Han character with a
-	 * live highlight shows pinyin for just the highlighted text (never
-	 * pinned, never per-message). Read-only and pointer-transparent,
-	 * so it can't disturb the highlight — and the highlight clearing
-	 * dismisses it at once via selectionchange below.
+	 * Selection readings overlay: right-clicking a Han character with
+	 * a live highlight shows just the readings (pinyin/furigana, never
+	 * the characters again — they're right there). Read-only and
+	 * pointer-transparent, so it can't disturb the highlight — and
+	 * the highlight clearing dismisses it at once via
+	 * selectionchange below.
 	 */
 	let selPinyin = $state<{
 		x: number;
 		y: number;
+		above: boolean;
 		quote: string;
 		messageId: ChatMsgId;
 		html: string;
@@ -6527,17 +6529,54 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			}
 			return ch !== "" && isHanChar(ch);
 		}
-		/** Dock the selection-pinyin overlay below the highlight,
-		aligned to its start so single characters keep it at the
-		word, clamped to the viewport. */
+		/**
+		 * Readings alone from ruby markup: the characters are right
+		 * there in the highlight, so the overlay carries only their
+		 * pronunciations (pinyin space-joined, furigana run together).
+		 */
+		function readingsOnly(html: string, joiner: string, selector: string): string | null {
+			let doc: Document;
+			try {
+				doc = new DOMParser().parseFromString(html, "text/html");
+			} catch {
+				return null;
+			}
+			const parts = [...doc.querySelectorAll(selector)]
+				.map((el) => el.textContent?.trim() ?? "")
+				.filter((part) => part !== "");
+			return parts.length > 0 ? escapeHtml(parts.join(joiner)) : null;
+		}
+		/** Dock the readings overlay centered on the highlight, above
+		it (below only when the top edge leaves no room). Centering
+		rides CSS translateX so panel width — and font size — never
+		matters; a frame later the true width clamps it exactly into
+		the viewport. The above branch anchors on the highlight's top
+		edge the same way, so tall readings never need measuring. */
 		function placeSelPinyin(quoted: { quote: string; messageId: ChatMsgId }, html: string): void {
 			const live = window.getSelection();
 			const rect = live?.rangeCount ? live.getRangeAt(0).getBoundingClientRect() : null;
 			if (!rect) return;
-			const x = Math.min(Math.max(8, rect.left), window.innerWidth - 208);
-			let y = rect.bottom + 8;
-			if (y + 64 > window.innerHeight) y = Math.max(8, rect.top - 64);
-			selPinyin = { x, y, quote: quoted.quote, messageId: quoted.messageId, html };
+			const above = rect.top >= 128;
+			const y = above ? rect.top : Math.min(rect.bottom, window.innerHeight - 40);
+			selPinyin = {
+				x: Math.min(Math.max(8, rect.left), window.innerWidth - 208),
+				y,
+				above,
+				quote: quoted.quote,
+				messageId: quoted.messageId,
+				html
+			};
+			requestAnimationFrame(() => {
+				const node = document.querySelector(".sel-pinyin");
+				const current = window.getSelection();
+				const now = current?.rangeCount ? current.getRangeAt(0).getBoundingClientRect() : null;
+				if (!node || !now || !selPinyin) return;
+				// Same highlight still live (not scrolled or changed)?
+				if (Math.abs(now.left - rect.left) > 2 || Math.abs(now.top - rect.top) > 2) return;
+				const w = node.getBoundingClientRect().width;
+				const x = Math.min(Math.max(w / 2 + 8, now.left + now.width / 2), window.innerWidth - w - 8);
+				if (Math.abs(x - selPinyin.x) > 1) selPinyin = { ...selPinyin, x };
+			});
 		}
 		/**
 		 * Japanese side of the overlay: furigana for just the highlight,
@@ -6554,10 +6593,11 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			} catch {
 				return;
 			}
-			if (!html.includes("frt")) return;
+			const readings = readingsOnly(html, "", ".frt");
+			if (!readings) return;
 			const now = currentQuote();
 			if (!now || now.messageId !== quoted.messageId || now.quote !== quoted.quote) return;
-			placeSelPinyin(quoted, html);
+			placeSelPinyin(quoted, readings);
 		}
 		// Desktop right-click reads aloud (the selection, else the word
 		// under the cursor, else the whole message; a playing message
@@ -6631,8 +6671,8 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 						hanOverlayLangFor(probe) !== "ja" &&
 						offeredLocalAids(quoted.quote).includes("pinyin")
 					) {
-						const html = pinyinRuby(quoted.quote);
-						if (html.includes("<rt>")) placeSelPinyin(quoted, html);
+						const readings = readingsOnly(pinyinRuby(quoted.quote), " ", "rt");
+						if (readings) placeSelPinyin(quoted, readings);
 					} else if (hanOverlayLangFor(probe) === "ja") {
 						void showSelectionFurigana(quoted);
 					}
@@ -6798,6 +6838,33 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			);
 		};
 		window.addEventListener("scroll", onFadeScroll, true);
+		// The readings overlay tracks its highlight while it scrolls
+		// (same anchor math as placement): a detached or collapsed
+		// range dismisses it instead of stranding it.
+		const trackSelPinyin = (): void => {
+			if (!selPinyin) return;
+			try {
+				const live = window.getSelection();
+				if (!live || live.rangeCount === 0 || live.isCollapsed) {
+					selPinyin = null;
+					return;
+				}
+				const range = live.getRangeAt(0);
+				if (!document.contains(range.startContainer)) {
+					selPinyin = null;
+					return;
+				}
+				const rect = range.getBoundingClientRect();
+				const above = rect.top >= 128;
+				const y = above ? rect.top : Math.min(rect.bottom + 8, window.innerHeight - 40);
+				if (selPinyin.y !== y || selPinyin.above !== above)
+					selPinyin = { ...selPinyin, y, above };
+			} catch {
+				selPinyin = null;
+			}
+		};
+		window.addEventListener("scroll", trackSelPinyin, true);
+		window.addEventListener("resize", trackSelPinyin);
 		window.addEventListener("mouseup", onMouseUp);
 		window.addEventListener("dblclick", onDoubleClick);
 		// Middle-click anywhere opens the shortcuts modal (no autoscroll).
@@ -6822,6 +6889,8 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			window.removeEventListener("mousedown", armMessageDrag, true);
 			document.removeEventListener("selectionchange", trimMessageDrag);
 			window.removeEventListener("scroll", onFadeScroll, true);
+			window.removeEventListener("scroll", trackSelPinyin, true);
+			window.removeEventListener("resize", trackSelPinyin);
 			window.removeEventListener("mouseup", onMouseUp);
 			window.removeEventListener("dblclick", onDoubleClick);
 			window.removeEventListener("auxclick", onMiddleClick);
@@ -7994,12 +8063,14 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	{/if}
 
 	{#if selPinyin && !previewing}
-		<!-- Selection pinyin: readings for just the highlight, docked
-		below it. Pointer-transparent so it never disturbs the
-		selection or blocks the native menu; the highlight clearing
-		dismisses it (see trimMessageDrag). -->
+		<!-- Selection readings: pronunciations for just the highlight,
+		docked above it (below only without headroom). Pointer-transparent
+		so it never disturbs the selection or blocks the native menu;
+		the highlight clearing dismisses it (see trimMessageDrag), and
+		scrolling tracks it (see trackSelPinyin). -->
 		<div
 			class="sel-pinyin"
+			class:above={selPinyin.above}
 			style="left: {selPinyin.x}px; top: {selPinyin.y}px"
 			aria-live="polite"
 		>{@html selPinyin.html}</div>
@@ -10709,36 +10780,18 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	:global(html[data-theme="dark"]) .sel-pinyin {
 		background: rgba(30, 30, 32, 0.88);
 	}
-	/* :global — readings arrive via {@html}, invisible to the compiler. */
-	.sel-pinyin :global(rt) {
-		font-size: 0.72em;
-		color: #6e6e73;
-		color: var(--muted);
-	}
-	.sel-pinyin :global(p) {
-		margin: 0;
-	}
-	/* Furigana spans reuse the message geometry (overlay, never
-	layout) at the panel's own size — but with no leftward pull:
-	measured in-browser at 13–41px bases, the panel's natural offset
-	is zero (unlike message text), so any pull overshoots left at
-	every size. Zero needs no font-size scaling by construction. */
-	.sel-pinyin :global(.frb) {
-		position: relative;
-		white-space: nowrap;
-	}
-	.sel-pinyin :global(.frt) {
-		position: absolute;
-		bottom: 100%;
-		left: 50%;
+	/* Centered on the highlight whatever the panel width (and so
+	whatever the font size): the style left is the highlight's
+	center. Above hangs 4px over its top edge; below clears 4px
+	under it. */
+	.sel-pinyin {
 		transform: translateX(-50%);
-		margin-left: 0;
-		white-space: nowrap;
-		font-size: 0.62em;
-		line-height: 1.2;
-		color: #6e6e73;
-		color: var(--muted);
-		pointer-events: none;
+	}
+	.sel-pinyin.above {
+		transform: translate(-50%, calc(-100% - 4px));
+	}
+	.sel-pinyin:not(.above) {
+		margin-top: 4px;
 	}
 	/* Cursor-anchored annotation pill (ChatGPT-style): a rounded bar that
 	starts as a single-line prompt and grows as you type. Enter saves,
