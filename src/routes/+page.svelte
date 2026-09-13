@@ -186,6 +186,7 @@
 		MODEL_AIDS,
 		MODEL_AID_FOR_SCRIPT,
 		extractWordAt,
+		hanOverlayLangFor,
 		ttsLangFor,
 		isHanOverlayLangUncertain,
 		HAN_OVERLAY_LANG_TAG,
@@ -6591,15 +6592,19 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			};
 			// Highlighted text wins: a right-click on a Han character
 			// shows pinyin for just the highlight (same offers as the
-			// A key — Japanese quotes keep speaking instead of reading
-			// Chinese). Any other right-click with a live message
+			// A key). Like Inspect, a lone Han char reads its locale
+			// from the surrounding sentence — kana nearby means
+			// Japanese, so it keeps speaking instead of reading
+			// Chinese. Any other right-click with a live message
 			// selection reads the whole selection (same per-quote
 			// language as the sel-menu button).
 			const quoted = currentQuote();
 			if (quoted) {
 				if (stopIfPlaying(quoted.messageId)) return;
+				const probe = sentenceForQuote(quoted.context, quoted.quote) ?? quoted.context;
 				if (
 					hanCharUnderCursor(event, body) &&
+					hanOverlayLangFor(probe) !== "ja" &&
 					offeredLocalAids(quoted.quote).includes("pinyin")
 				) {
 					const html = pinyinRuby(quoted.quote);

@@ -73,3 +73,24 @@ test("right-clicking hanzi with no highlight still speaks", async ({ page }) => 
 		.not.toEqual([]);
 	await expect(page.locator(".sel-pinyin")).toHaveCount(0);
 });
+
+test("right-clicking kanji in japanese keeps speaking, no pinyin", async ({ page }) => {
+	// Like Inspect, a lone Han char reads its locale from the
+	// surrounding sentence: kana nearby means Japanese.
+	await seedChat(page, [{ role: "assistant", content: "漢字を読む" }]);
+	await page.goto("/");
+	await expect(page.locator("article.assistant .rendered p").first()).toBeVisible({
+		timeout: 60_000
+	});
+	const selected = await page.evaluate(() => {
+		const p = document.querySelector("article.assistant .rendered p");
+		const text = p?.firstChild;
+		if (!text) return "";
+		window.getSelection()?.setBaseAndExtent(text, 0, text, 2);
+		return window.getSelection()?.toString() ?? "";
+	});
+	expect(selected).toBe("漢字");
+	await clickOnText(page);
+	await expect(page.locator(".sel-pinyin")).toHaveCount(0);
+	await expect.poll(() => spoken(page), { timeout: 10_000 }).toContain("漢字");
+});
