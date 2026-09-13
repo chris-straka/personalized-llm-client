@@ -148,6 +148,7 @@
 		shouldShowInspect
 	} from "$lib/inspect";
 	import { pinyinRuby } from "$lib/pinyin";
+	import { furiganaHtml } from "$lib/furigana";
 	import { fetchStrokePaths } from "$lib/kanjivg";
 	import {
 		clampSideviewWidth,
@@ -6365,6 +6366,11 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		let offChatDragArmed = false;
 		const armMessageDrag = (event: MouseEvent): void => {
 			const target = event.target instanceof Element ? event.target : null;
+			// Clicking off dismisses the pinyin overlay even when the
+			// highlight itself lingers (the panel is pointer-transparent,
+			// so every press lands outside it). A right-click re-summons
+			// through contextmenu right after when it still applies.
+			selPinyin = null;
 			selectingInMessage = event.button === 0 && !!target?.closest(".messages .rendered");
 			offChatDragArmed = event.button === 0 && !target?.closest(".messages .rendered");
 		};
@@ -6534,6 +6540,26 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			if (y + 64 > window.innerHeight) y = Math.max(8, rect.top - 64);
 			selPinyin = { x, y, quote: quoted.quote, messageId: quoted.messageId, html };
 		}
+		/**
+		 * Japanese side of the overlay: furigana for just the highlight,
+		 * converted on demand (worker). Stale right-clicks never land —
+		 * a moved-on highlight drops the result instead of showing it.
+		 */
+		async function showSelectionFurigana(
+			quoted: { quote: string; messageId: ChatMsgId },
+			clientX: number
+		): Promise<void> {
+			let html = "";
+			try {
+				html = await furiganaHtml(quoted.quote, "furigana");
+			} catch {
+				return;
+			}
+			if (!html.includes("frt")) return;
+			const now = currentQuote();
+			if (!now || now.messageId !== quoted.messageId || now.quote !== quoted.quote) return;
+			placeSelPinyin(quoted, html, clientX);
+		}
 		// Desktop right-click reads aloud (the selection, else the word
 		// under the cursor, else the whole message; a playing message
 		// stops) AND opens the native menu: no preventDefault here, so
@@ -6590,27 +6616,26 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 				}
 				return false;
 			};
-			// Highlighted text wins: a right-click on a Han character
-			// shows pinyin for just the highlight (same offers as the
-			// A key). Like Inspect, a lone Han char reads its locale
-			// from the surrounding sentence — kana nearby means
-			// Japanese, so it keeps speaking instead of reading
-			// Chinese. Any other right-click with a live message
+			// Highlighted text wins: a right-click with a live message
 			// selection reads the whole selection (same per-quote
-			// language as the sel-menu button).
+			// language as the sel-menu button). On a Han character it
+			// also shows readings for just the highlight — pinyin in
+			// Chinese text, furigana in Japanese — speech always runs;
+			// the panel is a silent extra. Like Inspect, a lone Han
+			// char reads its locale from the surrounding sentence.
 			const quoted = currentQuote();
 			if (quoted) {
 				if (stopIfPlaying(quoted.messageId)) return;
 				const probe = sentenceForQuote(quoted.context, quoted.quote) ?? quoted.context;
-				if (
-					hanCharUnderCursor(event, body) &&
-					hanOverlayLangFor(probe) !== "ja" &&
-					offeredLocalAids(quoted.quote).includes("pinyin")
-				) {
-					const html = pinyinRuby(quoted.quote);
-					if (html.includes("<rt>")) {
-						placeSelPinyin(quoted, html, event.clientX);
-						return;
+				if (hanCharUnderCursor(event, body)) {
+					if (
+						hanOverlayLangFor(probe) !== "ja" &&
+						offeredLocalAids(quoted.quote).includes("pinyin")
+					) {
+						const html = pinyinRuby(quoted.quote);
+						if (html.includes("<rt>")) placeSelPinyin(quoted, html, event.clientX);
+					} else if (hanOverlayLangFor(probe) === "ja") {
+						void showSelectionFurigana(quoted, event.clientX);
 					}
 				}
 				void speakQuote(quoted.quote, quoted.messageId, false, quoted.context);
@@ -10690,6 +10715,28 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		font-size: 0.72em;
 		color: #6e6e73;
 		color: var(--muted);
+	}
+	.sel-pinyin :global(p) {
+		margin: 0;
+	}
+	/* Furigana spans reuse the message geometry (overlay, never
+	layout) at the panel's own size. */
+	.sel-pinyin :global(.frb) {
+		position: relative;
+		white-space: nowrap;
+	}
+	.sel-pinyin :global(.frt) {
+		position: absolute;
+		bottom: 100%;
+		left: 50%;
+		transform: translateX(-50%);
+		margin-left: -0.8em;
+		white-space: nowrap;
+		font-size: 0.62em;
+		line-height: 1.2;
+		color: #6e6e73;
+		color: var(--muted);
+		pointer-events: none;
 	}
 	/* Cursor-anchored annotation pill (ChatGPT-style): a rounded bar that
 	starts as a single-line prompt and grows as you type. Enter saves,

@@ -55,12 +55,26 @@ test("right-clicking a hanzi highlight shows its pinyin only", async ({ page }) 
 	const panel = page.locator(".sel-pinyin");
 	await expect(panel).toBeVisible({ timeout: 10_000 });
 	await expect(panel.locator("rt").first()).toHaveText("nǐ");
-	// The gesture reads nothing aloud: pinyin replaces speech here.
-	expect(await spoken(page)).toEqual([]);
-	// Escape dismisses the panel; clearing the highlight does too.
+	// Speech always runs too: the panel is a silent extra.
+	await expect.poll(() => spoken(page), { timeout: 10_000 }).toContain(selected);
+	// Escape dismisses the panel.
 	await page.keyboard.press("Escape");
 	await expect(panel).toHaveCount(0);
+});
+
+test("clicking off dismisses the panel with the highlight live", async ({ page }) => {
+	await selectFirstTwo(page);
 	await clickOnText(page);
+	const panel = page.locator(".sel-pinyin");
+	await expect(panel).toBeVisible({ timeout: 10_000 });
+	await page.mouse.click(5, 5);
+	await expect(panel).toHaveCount(0);
+});
+
+test("clearing the highlight dismisses the panel", async ({ page }) => {
+	await selectFirstTwo(page);
+	await clickOnText(page);
+	const panel = page.locator(".sel-pinyin");
 	await expect(panel).toBeVisible({ timeout: 10_000 });
 	await page.evaluate(() => window.getSelection()?.removeAllRanges());
 	await expect(panel).toHaveCount(0);
@@ -74,7 +88,7 @@ test("right-clicking hanzi with no highlight still speaks", async ({ page }) => 
 	await expect(page.locator(".sel-pinyin")).toHaveCount(0);
 });
 
-test("right-clicking kanji in japanese keeps speaking, no pinyin", async ({ page }) => {
+test("right-clicking kanji in japanese shows furigana and speaks", async ({ page }) => {
 	// Like Inspect, a lone Han char reads its locale from the
 	// surrounding sentence: kana nearby means Japanese.
 	await seedChat(page, [{ role: "assistant", content: "漢字を読む" }]);
@@ -91,6 +105,9 @@ test("right-clicking kanji in japanese keeps speaking, no pinyin", async ({ page
 	});
 	expect(selected).toBe("漢字");
 	await clickOnText(page);
-	await expect(page.locator(".sel-pinyin")).toHaveCount(0);
+	const panel = page.locator(".sel-pinyin");
+	// Conversion runs in the dictionary worker: slower than pinyin.
+	await expect(panel).toBeVisible({ timeout: 60_000 });
+	await expect(panel.locator(".frt").first()).toHaveText("かんじ", { timeout: 10_000 });
 	await expect.poll(() => spoken(page), { timeout: 10_000 }).toContain("漢字");
 });
