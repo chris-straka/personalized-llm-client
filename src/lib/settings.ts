@@ -123,6 +123,8 @@ export interface AppSettings {
 	 * slides down out of view (any input restores it instantly).
 	 */
 	promptIdleSec: number;
+	/** Whole-app background opacity, 0.2–1 (1 = fully opaque). */
+	bgOpacity: number;
 	/** Color-scheme override (system follows the OS). */
 	theme: ThemeMode;
 	/**
@@ -160,11 +162,11 @@ export const DEFAULT_SYSTEM_PROMPT = "";
 
 /**
  * Text-size multiplier bounds (persisted): 50–400% on phones, up to
- * 600% on desktop — profiles roam across devices, so the stored range
+ * 800% on desktop — profiles roam across devices, so the stored range
  * fits the widest (desktop) cap and each UI clamps to its own max.
  */
 export const FONT_SCALE_MIN = 0.5;
-export const FONT_SCALE_MAX = 6;
+export const FONT_SCALE_MAX = 8;
 
 /** Desktop chat-column width in rem: 46 is the legacy fixed width. */
 export const CHAT_WIDTH_DEFAULT = 36;
@@ -176,13 +178,15 @@ export const SIDEVIEW_WIDTH_DEFAULT = 420;
 export const SIDEVIEW_WIDTH_MIN = 280;
 export const SIDEVIEW_WIDTH_MAX = 720;
 
-/** Prompt idle-hide timeout in seconds: 6s default, 2–10s configurable,
- * plus the top slider tick ("never", stored as 0 = hiding disabled). */
-export const PROMPT_IDLE_DEFAULT = 6;
-export const PROMPT_IDLE_MIN = 2;
-export const PROMPT_IDLE_MAX = 10;
 /** Stored idle-hide value meaning "never hide" (see `isPromptIdle`). */
 export const PROMPT_IDLE_NEVER = 0;
+/** Stored idle-hide value meaning "always hide when unfocused". */
+export const PROMPT_IDLE_ALWAYS = -1;
+/** Prompt idle-hide default: always hide when unfocused. Timed
+ * hiding (2–10s) and "never" stay on the slider. */
+export const PROMPT_IDLE_DEFAULT = PROMPT_IDLE_ALWAYS;
+export const PROMPT_IDLE_MIN = 2;
+export const PROMPT_IDLE_MAX = 10;
 
 /**
  * Dev-time `.env` prefill (Vite bakes these into dev/preview builds only —
@@ -281,6 +285,7 @@ export function defaultSettings(): AppSettings {
 		hoverAssistantActions: true,
 		scaleActionsWithFont: false,
 		promptIdleSec: PROMPT_IDLE_DEFAULT,
+		bgOpacity: 1,
 		voiceLangPinned: false,
 		theme: "system",
 		hideMessages: false,
@@ -355,7 +360,7 @@ export function loadSettings(store?: KeyValueStore): AppSettings {
 			if (!Array.isArray(entry.models)) entry.models = [];
 		}
 		// Clamp the text-size multiplier (range inputs persist strings).
-		// Up to 600% on desktop, 400% on phones (each UI clamps its own
+		// Up to 800% on desktop, 400% on phones (each UI clamps its own
 		// max; the stored range fits the widest so roamed profiles keep
 		// working).
 		if (
@@ -363,6 +368,10 @@ export function loadSettings(store?: KeyValueStore): AppSettings {
 			!(merged.fontScale >= FONT_SCALE_MIN && merged.fontScale <= FONT_SCALE_MAX)
 		) {
 			merged.fontScale = 1;
+		}
+		// Clamp the background opacity into its slider range.
+		if (typeof merged.bgOpacity !== "number" || !(merged.bgOpacity >= 0.2 && merged.bgOpacity <= 1)) {
+			merged.bgOpacity = 1;
 		}
 		// Backfill the desktop chat width on older saves; clamp strays
 		// into range (rounded to whole rem, the slider's step).
@@ -396,6 +405,7 @@ export function loadSettings(store?: KeyValueStore): AppSettings {
 			typeof merged.promptIdleSec !== "number" ||
 			Number.isNaN(merged.promptIdleSec) ||
 			(merged.promptIdleSec !== PROMPT_IDLE_NEVER &&
+				merged.promptIdleSec !== PROMPT_IDLE_ALWAYS &&
 				(merged.promptIdleSec < PROMPT_IDLE_MIN || merged.promptIdleSec > PROMPT_IDLE_MAX))
 		) {
 			merged.promptIdleSec = PROMPT_IDLE_DEFAULT;

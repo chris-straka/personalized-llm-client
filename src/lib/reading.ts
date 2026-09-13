@@ -38,6 +38,37 @@ export type DetectedScript = AidScript;
  */
 const KANA_RE = /[\u3040-\u309F\u30A0-\u30FF]/;
 
+/**
+ * Lines tagged code-aware: ``` fence lines toggle fenced runs, and
+ * fenced runs (plus their fences) never convert. Fences own the whole
+ * rest on unclosed input, exactly like the markdown renderer.
+ */
+export function codeAwareLines(text: string): Array<{ line: string; code: boolean }> {
+	const out: Array<{ line: string; code: boolean }> = [];
+	let fenced = false;
+	for (const line of text.split("\n")) {
+		if (/^\s*```/.test(line)) {
+			fenced = !fenced;
+			out.push({ line, code: true });
+			continue;
+		}
+		out.push({ line, code: fenced });
+	}
+	return out;
+}
+
+/**
+ * Detection text for aid buttons: fenced code blocks are out, and
+ * inline code spans read as empty, so Japanese/Chinese living only in
+ * code never summons the pinyin/furigana buttons. Pure and unit-tested.
+ */
+export function stripCodeForDetection(text: string): string {
+	return codeAwareLines(text)
+		.filter((entry) => !entry.code)
+		.map((entry) => entry.line.replace(/`[^`\n]*`/g, ""))
+		.join("\n");
+}
+
 export function detectScripts(text: string): AidScript[] {
 	const scripts: AidScript[] = [];
 	if (/[\u0600-\u06FF\u0750-\u077F]/.test(text)) scripts.push("ar");

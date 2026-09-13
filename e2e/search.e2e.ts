@@ -126,26 +126,27 @@ test.describe("palette focus order", () => {
 		expect(back).toBe(first);
 	});
 
-	test("Enter jumps with the message selected and focused", async ({ page }) => {
+	test("Enter jumps without selecting the message", async ({ page }) => {
 		await seedMiso(page);
 		await page.keyboard.press("Control+p");
 		const box = page.getByLabel("Search chats and annotations");
 		await box.fill("ramen");
 		await expect(page.locator(".search-hit").first()).toContainText("ramen", { timeout: 8000 });
 		await box.press("Enter");
-		// Native focus order matches the highlighted message: the
-		// article carries .selected and DOM focus.
-		const landed = await page.evaluate(() => ({
-			tag: document.activeElement?.tagName,
-			id: (document.activeElement as HTMLElement | null)?.id,
-			selected: (document.activeElement as HTMLElement | null)?.classList.contains("selected")
-		}));
-		expect(landed.tag).toBe("ARTICLE");
-		expect(landed.selected).toBe(true);
-		// j from the highlight walks to the next message.
-		const targetId = landed.id === "msg-0" ? "msg-1" : "msg-0";
+		// The jump lands silently: the article takes DOM focus but
+		// carries no .selected cursor (no scroll-mode parking).
+		await expect
+			.poll(() => page.evaluate(() => document.activeElement?.tagName), { timeout: 8000 })
+			.toBe("ARTICLE");
+		const selected = await page.evaluate(() =>
+			(document.activeElement as HTMLElement | null)?.classList.contains("selected")
+		);
+		expect(selected).toBe(false);
+		await expect(page.locator("article.selected")).toHaveCount(0);
+		// j glides instead of walking: still no cursor afterwards.
 		await page.keyboard.press("j");
-		await expect(page.locator(`article#${targetId}.selected`)).toBeVisible({ timeout: 8000 });
+		await page.waitForTimeout(500);
+		await expect(page.locator("article.selected")).toHaveCount(0);
 	});
 });
 
@@ -192,6 +193,122 @@ test.describe("find in chat", () => {
 		// Escape closes the bar.
 		await page.keyboard.press("Escape");
 		await expect(bar).toBeHidden();
+	});
+
+	test("repeat Ctrl+F closes the bar it opened", async ({ page }) => {
+		await seedThreeChats(page);
+		await page.keyboard.press("Control+f");
+		const bar = page.locator(".find-bar");
+		await expect(bar).toBeVisible();
+		await page.keyboard.press("Control+f");
+		await expect(bar).toBeHidden();
+	});
+
+	/** One hit is "done": Enter, Esc, and repeat Cmd+F close the bar
+	and drop the landed cursor. Several hits keep the old close
+	(cursor stays for walking). */
+	test("a lone find hit closes and deselects on Enter, Esc, repeat", async ({ page }) => {
+		await page.addInitScript(() => {
+			window.localStorage.setItem("ccez-mock-provider", "1");
+			window.localStorage.setItem("ccez-studio-settings-v1", JSON.stringify({}));
+			const msg = (id: string, content: string) => ({
+				id,
+				role: "assistant",
+				content,
+				usage: null,
+				error: null
+			});
+			window.localStorage.setItem(
+				"ccez-studio-chats-v1",
+				JSON.stringify([
+					{
+						id: "chat-a",
+						createdAt: 1,
+						replyLang: null,
+						messages: [msg("a1", "miso ramen broth"), msg("a2", "sushi rice"), msg("a3", "miso soup breakfast")]
+					}
+				])
+			);
+		});
+		await page.goto("/");
+		await expect(page.locator("article .rendered").first()).toBeVisible();
+		const bar = page.locator(".find-bar");
+		const box = bar.getByLabel("Find in chat");
+		const loneHit = async () => {
+			await page.keyboard.press("Control+f");
+			await expect(bar).toBeVisible();
+			await box.fill("sushi");
+			await expect(bar.locator(".find-count")).toHaveText("1/1", { timeout: 8000 });
+			await expect(page.locator("article#msg-1.selected")).toBeVisible();
+		};
+		// Enter with one hit: bar closes, cursor dropped.
+		await loneHit();
+		await box.press("Enter");
+		await expect(bar).toBeHidden();
+		await expect(page.locator("article.selected")).toHaveCount(0);
+		// Esc with one hit: same "done".
+		await loneHit();
+		await page.keyboard.press("Escape");
+		await expect(bar).toBeHidden();
+		await expect(page.locator("article.selected")).toHaveCount(0);
+		// Repeat Cmd+F with one hit: same "done".
+		await loneHit();
+		await page.keyboard.press("Control+f");
+		await expect(bar).toBeHidden();
+		await expect(page.locator("article.selected")).toHaveCount(0);
+		// Several hits still cycle on Enter, and closing drops the
+		// cursor too: composer focus already flips mode to edit, so a
+		// stale cursor would only strand the next scroll entry.
+		await page.keyboard.press("Control+f");
+		await expect(bar).toBeVisible();
+		await box.fill("miso");
+		await expect(bar.locator(".find-count")).toHaveText("1/2", { timeout: 8000 });
+		await expect(page.locator("article#msg-0.selected")).toBeVisible();
+		await box.press("Enter");
+		await expect(bar.locator(".find-count")).toHaveText("2/2");
+		await expect(page.locator("article#msg-2.selected")).toBeVisible();
+		await page.keyboard.press("Escape");
+		await expect(bar).toBeHidden();
+		await expect(page.locator("article.selected")).toHaveCount(0);
+	});
+
+	test("find bar floats in the upper half, never dead center", async ({ page }) => {
+		await seedThreeChats(page);
+		await page.keyboard.press("Control+f");
+		const bar = page.locator(".find-bar");
+		await expect(bar).toBeVisible();
+		const geom = await bar.evaluate((el) => {
+			const r = el.getBoundingClientRect();
+			return { midY: r.top + r.height / 2, viewport: window.innerHeight };
+		});
+		expect(geom.midY).toBeLessThan(geom.viewport / 2);
+	});
+
+	test("Shift+F never summons find, it types", async ({ page }) => {
+		await page.addInitScript(() => {
+			window.localStorage.setItem("ccez-mock-provider", "1");
+			window.localStorage.setItem("ccez-studio-settings-v1", JSON.stringify({}));
+			window.localStorage.setItem(
+				"ccez-studio-chats-v1",
+				JSON.stringify([
+					{
+						id: "chat-a",
+						createdAt: 1,
+						replyLang: null,
+						messages: [{ id: "a1", role: "assistant", content: "miso ramen", usage: null, error: null }]
+					}
+				])
+			);
+		});
+		await page.goto("/");
+		await expect(page.locator("article .rendered").first()).toBeVisible({ timeout: 60_000 });
+		await page.locator(".cm-content").click();
+		await page.keyboard.press("Shift+f");
+		await expect(page.locator(".find-bar")).toHaveCount(0);
+		const draft = await page.evaluate(
+			() => document.querySelector(".prompt .cm-content")?.textContent ?? ""
+		);
+		expect(draft.toLowerCase()).toContain("f");
 	});
 });
 

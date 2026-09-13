@@ -4,6 +4,7 @@ import {
 	type PromptEditorOptions
 } from "./editor";
 import { attachEditContext, shouldDeferForComposition } from "./editContext";
+import { fenceAtOffset, parseFences, shiftEnterAction } from "./fences";
 
 /**
  * Plain-textarea PromptEditor for Android (see `createPromptEditor` in
@@ -50,12 +51,56 @@ export function createTextareaEditor(
 	const onInput = (): void => {
 		notify();
 	};
+	/**
+	 * Fence Shift+Enter for the plain textarea: ```py + Shift+Enter
+	 * completes the closing fence with the caret between, Shift+Enter
+	 * in an empty body exits past the fence. Collapsed caret only —
+	 * ranges keep native behavior. Returns true when handled.
+	 */
+	const fenceShiftEnter = (): boolean => {
+		const start = ta.selectionStart ?? ta.value.length;
+		const end = ta.selectionEnd ?? ta.value.length;
+		if (start !== end) return false;
+		const doc = ta.value;
+		const action = shiftEnterAction(doc, start);
+		if (action.kind === "newline") return false;
+		if (action.kind === "close") {
+			const nl = doc.indexOf("\n", start);
+			const lineEnd = nl === -1 ? doc.length : nl;
+			ta.value = `${doc.slice(0, lineEnd)}\n\n\`\`\`${doc.slice(lineEnd)}`;
+			ta.setSelectionRange(lineEnd + 1, lineEnd + 1);
+			notify();
+			return true;
+		}
+		const fence = fenceAtOffset(parseFences(doc), start);
+		if (!fence) return false;
+		if (fence.closeLine !== -1) {
+			if (fence.closeTo < doc.length) {
+				ta.setSelectionRange(fence.closeTo + 1, fence.closeTo + 1);
+			} else {
+				ta.value = `${doc.slice(0, fence.closeTo)}\n${doc.slice(fence.closeTo)}`;
+				ta.setSelectionRange(fence.closeTo + 1, fence.closeTo + 1);
+				notify();
+			}
+			return true;
+		}
+		ta.value = `${doc.slice(0, fence.bodyFrom)}\`\`\`\n${doc.slice(fence.bodyTo)}`;
+		ta.setSelectionRange(fence.bodyFrom + 4, fence.bodyFrom + 4);
+		notify();
+		return true;
+	};
 	const onKeyDown = (event: KeyboardEvent): void => {
 		// IME composition (notably pinyin) confirms with Enter — never
 		// hijack that keystroke or typing CJK sends the message halfway.
 		// An attached EditContext (where supported) sharpens the range
 		// tracking behind this flag; the fallback is this check itself.
 		if (shouldDeferForComposition({ isComposing: event.isComposing })) return;
+		// Shift+Enter on a fence line closes/exits the fence (mirrors
+		// the CodeMirror composer); anywhere else it is a newline.
+		if (event.key === "Enter" && event.shiftKey && !event.altKey) {
+			if (fenceShiftEnter()) event.preventDefault();
+			return;
+		}
 		// Enter and Mod-Enter send; Shift-Enter falls through to newline.
 		if (event.key === "Enter" && !event.shiftKey && !event.altKey) {
 			event.preventDefault();

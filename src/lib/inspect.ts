@@ -14,6 +14,7 @@
  * and definition.
  */
 import { CJKDECOMP_SUBSET } from "./cjkdecomp-subset.generated";
+import { hanOverlayLangFor, type HanOverlayLang } from "./reading";
 import { UNIHAN } from "./unihan.generated";
 
 /** One inspected character: everything the overlay shows. */
@@ -64,6 +65,19 @@ export function shouldShowInspect(quote: string, enabled: boolean): boolean {
 }
 
 /**
+ * Inspect's predicted reading locale for one highlighted character.
+ * The single char can never hold kana itself, so the guess reads the
+ * paragraph it was picked from instead: kana present means Japanese,
+ * else the Chinese default (the same rule as `hanOverlayLangFor`).
+ * Empty context falls back to the quote alone — always Chinese for a
+ * lone Han char, with the overlay toggle left to correct it.
+ */
+export function inspectLangFor(quote: string, context: string): HanOverlayLang {
+	const text = context.trim() === "" ? quote : context;
+	return hanOverlayLangFor(text);
+}
+
+/**
  * The 214 Kangxi radicals in number order (1-indexed): index 0 is
  * radical 1 (一), index 213 is radical 214 (龠). Static reference data,
  * not analysis — pinned by cross-check tests below against Unihan
@@ -92,6 +106,52 @@ export function decomposeChar(ch: string): ComponentEntry | null {
 	const data = CJKDECOMP_SUBSET[ch];
 	if (data && data.length > 0) return { char: ch, components: [...data] };
 	return null;
+}
+
+/** One node of a recursive decomposition tree (depth-capped). */
+export interface DecompNode {
+	char: string;
+	/** Empty for leaves (no split, or depth cap reached). */
+	children: DecompNode[];
+}
+
+/**
+ * Recursive decomposition up to `depth` levels (default 2, like the
+ * mdbg.net word panel: 通 → 辶 + 甬 → 用 + …). Single-child and cyclic
+ * splits stop as leaves so the tree always terminates. Pure and
+ * unit-tested.
+ */
+export function decomposeTree(ch: string, depth = 2, seen: string[] = []): DecompNode {
+	if (depth <= 0 || seen.includes(ch)) return { char: ch, children: [] };
+	const entry = decomposeChar(ch);
+	if (!entry || entry.components.length < 2) return { char: ch, children: [] };
+	const next = [...seen, ch];
+	return {
+		char: ch,
+		children: entry.components.map((c) => decomposeTree(c, depth - 1, next))
+	};
+}
+
+/** Lowercased comma-joined readings ("ICHI ITSU" → "ichi,itsu"). */
+function joinReadings(raw: string | null): string {
+	if (!raw) return "";
+	return raw
+		.split(/\s+/)
+		.filter((r) => r.length > 0)
+		.map((r) => r.toLowerCase())
+		.join(",");
+}
+
+/**
+ * One-line on/kun row ("On/Kun: ichi,itsu | hitor..."), or null when the
+ * subset holds neither. Pure and unit-tested.
+ */
+export function onKunLine(data: Pick<InspectData, "japaneseOn" | "japaneseKun">): string | null {
+	const parts = [joinReadings(data.japaneseOn), joinReadings(data.japaneseKun)].filter(
+		(part) => part.length > 0
+	);
+	if (parts.length === 0) return null;
+	return `On/Kun: ${parts.join(" | ")}`;
 }
 
 /**

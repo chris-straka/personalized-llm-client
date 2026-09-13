@@ -1,4 +1,4 @@
-import { PROMPT_IDLE_MAX, PROMPT_IDLE_MIN, PROMPT_IDLE_NEVER } from "./settings";
+import { PROMPT_IDLE_ALWAYS, PROMPT_IDLE_MAX, PROMPT_IDLE_MIN, PROMPT_IDLE_NEVER } from "./settings";
 
 /**
  * App-chrome helpers (pure, DOM-free): prompt idle-hide and slider
@@ -26,7 +26,7 @@ export function isPromptIdle(lastInputAt: number, now: number, idleSec: number):
  */
 export function clampPromptIdleSec(raw: number): number {
 	if (typeof raw !== "number" || Number.isNaN(raw)) return PROMPT_IDLE_MIN;
-	if (raw === PROMPT_IDLE_NEVER) return PROMPT_IDLE_NEVER;
+	if (raw === PROMPT_IDLE_NEVER || raw === PROMPT_IDLE_ALWAYS) return raw;
 	return Math.min(PROMPT_IDLE_MAX, Math.max(PROMPT_IDLE_MIN, Math.round(raw)));
 }
 
@@ -35,21 +35,26 @@ export function clampPromptIdleSec(raw: number): number {
  * the stored value is 0 (hiding disabled — see `isPromptIdle`).
  */
 export const IDLE_SLIDER_TOP = PROMPT_IDLE_MAX + 1;
+/** Bottom slider tick: "always hide when unfocused". */
+export const IDLE_SLIDER_BOTTOM = 1;
 
-/** Slider position -> stored idle seconds (top tick stores "never"). */
+/** Slider position -> stored value (bottom tick stores "always"). */
 export function idleSliderToSetting(slider: number): number {
+	if (slider <= IDLE_SLIDER_BOTTOM) return PROMPT_IDLE_ALWAYS;
 	if (slider >= IDLE_SLIDER_TOP) return PROMPT_IDLE_NEVER;
 	return clampPromptIdleSec(slider);
 }
 
-/** Stored idle seconds -> slider position ("never" rides the top tick). */
+/** Stored value -> slider position ("always" rides the bottom tick). */
 export function idleSettingToSlider(sec: number): number {
+	if (sec === PROMPT_IDLE_ALWAYS) return IDLE_SLIDER_BOTTOM;
 	if (!(sec > 0)) return IDLE_SLIDER_TOP;
 	return clampPromptIdleSec(sec);
 }
 
-/** Readout for the stored idle value: seconds, or "never". */
+/** Readout for the stored idle value: "always", seconds, or "never". */
 export function formatIdleTimeout(sec: number): string {
+	if (sec === PROMPT_IDLE_ALWAYS) return "always";
 	return sec > 0 ? `${Math.round(sec)} s` : "never";
 }
 

@@ -123,6 +123,40 @@ export const SCROLLKEY_DU_VELOCITY_PX_S = 2520;
 export const SCROLL_HOLD_TAP_MS = 150;
 
 /**
+ * Viewport-space rect of one message, for the screen-center pick.
+ * Missing nodes never reach here (the caller skips them).
+ */
+export interface MessageRect {
+	top: number;
+	bottom: number;
+}
+
+/**
+ * Index of the message crossing a viewport line (the m/n screen-center
+ * pick): the first message covering `line`; when none covers it (a gap
+ * between messages), the nearest message center wins; -1 when empty.
+ * Pure over measured viewport-space rects so Vitest can pin it.
+ */
+export function indexAtViewportLine(rects: MessageRect[], line: number): number {
+	for (let i = 0; i < rects.length; i++) {
+		const r = rects[i];
+		if (r && r.top <= line && r.bottom > line) return i;
+	}
+	let best = -1;
+	let bestDist = Infinity;
+	for (let i = 0; i < rects.length; i++) {
+		const r = rects[i];
+		if (!r) continue;
+		const dist = Math.abs((r.top + r.bottom) / 2 - line);
+		if (dist < bestDist) {
+			bestDist = dist;
+			best = i;
+		}
+	}
+	return best;
+}
+
+/**
  * Glide velocity for a held scroll key, or null for keys that do not
  * glide (gg/G/z/Z and everything else keep their discrete behavior).
  */

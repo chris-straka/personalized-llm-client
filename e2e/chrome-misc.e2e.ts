@@ -143,3 +143,25 @@ test("top bar shows no text and survives a double-click", async ({ page }) => {
 	);
 	await expect(header).toHaveText(/^\s*$/);
 });
+
+/** Fullscreen toggles on Meta+E (and Ctrl+Meta+F): the web Fullscreen
+API in the browser build. */
+test("Meta+E toggles fullscreen", async ({ page }) => {
+	await openWithMessages(page, [{ role: "assistant", content: "hi" }]);
+	await page.keyboard.press("Meta+e");
+	await expect
+		.poll(() => page.evaluate(() => !!document.fullscreenElement), { timeout: 5_000 })
+		.toBe(true);
+	await page.keyboard.press("Meta+e");
+	await expect
+		.poll(() => page.evaluate(() => !!document.fullscreenElement), { timeout: 5_000 })
+		.toBe(false);
+	await page.keyboard.press("Meta+Control+f");
+	await expect
+		.poll(() => page.evaluate(() => !!document.fullscreenElement), { timeout: 5_000 })
+		.toBe(true);
+	await page.keyboard.press("Meta+Control+f");
+	await expect
+		.poll(() => page.evaluate(() => !!document.fullscreenElement), { timeout: 5_000 })
+		.toBe(false);
+});

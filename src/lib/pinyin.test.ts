@@ -44,6 +44,13 @@ describe("pinyinBlock", () => {
 		// Kana is unambiguous: the pill never overrides it.
 		expect(pinyinBlock("漢字を読む", "pinyin")).toBe("漢字を読む");
 	});
+
+	it("never converts fenced code, even with CJK inside", () => {
+		expect(pinyinBlock("```py\nprint('你好')\n```")).toBe("```py\nprint('你好')\n```");
+		expect(pinyinBlock("你好\n```\n世界\n```")).toContain("<ruby>你<rt>nǐ</rt></ruby>");
+		expect(pinyinBlock("你好\n```\n世界\n```")).toContain("世界");
+		expect(pinyinBlock("你好\n```\n世界\n```")).not.toContain("<ruby>世");
+	});
 });
 
 describe("plainParagraphs", () => {

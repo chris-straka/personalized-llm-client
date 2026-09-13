@@ -37,6 +37,49 @@ test.beforeEach(async ({ page }) => {
 	await expect(page.locator("article .rendered").first()).toBeVisible();
 });
 
+/** Ctrl+Delete drops the current chat and lands on the next one. */
+test("ctrl-delete drops the current chat", async ({ page }) => {
+	await expect(page.locator("article .rendered").first()).toContainText(ALPHA);
+	// Focus leaves the composer so the chord isn't line-kill.
+	await page.locator("article .rendered").first().click();
+	await page.keyboard.press("Control+Delete");
+	await expect(page.locator("article .rendered").first()).toContainText(BRAVO);
+	await expect(page.locator("article .rendered")).toHaveCount(1);
+});
+
+/** Ctrl+Shift+Delete drops every chat, minting a blank. */
+test("ctrl-shift-delete drops every chat", async ({ page }) => {
+	await expect(page.locator("article .rendered").first()).toBeVisible();
+	await page.locator("article .rendered").first().click();
+	await page.keyboard.press("Control+Shift+Delete");
+	await expect(page.locator("article .rendered")).toHaveCount(0);
+});
+
+/** Row icons sit adjacent inside reserved title padding: export parks
+left of delete, never on the label text (mono titles align). */
+test("row export sits by delete, clear of the title", async ({ page }) => {
+	await openSidebar(page);
+	const row = page.locator("aside ul li").first();
+	await row.hover();
+	const geom = await page.evaluate(() => {
+		const q = (sel: string): HTMLElement | null => document.querySelector(sel);
+		const exp = q("aside ul li .exp")?.getBoundingClientRect();
+		const del = q("aside ul li .del")?.getBoundingClientRect();
+		const title = q("aside ul li .side-chat");
+		if (!exp || !del || !title) return null;
+		const st = getComputedStyle(title);
+		return {
+			gap: Math.round(del.left - exp.right),
+			padRightPx: parseFloat(st.paddingRight),
+			mono: st.fontFamily
+		};
+	});
+	expect(geom).not.toBeNull();
+	expect(geom!.gap).toBeLessThanOrEqual(8);
+	expect(geom!.padRightPx).toBeGreaterThan(50);
+	expect(geom!.mono).toMatch(/monospace/i);
+});
+
 /** Clicking a chat closes the sidebar and lands on that chat. */
 test("clicking a chat closes the sidebar", async ({ page }) => {
 	await openSidebar(page);
@@ -81,21 +124,88 @@ test("double-tap on sidebar chrome closes it, on buttons does not", async ({ pag
 	await expect(chatsAside(page)).toHaveClass(/collapsed/);
 });
 
-/** The find bar pushes content down instead of covering the top message. */
-test("open find never covers the top message", async ({ page }) => {
+/** The find bar floats centered instead of pushing content down,
+while the first message still bleeds to the window's top edge.
+Pressing elsewhere dismisses it without summoning the prompt. */
+test("open find floats centered, outside press dismisses", async ({ page }) => {
 	await page.keyboard.press("Control+f");
 	const bar = page.locator(".find-bar");
 	await expect(bar).toBeVisible();
-	const overlap = await page.evaluate(() => {
+	const geom = await page.evaluate(() => {
 		const barEl = document.querySelector(".find-bar") as HTMLElement | null;
 		const art = document.querySelector(".messages article") as HTMLElement | null;
 		if (!barEl || !art) return null;
 		const barBox = barEl.getBoundingClientRect();
 		const artBox = art.getBoundingClientRect();
 		const barPos = getComputedStyle(barEl).getPropertyValue("position");
-		return { barBottom: barBox.bottom, artTop: artBox.top, barPos };
+		return {
+			barPos,
+			barCX: barBox.left + barBox.width / 2,
+			barCY: barBox.top + barBox.height / 2,
+			winW: window.innerWidth,
+			winH: window.innerHeight,
+			artTop: artBox.top
+		};
 	});
-	expect(overlap).not.toBeNull();
-	expect(overlap!.barPos).not.toBe("fixed");
-	expect(overlap!.artTop).toBeGreaterThanOrEqual(overlap!.barBottom - 1);
+	expect(geom).not.toBeNull();
+	expect(geom!.barPos).toBe("fixed");
+	expect(Math.abs(geom!.barCX - geom!.winW / 2)).toBeLessThan(4);
+	expect(Math.abs(geom!.barCY - geom!.winH / 2)).toBeLessThan(4);
+	expect(geom!.artTop).toBeLessThan(geom!.winH / 2);
+	const prompt = page.locator(".prompt");
+	const promptBefore = await prompt.getAttribute("class");
+	await page.locator("article .rendered").first().click();
+	await expect(bar).toBeHidden({ timeout: 5_000 });
+	// Dismissing summons nothing: the prompt is exactly as found.
+	expect(await prompt.getAttribute("class")).toBe(promptBefore);
+});
+
+/** Chat rows read day + 2-digit time, never a message count. */
+test("chat rows show 2-digit times with no message count", async ({ page }) => {
+	await openSidebar(page);
+	const rows = chatRows(page);
+	await expect(rows).toHaveCount(2);
+	for (let i = 0; i < 2; i++) {
+		await expect(rows.nth(i)).toContainText(/\d{2}:\d{2}/);
+		await expect(rows.nth(i)).not.toContainText("msg");
+	}
+});
+
+/** Entering an empty chat from the list lands in a focused composer. */
+test("space on an empty chat focuses the prompt", async ({ page }) => {
+	await page.addInitScript(() => {
+		window.localStorage.setItem("ccez-mock-provider", "1");
+		window.localStorage.setItem("ccez-studio-settings-v1", JSON.stringify({}));
+		const msg = (id: string, content: string) => ({
+			id,
+			role: "assistant",
+			content,
+			usage: null,
+			error: null
+		});
+		window.localStorage.setItem(
+			"ccez-studio-chats-v1",
+			JSON.stringify([
+				{ id: "chat-full", createdAt: 2, replyLang: null, messages: [msg("f1", "hello there")] },
+				{ id: "chat-empty", createdAt: 1, replyLang: null, messages: [] }
+			])
+		);
+	});
+	await page.goto("/");
+	await expect(page.locator("article .rendered").first()).toBeVisible({ timeout: 60_000 });
+	await openSidebar(page);
+	// Focus the current row, step down to the empty chat, enter it.
+	await page.keyboard.press("Control+Shift+H");
+	await page.keyboard.press("j");
+	await page.keyboard.press("Space");
+	await expect(chatsAside(page)).toHaveClass(/collapsed/);
+	await expect
+		.poll(
+			() =>
+				page.evaluate(
+					() => !!(document.activeElement as HTMLElement | null)?.closest(".prompt .cm-content")
+				),
+			{ timeout: 10_000 }
+		)
+		.toBe(true);
 });

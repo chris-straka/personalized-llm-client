@@ -53,7 +53,11 @@ test.describe("voice-error", () => {
 	test("explicit speak failure banners, then expires", async ({ page }) => {
 		await throwingSpeak(page);
 		await webEngine(page);
-		await seedChat(page, [{ role: "assistant", content: "hello there" }]);
+		// Tall enough that the article's hover center clears the
+		// invisible top drag strip (a one-liner would sit under it).
+		await seedChat(page, [
+			{ role: "assistant", content: "hello there\n\nlorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor" }
+		]);
 		await page.goto("/");
 		const article = page.locator("article.assistant");
 		await expect(article).toBeVisible({ timeout: 60_000 });
@@ -132,7 +136,11 @@ test.describe("native-fallback", () => {
 	 * (Shell-side speech itself is device-only and unverified here.)
 	 */
 	test.beforeEach(async ({ page }) => {
-		await seedChat(page, [{ role: "assistant", content: "hello there" }]);
+		// Tall enough that the article's hover center clears the
+		// invisible top drag strip (a one-liner would sit under it).
+		await seedChat(page, [
+			{ role: "assistant", content: "hello there\n\nlorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor" }
+		]);
 		await page.goto("/");
 		await expect(page.locator("article.assistant")).toBeVisible({ timeout: 60_000 });
 	});
@@ -218,6 +226,24 @@ test.describe("ios-voice", () => {
 		const select = pick.locator("select");
 		await expect(select.locator("option").nth(1)).toHaveText("Samantha");
 		await expect(select.locator("option").nth(2)).toHaveText("Daniel · en-GB");
+	});
+
+	/** Refresh is an icon on the picker row, and it reports its outcome. */
+	test("voice refresh reports up to date", async ({ page }) => {
+		const panel = page.locator(".settings-panel");
+		const refresh = panel.getByRole("button", { name: "Check for new voices" });
+		await expect(refresh).toBeVisible();
+		await expect(refresh).toHaveText("");
+		await expect(refresh.locator("svg")).toHaveCount(1);
+		// Ghost icon: fixed square, transparent in every theme.
+		const box = await refresh.boundingBox();
+		expect(box).toBeTruthy();
+		expect(Math.abs(box!.width - box!.height)).toBeLessThan(1);
+		await expect
+			.poll(() => refresh.evaluate((el) => getComputedStyle(el).backgroundColor))
+			.toBe("rgba(0, 0, 0, 0)");
+		await refresh.click();
+		await expect(panel.getByText("Voice list is up to date.")).toBeVisible();
 	});
 
 	/** A picked voice is saved (debounced) and restored on boot. */

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	CODE_RUN_TIMEOUT_SECS,
+	codeRunBody,
 	codeRunDisabledReason,
 	codeRunSummary,
 	noRunnerReason,
@@ -20,6 +21,8 @@ describe("runnerFor", () => {
 		expect(runnerFor("sh")).toEqual({ program: "bash", suffix: "sh" });
 		expect(runnerFor("ruby")).toEqual({ program: "ruby", suffix: "rb" });
 		expect(runnerFor("deno")).toEqual({ program: "deno", suffix: "js" });
+		expect(runnerFor("go")).toEqual({ program: "go", suffix: "go" });
+		expect(runnerFor("golang")).toEqual({ program: "go", suffix: "go" });
 	});
 
 	it("is case- and whitespace-tolerant", () => {
@@ -97,5 +100,33 @@ describe("codeRunSummary", () => {
 		).toContain("Timed out after 10s");
 		expect(codeRunSummary("python", { kind: "unavailable", reason: "nope" })).toBe("nope");
 		expect(codeRunDisabledReason()).toContain("desktop app");
+	});
+});
+
+describe("codeRunBody", () => {
+	const result = {
+		exit_code: 0,
+		timed_out: false,
+		truncated: false,
+		cwd: "/tmp/x",
+		command: ["python3", "/tmp/x/snippet.py"]
+	};
+	it("stamps output with no header line", () => {
+		expect(
+			codeRunBody({ kind: "ok", result: { ...result, stdout: "Hello, world!\n", stderr: "" } })
+		).toBe("Hello, world!\n");
+		expect(
+			codeRunBody({ kind: "ok", result: { ...result, stdout: "out\n", stderr: "warn\n" } })
+		).toBe("out\n\nwarn\n");
+	});
+
+	it("is empty for silent runs so no tray renders", () => {
+		expect(codeRunBody({ kind: "ok", result: { ...result, stdout: "", stderr: "  \n" } })).toBe(
+			""
+		);
+	});
+
+	it("keeps the reason for never-ran outcomes", () => {
+		expect(codeRunBody({ kind: "unavailable", reason: "nope" })).toBe("nope");
 	});
 });

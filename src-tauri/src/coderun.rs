@@ -58,6 +58,7 @@ pub fn runner_for(language: &str) -> Option<(&'static str, &'static str)> {
         "typescript" | "ts" => Some(("bun", "ts")),
         "bash" | "sh" | "shell" => Some(("bash", "sh")),
         "ruby" | "rb" => Some(("ruby", "rb")),
+        "go" | "golang" => Some(("go", "go")),
         "bun" => Some(("bun", "js")),
         "deno" => Some(("deno", "js")),
         _ => None,
@@ -81,7 +82,7 @@ fn truncate(s: &str) -> (String, bool) {
 pub fn run_code(language: String, code: String) -> Result<CodeRunResult, String> {
     let (program, suffix) = runner_for(&language).ok_or_else(|| {
         format!(
-            "no local runner for \"{language}\" — python, javascript, typescript (bun), bash, ruby, and deno run locally"
+            "no local runner for \"{language}\" — python, javascript, typescript (bun), bash, ruby, deno, and go run locally"
         )
     })?;
     if code.trim().is_empty() {
@@ -104,9 +105,9 @@ pub fn run_code(language: String, code: String) -> Result<CodeRunResult, String>
     let file = dir.join(format!("snippet.{suffix}"));
     std::fs::write(&file, &code).map_err(|e| format!("could not stage the snippet: {e}"))?;
 
-    // Deno needs an explicit `run` subcommand; the rest take the file.
+    // Deno and Go need an explicit `run` subcommand; the rest take the file.
     let mut argv = vec![program.to_string()];
-    if program == "deno" {
+    if program == "deno" || program == "go" {
         argv.push("run".to_string());
     }
     argv.push(file.to_string_lossy().to_string());

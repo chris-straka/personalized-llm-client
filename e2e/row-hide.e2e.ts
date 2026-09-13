@@ -88,9 +88,9 @@ test("row stays visible while its button holds keyboard focus", async ({ page })
 	await expect(row).toHaveCSS("opacity", "0");
 });
 
-/** X cuts the hovered message (clipboard first, then delete); bare
-Delete drops it and copies nothing. */
-test("x cuts and Delete deletes the hovered message", async ({ page, context }) => {
+/** X cuts the hovered message (clipboard first, then delete);
+Shift+D drops it and copies nothing; bare Delete never deletes. */
+test("x cuts, shift+D drops, bare Delete spares the hovered message", async ({ page, context }) => {
 	await context.grantPermissions(["clipboard-read", "clipboard-write"]);
 	await seedChat(page, [
 		{ role: "assistant", content: "cut me" },
@@ -110,7 +110,11 @@ test("x cuts and Delete deletes the hovered message", async ({ page, context }) 
 	const remaining = page.locator("article .rendered").first();
 	await expect(remaining).toContainText("drop me");
 	await remaining.hover();
+	// Bare Delete is harmless while reading.
 	await page.keyboard.press("Delete");
+	await expect(page.locator("article .rendered")).toHaveCount(1);
+	// Shift+D drops it and copies nothing.
+	await page.keyboard.press("Shift+d");
 	await expect(page.locator("article .rendered")).toHaveCount(0);
 	await expect(page.evaluate(() => navigator.clipboard.readText())).resolves.toBe("cut me");
 });

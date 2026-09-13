@@ -3,6 +3,7 @@ import DOMPurify from "dompurify";
 import katex from "katex";
 import { createHighlighter, type Highlighter } from "shiki";
 import { RUBY_SCRIPT_RE } from "./reading";
+import { runnerFor } from "./coderun";
 
 /**
  * Message rendering: markdown → sanitized HTML with code chrome, collapsed
@@ -96,20 +97,14 @@ export function renderMarkdown(markdownText: string): RenderedMessage {
 	return rendered;
 }
 
-/** Render a full assistant message: thoughts collapsed on top, body below. */
+/** Render a full assistant message: thoughts stripped, body only. */
 export function renderMessage(markdownText: string, sourcesWanted: boolean): RenderedMessage {
-	const { thoughts, body } = extractThoughts(markdownText);
+	// Thoughts never display; extraction still strips them (and unasked
+	// sources) so only the answer renders. Copy uses the same strip.
+	const { body } = extractThoughts(markdownText);
 	const clean = stripSourcesIfUnasked(body, sourcesWanted);
 	const rendered: RenderedMessage = { html: "", codes: [], maths: [] };
-	let html = "";
-	if (thoughts) {
-		const inner = renderInto(thoughts, rendered.codes, rendered.maths);
-		html +=
-			`<details class="ccez-thoughts"><summary>thoughts</summary>` +
-			`<div class="ccez-thoughts-body">${inner}</div></details>`;
-	}
-	html += renderInto(clean, rendered.codes, rendered.maths);
-	rendered.html = sanitize(html);
+	rendered.html = sanitize(renderInto(clean, rendered.codes, rendered.maths));
 	return rendered;
 }
 
@@ -287,6 +282,50 @@ export function mathTexPreview(tex: string, max = 48): string {
 }
 
 /**
+ * TeX inside a first line that opens math, or null for plain text.
+ * Same-line `$$…$$` / `\[…\]` / `$…$` strip their delimiters; a bare
+ * opening `$$` / `\[` line reads the next line (multiline display
+ * blocks). An unclosed inline `$` reads to end of line.
+ */
+function mathPreviewInner(lines: string[]): string | null {
+	const first = (lines[0] ?? "").trim();
+	for (const [open, close] of [
+		["$$", "$$"],
+		["\\[", "\\]"]
+	] as const) {
+		if (first.startsWith(open)) {
+			let inner = first.slice(open.length);
+			if (inner.endsWith(close)) inner = inner.slice(0, -close.length);
+			if (inner.trim() === "") {
+				const next = (lines[1] ?? "").trim();
+				inner = next.endsWith(close) ? next.slice(0, -close.length) : next;
+			}
+			return inner;
+		}
+	}
+	if (first.startsWith("$") && !first.startsWith("$$")) {
+		const close = first.indexOf("$", 1);
+		return close < 0 ? first.slice(1) : first.slice(1, close);
+	}
+	return null;
+}
+
+/**
+ * Folded-message preview text: the override wins (refs-only quotes),
+ * else the first line (unchanged plain-text behavior). Math folds
+ * into its TeX wrapped in `\\(…\\)` so a folded equation still reads
+ * as latex — and the preview button keeps it clickable. Pure and
+ * unit-tested.
+ */
+export function foldPreviewText(content: string, override: string | null): string {
+	if (override !== null) return override;
+	const lines = content.split("\n");
+	const tex = mathPreviewInner(lines);
+	if (tex !== null) return `\\(${mathTexPreview(tex, 120)}\\)`;
+	return (lines[0] ?? "").slice(0, 140);
+}
+
+/**
  * Collapsed label for a folded code block (`python · 13 LOC`): folding
  * swaps the pre for this text instead of hiding the block outright, so
  * the fold still reads as code. Pure and unit-tested.
@@ -302,6 +341,36 @@ export function foldedCodeLabel(lang: string, loc: number): string {
  */
 export function mathCopyText(tex: string): string {
 	return `$$${tex}$$`;
+}
+
+/** Outer `$$…$$` delimiters off a fenced-latex body, when present. */
+function stripOuterDisplayDelimiters(text: string): string {
+	const t = text.trim();
+	if (t.startsWith("$$") && t.endsWith("$$") && t.length >= 4) return t.slice(2, -2).trim();
+	return text;
+}
+
+/** Equality key for duplicate latex: delimiters and whitespace aside. */
+function normMathSrc(text: string): string {
+	return stripOuterDisplayDelimiters(text).replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Drop a ```latex fence when an identical `$$` display block sits right
+ * next to it (either order): models often emit both, and the pair reads
+ * as the same equation twice. The display block stays — it renders —
+ * so each equation shows exactly once. Pure and unit-tested.
+ */
+export function stripLatexFenceDupes(source: string): string {
+	const fenceThenDisplay =
+		/^```latex[^\S\n]*\n([\s\S]*?)\n```[^\S\n]*(?:\n[ \t]*)*\n(\$\$[\s\S]*?\$\$)/gm;
+	const displayThenFence =
+		/(\$\$[\s\S]*?\$\$)(?:\n[ \t]*)*\n```latex[^\S\n]*\n([\s\S]*?)\n```/gm;
+	const dropFence = (_match: string, fence: string, display: string): string =>
+		normMathSrc(fence) === normMathSrc(display) ? display : _match;
+	const dropFenceAfter = (_match: string, display: string, fence: string): string =>
+		normMathSrc(fence) === normMathSrc(display) ? display : _match;
+	return source.replace(fenceThenDisplay, dropFence).replace(displayThenFence, dropFenceAfter);
 }
 
 /** KaTeX HTML for one math entry, or its escaped plain source on failure. */
@@ -320,9 +389,10 @@ export function mathHtml(entry: MathEntry, index: number): string {
 		// Unknown/invalid math keeps plain rendering, never fatal.
 		return escapeHtml(entry.raw);
 	}
-	// Body-only display math (no fold bar, no buttons): the body stays
-	// and remains foldable via `data-folded` (wired elsewhere), while a
-	// body click copies the TeX with its `$$` delimiters (see
+	// Display math carries the code-style head: copy top-right, a `$`
+	// toggle left of it flipping rendered/raw, and a `latex · N LOC`
+	// folded label (folding rides `data-folded`, wired elsewhere). A
+	// body click still copies the TeX with its `$$` delimiters (see
 	// mathCopyText). Inline math renders bare (no chrome at all): a bar
 	// mid-sentence would break the line's rhythm, and its TeX stays one
 	// message-copy away. `.ccez-math-body` and `data-math-index` are the
@@ -331,9 +401,16 @@ export function mathHtml(entry: MathEntry, index: number): string {
 	// equations readable in both themes without a second palette to
 	// maintain.
 	if (entry.kind === "display") {
+		const loc = entry.raw.split("\n").length;
 		return (
 			`<div class="ccez-math" data-math-index="${index}">` +
-			`<div class="ccez-math-body">${inner}</div></div>`
+			`<button type="button" class="ccez-math-tex" ` +
+			`aria-label="Show math source" title="Show source">$</button>` +
+			`<button type="button" class="ccez-math-copy" ` +
+			`aria-label="Copy equation" title="Copy">${CODE_COPY_GLYPH}</button>` +
+			`<span class="ccez-math-foldedlabel">${escapeHtml(foldedCodeLabel("latex", loc))}</span>` +
+			`<div class="ccez-math-body">${inner}</div>` +
+			`<pre class="ccez-math-raw">${escapeHtml(entry.raw)}</pre></div>`
 		);
 	}
 	return (
@@ -366,16 +443,26 @@ const CODE_COPY_GLYPH =
 	`<rect x="6" y="6" width="7" height="7" rx="1.5" />` +
 	`<path d="M9.5 6V4.2A1.2 1.2 0 0 0 8.3 3H4.2A1.2 1.2 0 0 0 3 4.2v4.1a1.2 1.2 0 0 0 1.2 1.2H6" />` +
 	`</svg>`;
+/**
+ * Play triangle for the Code Run button: same 16px box as the copy
+ * glyph, filled (a stroked triangle reads mushy at 1rem).
+ */
+const CODE_RUN_GLYPH =
+	`<svg class="action-glyph" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">` +
+	`<path d="M5 3.2v9.6L12.2 8z" />` +
+	`</svg>`;
 
 function renderInto(
 	markdownText: string,
 	codes: Array<{ lang: string; code: string }>,
 	maths: MathEntry[]
 ): string {
-	// Math leaves the source first (code fences/spans excluded there), so
+	// A ```latex fence duplicating its neighboring `$$` block goes first
+	// (the display block stays), so each equation renders exactly once.
+	// Math leaves the source next (code fences/spans excluded there), so
 	// marked never sees the delimiters and KaTeX tags never pass through it.
 	const base = maths.length;
-	const { stripped, maths: found } = extractMath(markdownText);
+	const { stripped, maths: found } = extractMath(stripLatexFenceDupes(markdownText));
 	for (const entry of found) maths.push(entry);
 	const instance = new Marked({ breaks: true });
 	instance.use({
@@ -404,6 +491,14 @@ function renderInto(
 			},
 			code({ text, lang }: { text: string; lang?: string }): string {
 				const language = (lang ?? "").trim() || "text";
+				// A lone ```latex fence is math, not code: it renders
+				// through KaTeX like a display block (a fence sitting next
+				// to an identical `$$` block was already dropped by
+				// stripLatexFenceDupes, so each equation shows once).
+				if (language === "latex") {
+					maths.push({ kind: "display", tex: stripOuterDisplayDelimiters(text), raw: text });
+					return mathPlaceholder(maths.length - 1 - base);
+				}
 				const index = codes.length;
 				codes.push({ lang: language, code: text });
 				// Headless code block: no fold bar, no copy-on-click —
@@ -416,11 +511,18 @@ function renderInto(
 				// exists and Shiki already colors blocks apart, so
 				// artwork per language isn't cheap.
 				const loc = text.split("\n").length;
+				// Run lives only on runnable fences (runnerFor's allowlist):
+				// prose, output samples, and unknown languages get copy
+				// alone — never a button that only explains itself.
+				const runButton =
+					runnerFor(language) !== null
+						? `<button type="button" class="ccez-code-run" data-code-run="${index}" data-code-lang="${escapeHtml(language)}" aria-label="Run code block" title="Run locally">${CODE_RUN_GLYPH}</button>`
+						: "";
 				return (
 					`<div class="ccez-code" data-code-index="${index}">` +
 					`<button type="button" class="ccez-code-copy" data-code-copy="${index}" ` +
 					`aria-label="Copy code block" title="Copy">${CODE_COPY_GLYPH}</button>` +
-					`<button type="button" class="ccez-code-run" data-code-run="${index}" data-code-lang="${escapeHtml(language)}" aria-label="Run code block" title="Run locally">Run</button>` +
+					runButton +
 					`<span class="ccez-code-foldedlabel">${escapeHtml(foldedCodeLabel(language, loc))}</span>` +
 					`<pre><code data-code-index="${index}">${escapeHtml(text)}</code></pre></div>`
 				);

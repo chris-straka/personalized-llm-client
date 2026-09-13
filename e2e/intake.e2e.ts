@@ -153,9 +153,7 @@ test("long paste collapses to a tag; Ctrl+O expands and re-collapses", async ({
 	await expect(marker).toBeVisible();
 });
 
-test("Ctrl+O without paste tags still toggles thoughts", async ({ page }) => {
-	// The shortcut is composer-first, not composer-only: with no tags
-	// to expand, it keeps its thoughts toggle from inside the prompt.
+test("thoughts never render and Ctrl+O stays quiet without paste tags", async ({ page }) => {
 	await page.addInitScript(() => {
 		window.localStorage.setItem(
 			"ccez-studio-chats-v1",
@@ -179,13 +177,15 @@ test("Ctrl+O without paste tags still toggles thoughts", async ({ page }) => {
 		);
 	});
 	await page.reload();
-	const thoughts = page.locator("article.assistant .ccez-thoughts").first();
-	await expect(thoughts).toBeVisible({ timeout: 60_000 });
+	const body = page.locator("article.assistant .rendered").first();
+	await expect(body).toContainText("Final answer", { timeout: 60_000 });
+	await expect(body).not.toContainText("quiet plan");
+	await expect(page.locator("article.assistant .ccez-thoughts")).toHaveCount(0);
+	// Ctrl+O with no paste tags does nothing (and opens no file dialog).
 	await page.locator(".cm-content").first().click();
 	await page.keyboard.press("Control+o");
-	await expect(thoughts).toHaveAttribute("open", "");
-	await page.keyboard.press("Control+o");
-	await expect(thoughts).not.toHaveAttribute("open", "");
+	await expect(page.locator("article.assistant .ccez-thoughts")).toHaveCount(0);
+	await expect(body).toContainText("Final answer");
 });
 
 test("screenshot-to-chat is gone, paste still takes images", async ({ page }) => {

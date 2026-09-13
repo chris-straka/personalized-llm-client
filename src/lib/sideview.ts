@@ -87,6 +87,48 @@ export function toggleSideviewOpen(open: boolean): boolean {
 }
 
 /**
+ * Committed-URL history for the embedded fallback view (the DOM
+ * browser behind the fallback strip): typing alone never
+ * navigates — only a committed URL lands in the viewport, so
+ * back/forward step through committed URLs only.
+ */
+export interface BrowserHistoryState {
+	entries: string[];
+	index: number;
+}
+
+/** Cap on committed entries (a single tab never needs more). */
+export const BROWSER_HISTORY_MAX = 100;
+
+/** Commit a URL: append (dropping any forward entries), cap, point at it. */
+export function pushBrowserHistory(
+	prev: BrowserHistoryState,
+	url: string,
+	max = BROWSER_HISTORY_MAX
+): BrowserHistoryState {
+	const entries = prev.entries.slice(0, prev.index + 1);
+	const last = entries[entries.length - 1];
+	// Re-committing the current page (e.g. a reload via Enter)
+	// must not fork a duplicate history entry.
+	if (last !== url) entries.push(url);
+	const capped = entries.slice(-Math.max(1, max));
+	return { entries: capped, index: capped.length - 1 };
+}
+
+/** Step back (-1) or forward (+1); clamps at both ends, never throws. */
+export function stepBrowserHistory(
+	prev: BrowserHistoryState,
+	delta: -1 | 1
+): BrowserHistoryState {
+	if (prev.entries.length === 0) return { entries: [], index: -1 };
+	const index = Math.min(
+		prev.entries.length - 1,
+		Math.max(0, prev.index + delta)
+	);
+	return { entries: prev.entries, index };
+}
+
+/**
  * Clamp a dragged panel width into the memorized range (whole px).
  * Non-numbers reset to the dock default via the settings loader —
  * this only clamps real input.

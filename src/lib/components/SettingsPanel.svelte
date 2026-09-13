@@ -14,12 +14,12 @@
 		CHAT_WIDTH_MAX,
 		CHAT_WIDTH_MIN,
 		PROMPT_IDLE_DEFAULT,
-		PROMPT_IDLE_MIN,
 		type AppSettings
 	} from "$lib/settings";
 	import {
 		draggedSliderPastTop,
 		formatIdleTimeout,
+		IDLE_SLIDER_BOTTOM,
 		IDLE_SLIDER_TOP,
 		idleSettingToSlider,
 		idleSliderToSetting
@@ -40,6 +40,7 @@
 	import { voicesForLang, allVoicesForLang, autoVoiceForLang } from "$lib/voiceTiers";
 	import { currentPlatform } from "$lib/platform";
 	import type { NativeVoice } from "$lib/nativeTts";
+	import ActionIcon from "./ActionIcon.svelte";
 	import { onMount } from "svelte";
 
 	interface Props {
@@ -318,8 +319,17 @@
 	 * voiceLoadError and keep the last good inventory.
 	 */
 	let refreshingVoices = $state(false);
-	async function loadVoices(): Promise<void> {
+	/**
+	 * Last manual refresh outcome ("Found 2 new voices", "Voice list
+	 * is up to date"): the re-check reads the same OS registry, so
+	 * without this the button looks dead. Empty until the first
+	 * manual refresh — the mount load stays silent.
+	 */
+	let voiceRefreshNote = $state("");
+	async function loadVoices(announce = false): Promise<void> {
 		refreshingVoices = true;
+		if (announce) voiceRefreshNote = "";
+		const before = installedVoices.length;
 		try {
 			const supported = await nativeTtsSupported();
 			nativeVoice = supported;
@@ -349,6 +359,13 @@
 				settings.nativeVoiceId = null;
 			}
 			voicesLoaded = true;
+			if (announce) {
+				const found = installed.length - before;
+				voiceRefreshNote =
+					found > 0
+						? `Found ${found} new voice${found === 1 ? "" : "s"} — list updated.`
+						: "Voice list is up to date.";
+			}
 		} finally {
 			refreshingVoices = false;
 		}
@@ -707,7 +724,7 @@
 		each box names whose buttons it covers. Desktop-only (this branch),
 		with the bubble toggle below the row. -->
 		<fieldset class="hover-row">
-			<legend>Message buttons only on hover for…</legend>
+			<legend>Show message buttons only on hover for:</legend>
 			<label class="check">
 				<input type="checkbox" bind:checked={settings.hoverUserActions} />
 				My messages
@@ -743,22 +760,34 @@
 					<span class="voice-pick-label" id="system-voice-label-android"
 						>System voice ({voiceLangTag})</span
 					>
-					<select
-						value={settings.nativeVoiceId ?? ""}
-						aria-labelledby="system-voice-label-android"
-						onchange={(e) => {
-							settings.nativeVoiceId = e.currentTarget.value || null;
-						}}
-					>
-						<option value="">{autoLabel}</option>
-						{#each androidVoiceOptions as option (option.id)}
-							<option value={option.id}>
-								{option.name}{option.lang.toLowerCase() === voiceLangTag.toLowerCase()
-									? ""
-									: ` · ${option.lang}`}
-							</option>
-						{/each}
-					</select>
+					<div class="voice-pick-row">
+						<select
+							value={settings.nativeVoiceId ?? ""}
+							aria-labelledby="system-voice-label-android"
+							onchange={(e) => {
+								settings.nativeVoiceId = e.currentTarget.value || null;
+							}}
+						>
+							<option value="">{autoLabel}</option>
+							{#each androidVoiceOptions as option (option.id)}
+								<option value={option.id}>
+									{option.name}{option.lang.toLowerCase() === voiceLangTag.toLowerCase()
+										? ""
+										: ` · ${option.lang}`}
+								</option>
+							{/each}
+						</select>
+						<button
+							type="button"
+							class="voice-refresh"
+							title={refreshingVoices ? "Checking…" : "Check for new voices"}
+							aria-label={refreshingVoices ? "Checking for new voices" : "Check for new voices"}
+							onclick={() => void loadVoices(true)}
+							disabled={refreshingVoices}
+						>
+							<ActionIcon kind="rerun" />
+						</button>
+					</div>
 				</div>
 			{:else if voicesLoaded}
 				<p class="note voice-note">
@@ -769,9 +798,9 @@
 				</p>
 			{/if}
 		{/if}
-		<button type="button" class="linklike" onclick={() => void loadVoices()} disabled={refreshingVoices}>
-			{refreshingVoices ? "Checking…" : "Check for new voices"}
-		</button>
+		{#if voiceRefreshNote !== ""}
+			<p class="note" role="status">{voiceRefreshNote}</p>
+		{/if}
 	{/if}
 	{#if androidUI && !inShell}
 		<label class="check">
@@ -815,22 +844,34 @@
 						<span class="voice-pick-label" id="system-voice-label"
 							>System voice ({voiceLangTag})</span
 						>
-						<select
-							value={settings.nativeVoiceId ?? ""}
-							aria-labelledby="system-voice-label"
-							onchange={(e) => {
-								settings.nativeVoiceId = e.currentTarget.value || null;
-							}}
-						>
-							<option value="">{autoLabel}</option>
-							{#each voiceOptions as option (option.id)}
-								<option value={option.id}>
-									{option.name}{option.lang.toLowerCase() === voiceLangTag.toLowerCase()
-										? ""
-										: ` · ${option.lang}`}
-								</option>
-							{/each}
-						</select>
+						<div class="voice-pick-row">
+							<select
+								value={settings.nativeVoiceId ?? ""}
+								aria-labelledby="system-voice-label"
+								onchange={(e) => {
+									settings.nativeVoiceId = e.currentTarget.value || null;
+								}}
+							>
+								<option value="">{autoLabel}</option>
+								{#each voiceOptions as option (option.id)}
+									<option value={option.id}>
+										{option.name}{option.lang.toLowerCase() === voiceLangTag.toLowerCase()
+											? ""
+											: ` · ${option.lang}`}
+									</option>
+								{/each}
+							</select>
+							<button
+								type="button"
+								class="voice-refresh"
+								title={refreshingVoices ? "Checking…" : "Check for new voices"}
+								aria-label={refreshingVoices ? "Checking for new voices" : "Check for new voices"}
+								onclick={() => void loadVoices(true)}
+								disabled={refreshingVoices}
+							>
+								<ActionIcon kind="rerun" />
+							</button>
+						</div>
 					</div>
 				{:else if voicesLoaded}
 					<p class="note voice-note">
@@ -839,9 +880,9 @@
 					</p>
 				{/if}
 			{/if}
-			<button type="button" class="linklike" onclick={() => void loadVoices()} disabled={refreshingVoices}>
-				{refreshingVoices ? "Checking…" : "Check for new voices"}
-			</button>
+			{#if voiceRefreshNote !== ""}
+				<p class="note" role="status">{voiceRefreshNote}</p>
+			{/if}
 		</fieldset>
 		{:else if inShell && voiceLoadError && !androidUI}
 			<fieldset>
@@ -906,7 +947,7 @@
 			<input
 				type="range"
 				min="80"
-				max={androidUI ? 400 : 600}
+				max={androidUI ? 400 : 800}
 				step="5"
 				value={Math.round(settings.fontScale * 100)}
 				aria-label="Text size percent"
@@ -917,6 +958,31 @@
 				}}
 			/>
 			<output>{Math.round(settings.fontScale * 100)}%</output>
+		</span>
+	</label>
+	<label class="slider-row">
+		Background opacity
+		<button
+			type="button"
+			class="reset-width"
+			title="Reset to fully opaque"
+			onclick={() => (settings.bgOpacity = 1)}>(100%)</button
+		>
+		<span class="font-row">
+			<input
+				type="range"
+				min="20"
+				max="100"
+				step="5"
+				value={Math.round((settings.bgOpacity ?? 1) * 100)}
+				aria-label="Background opacity percent"
+				onpointerdown={noteSliderPress}
+				onpointerup={(e) => sliderRelease(e, () => (settings.bgOpacity = 1))}
+				oninput={(e) => {
+					settings.bgOpacity = Number(e.currentTarget.value) / 100;
+				}}
+			/>
+			<output>{Math.round((settings.bgOpacity ?? 1) * 100)}%</output>
 		</span>
 	</label>
 	{#if !androidUI}
@@ -954,16 +1020,16 @@
 			class="reset-width"
 			title="Reset to the default idle time"
 			onclick={() => (settings.promptIdleSec = PROMPT_IDLE_DEFAULT)}
-			>({PROMPT_IDLE_DEFAULT}s)</button
+			>({formatIdleTimeout(PROMPT_IDLE_DEFAULT)})</button
 		>
 		<span class="font-row">
 			<input
 				type="range"
-				min={PROMPT_IDLE_MIN}
+				min={IDLE_SLIDER_BOTTOM}
 				max={IDLE_SLIDER_TOP}
 				step="1"
 				value={idleSettingToSlider(settings.promptIdleSec ?? PROMPT_IDLE_DEFAULT)}
-				aria-label="Idle seconds before the prompt hides (top is never)"
+				aria-label="Idle seconds before the prompt hides (bottom is always, top is never)"
 				onpointerdown={noteSliderPress}
 				onpointerup={(e) => sliderRelease(e, () => (settings.promptIdleSec = PROMPT_IDLE_DEFAULT))}
 				oninput={(e) => {
@@ -1173,6 +1239,53 @@
 		display: block;
 		margin-bottom: 0.35rem;
 	}
+	/* Refresh rides on the picker row (beside the select, never a
+	paragraph of its own): a borderless ghost icon, so neither theme
+	can clash with it. Fixed square, never stretched. */
+	.voice-pick-row {
+		display: flex;
+		gap: 0.2rem;
+		align-items: center;
+	}
+	.voice-pick-row select {
+		flex: 1 1 auto;
+		min-width: 0;
+		width: auto;
+		margin-top: 0;
+	}
+	.voice-refresh {
+		flex: none;
+		align-self: center;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.9rem;
+		height: 1.9rem;
+		padding: 0;
+		border: 0;
+		border-radius: 8px;
+		background: none;
+		color: #6e6e73;
+		cursor: pointer;
+		transition: color 0.15s ease;
+	}
+	.voice-refresh:hover:not(:disabled) {
+		color: #1c1c1e;
+	}
+	.voice-refresh:disabled {
+		cursor: default;
+		opacity: 0.55;
+	}
+	.voice-refresh > :global(svg) {
+		height: 1rem;
+		width: 1rem;
+	}
+	:global(html[data-theme="dark"]) .voice-refresh {
+		color: #98989f;
+	}
+	:global(html[data-theme="dark"]) .voice-refresh:hover:not(:disabled) {
+		color: #f2f2f7;
+	}
 	/* Native select chrome (Aqua in the shell) sizes itself, so the
 	picker would never match the text field: draw it as a twin with a
 	chevron in the project's line-icon style instead. */
@@ -1319,21 +1432,6 @@
 	.voice-note {
 		margin-bottom: 0.9rem;
 	}
-	.linklike {
-		font: inherit;
-		font-size: 0.84rem;
-		color: inherit;
-		text-decoration: underline;
-		text-underline-offset: 2px;
-		background: none;
-		border: 0;
-		padding: 0;
-		cursor: pointer;
-	}
-	.linklike:disabled {
-		cursor: default;
-		opacity: 0.6;
-	}
 	.key-state {
 		font-size: 0.87rem;
 		display: flex;
@@ -1426,7 +1524,7 @@
 	.hover-row {
 		display: flex;
 		gap: 1.2rem;
-		margin-bottom: 0.7rem;
+		margin-bottom: 0.55rem;
 	}
 	.hover-row legend {
 		margin-bottom: 0.6rem;

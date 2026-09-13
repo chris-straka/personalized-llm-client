@@ -47,6 +47,13 @@ test("right-click with a selection reads the selection, menu unblocked", async (
 	await para.dblclick({ position: { x: 10, y: 10 } });
 	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
 	expect(selected.length).toBeGreaterThan(0);
+	// The double-click summons the Annotate menu over the paragraph's
+	// top edge; dismiss it (Escape keeps the highlight) so the
+	// right-click lands on the selected text, not a menu button.
+	await page.keyboard.press("Escape");
+	await expect(page.locator(".sel-menu")).toHaveCount(0);
+	const reselected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+	expect(reselected).toBe(selected);
 	const box = await para.boundingBox();
 	if (!box) throw new Error("missing para box");
 	await page.mouse.click(box.x + 10, box.y + 10, { button: "right" });

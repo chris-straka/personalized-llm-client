@@ -13,6 +13,7 @@ import {
 	SIDEVIEW_WIDTH_DEFAULT,
 	SIDEVIEW_WIDTH_MAX,
 	SIDEVIEW_WIDTH_MIN,
+	PROMPT_IDLE_ALWAYS,
 	PROMPT_IDLE_DEFAULT,
 	PROMPT_IDLE_MAX,
 	PROMPT_IDLE_MIN,
@@ -69,13 +70,13 @@ describe("settings", () => {
 		expect(loadSettings(memoryStore).fontScale).toBe(1.2);
 	});
 
-	it("persists text size up to 600% and resets strays", () => {
+	it("persists text size up to 800% and resets strays", () => {
 		const max = blankSettings();
-		max.fontScale = 6;
+		max.fontScale = 8;
 		saveSettings(max, memoryStore);
-		expect(loadSettings(memoryStore).fontScale).toBe(6);
+		expect(loadSettings(memoryStore).fontScale).toBe(8);
 		const over = blankSettings();
-		over.fontScale = 6.5;
+		over.fontScale = 8.5;
 		saveSettings(over, memoryStore);
 		expect(loadSettings(memoryStore).fontScale).toBe(1);
 	});
@@ -128,6 +129,11 @@ describe("settings", () => {
 		(junk as unknown as Record<string, unknown>).sideviewWidthPx = "wide";
 		saveSettings(junk, memoryStore);
 		expect(loadSettings(memoryStore).sideviewWidthPx).toBe(SIDEVIEW_WIDTH_DEFAULT);
+	});
+
+	it("hides the prompt whenever unfocused out of the box", () => {
+		expect(PROMPT_IDLE_DEFAULT).toBe(PROMPT_IDLE_ALWAYS);
+		expect(defaultSettings().promptIdleSec).toBe(PROMPT_IDLE_ALWAYS);
 	});
 
 	it("backfills and clamps the prompt idle timeout on old saves", () => {

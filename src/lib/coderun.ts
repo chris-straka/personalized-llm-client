@@ -36,6 +36,9 @@ export function runnerFor(language: string): { program: string; suffix: string }
 		case "ruby":
 		case "rb":
 			return { program: "ruby", suffix: "rb" };
+		case "go":
+		case "golang":
+			return { program: "go", suffix: "go" };
 		case "bun":
 			return { program: "bun", suffix: "js" };
 		case "deno":
@@ -69,7 +72,7 @@ export function codeRunDisabledReason(): string {
 /** Reason for fence labels with no PATH-resolved runner. */
 export function noRunnerReason(language: string): string {
 	const label = language.trim() || "text";
-	return `No local runner for "${label}" — python, javascript, typescript (bun), bash, ruby, and deno run locally.`;
+	return `No local runner for "${label}" — python, javascript, typescript (bun), bash, ruby, deno, and go run locally.`;
 }
 
 /**
@@ -94,6 +97,20 @@ export async function runCodeBlock(language: string, code: string): Promise<Code
 			reason: error instanceof Error ? error.message : String(error)
 		};
 	}
+}
+
+/**
+ * Tray text for a finished run: captured stdout/stderr only, never the
+ * `Ran … (…snippet.py) — exit 0` header line (tmp-path and exit-0
+ * noise). Silent runs yield "" so no tray renders; failures surface
+ * through stderr, and never-ran outcomes keep their reason line.
+ * Pure and unit-tested.
+ */
+export function codeRunBody(outcome: CodeRunOutcome): string {
+	if (outcome.kind !== "ok") return codeRunSummary("text", outcome);
+	return [outcome.result.stdout, outcome.result.stderr]
+		.filter((part) => part.trim() !== "")
+		.join("\n");
 }
 
 /** One-line summary stamped above captured output (`ran with …`). */

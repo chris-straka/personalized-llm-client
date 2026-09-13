@@ -36,6 +36,19 @@ export default defineConfig({
 		baseURL: `http://127.0.0.1:${PORT}`,
 		trace: "retain-on-failure"
 	},
+	projects: [
+		{ name: "chromium", use: { browserName: "chromium" } },
+		// Shell-engine coverage: the Tauri app is WebKit (WKWebView),
+		// which fires selectionchange on body swaps where Chromium stays
+		// silent — the Annotate menu strand only reproduced there.
+		// Scoped to the selection spec (no clipboard perms, which are
+		// Chromium-only); everything else stays Chromium-only.
+		{
+			name: "webkit",
+			use: { browserName: "webkit" },
+			testMatch: ["**/sel-menu.e2e.ts"]
+		}
+	],
 	webServer: {
 		command: `bun run dev -- --port ${PORT} --strictPort`,
 		url: `http://127.0.0.1:${PORT}`,

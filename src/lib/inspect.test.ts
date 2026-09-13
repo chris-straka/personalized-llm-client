@@ -2,12 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
 	decomposeChar,
 	decomposeText,
+	decomposeTree,
 	getInspectData,
+	inspectLangFor,
 	isHanChar,
 	isSingleHanChar,
+	onKunLine,
 	parseKangxi,
 	shouldShowInspect
 } from "./inspect";
+import { extractStrokePaths, kanjiSvgUrl } from "./kanjivg";
 import { defaultSettings, loadSettings, saveSettings, memoryStore } from "./settings";
 
 describe("isSingleHanChar", () => {
@@ -24,6 +28,23 @@ describe("isSingleHanChar", () => {
 		expect(isSingleHanChar("")).toBe(false);
 		expect(isSingleHanChar("  ")).toBe(false);
 		expect(isSingleHanChar("語学")).toBe(false);
+	});
+});
+
+describe("inspectLangFor", () => {
+	it("guesses Japanese from kana in the picked paragraph", () => {
+		expect(inspectLangFor("字", "漢字のテスト")).toBe("ja");
+		expect(inspectLangFor("語", "日本語を勉強します")).toBe("ja");
+	});
+
+	it("defaults to Chinese for kana-free paragraphs", () => {
+		expect(inspectLangFor("字", "汉字测试")).toBe("zh");
+		expect(inspectLangFor("語", "学习中文")).toBe("zh");
+	});
+
+	it("falls back to the quote when the paragraph is empty", () => {
+		expect(inspectLangFor("字", "")).toBe("zh");
+		expect(inspectLangFor("字", "   ")).toBe("zh");
 	});
 });
 
@@ -231,5 +252,54 @@ describe("parseKangxi", () => {
 		expect(parseKangxi("149")).toBeNull();
 		expect(parseKangxi("x.7")).toBeNull();
 		expect(parseKangxi("999.1")).toBeNull();
+	});
+});
+
+describe("decomposeTree", () => {
+	it("nests two levels and stops at leaves", () => {
+		const tree = decomposeTree("通");
+		expect(tree.char).toBe("通");
+		expect(tree.children.length).toBeGreaterThanOrEqual(2);
+		for (const child of tree.children) {
+			expect(child.char.length).toBeGreaterThan(0);
+			for (const grand of child.children) expect(grand.children).toEqual([]);
+		}
+	});
+	it("returns a leaf for unknown characters", () => {
+		expect(decomposeTree("�")).toEqual({ char: "�", children: [] });
+	});
+	it("depth 1 never nests", () => {
+		const tree = decomposeTree("通", 1);
+		for (const child of tree.children) expect(child.children).toEqual([]);
+	});
+});
+
+describe("onKunLine", () => {
+	it("lowercases and comma-joins both sides on one line", () => {
+		expect(onKunLine({ japaneseOn: "ICHI ITSU", japaneseKun: "HITOTSU HAJIME" })).toBe(
+			"On/Kun: ichi,itsu | hitotsu,hajime"
+		);
+	});
+	it("omits a missing side without a dangling separator", () => {
+		expect(onKunLine({ japaneseOn: "ICHI", japaneseKun: null })).toBe("On/Kun: ichi");
+		expect(onKunLine({ japaneseOn: null, japaneseKun: null })).toBeNull();
+	});
+});
+
+describe("kanjivg", () => {
+	it("addresses files by 5-digit lowercase hex codepoint", () => {
+		expect(kanjiSvgUrl("一")).toBe(
+			"https://raw.githubusercontent.com/KanjiVG/kanjivg/master/kanji/04e00.svg"
+		);
+		expect(kanjiSvgUrl("往")).toContain("/05f80.svg");
+	});
+	it("extracts stroke paths in -sN order", () => {
+		const svg =
+			`<svg><g id="kvg:123"><path id="kvg:123-s2" d="M20 0C30 0 40 0"/><path id="kvg:123-s1" d="M10 0C10 10 10 20"/>` +
+			`<path id="kvg:123-g1" d="M0 0h5"/></g></svg>`;
+		expect(extractStrokePaths(svg)).toEqual(["M10 0C10 10 10 20", "M20 0C30 0 40 0"]);
+	});
+	it("returns null when no stroke paths exist", () => {
+		expect(extractStrokePaths("<svg><g></g></svg>")).toBeNull();
 	});
 });

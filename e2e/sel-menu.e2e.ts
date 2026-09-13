@@ -44,48 +44,187 @@ test.describe("desktop", () => {
 		await expect(page.locator(".ann-pop")).toBeVisible();
 	});
 
+	test("pressing Annotate stands the menu through mousedown", async ({ page }) => {
+		await waitForToastToFade(page);
+		await selectWord(page);
+		const button = page.locator('.sel-menu button:has-text("Annotate")');
+		await button.hover();
+		await page.mouse.down();
+		// The press natively collapses the highlight; the menu must stand
+		// on its stored quote past the selectionchange dismiss.
+		await expect(page.locator(".sel-menu")).toBeVisible();
+		await page.mouse.up();
+		await expect(page.locator(".ann-pop")).toBeVisible();
+	});
+
+	/** Long CJK drag selection (the reader's case): Annotate files the
+	pill for a multi-line quote. */
+	test("Annotate files a multi-line CJK quote", async ({ page }) => {
+		const CJK =
+			"读书是一种安静而深远的力量，它能带我们穿越时空，去体验不同的人生。当我们翻开一本历史书，仿佛能听到古代战场的鼓声与市井的喧哗；当我们阅读一本科幻小说，又好像置身于未来的星际之中。书中的人物常常像镜子一样，映照出我们内心的困惑与渴望。每一次深夜里的沉思，每一次在页边写下的批注，都是与作者跨越时空的对话。";
+		await seedChat(page, [{ role: "assistant", content: CJK }]);
+		await page.goto("/");
+		const body = page.locator("article .rendered").first();
+		await expect(body).toBeVisible({ timeout: 60_000 });
+		const box = await body.boundingBox();
+		if (!box) throw new Error("message has no box");
+		await waitForToastToFade(page);
+		await page.mouse.move(box.x + 40, box.y + 20);
+		await page.mouse.down();
+		await page.mouse.move(box.x + box.width - 40, box.y + box.height - 20, { steps: 12 });
+		await page.mouse.up();
+		const menu = page.locator(".sel-menu");
+		await expect(menu).toBeVisible({ timeout: 5_000 });
+		const quote = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+		expect(quote.trim().length).toBeGreaterThan(20);
+		const button = page.locator('.sel-menu button:has-text("Annotate")');
+		await button.hover();
+		await page.mouse.down();
+		await page.mouse.up();
+		await expect(page.locator(".ann-pop")).toBeVisible({ timeout: 5_000 });
+	});
+
 	/** Hovering the menu holds it past the auto-dismiss: moving the mouse
-	from the highlight to Annotate never cancels it, and the highlight
-	keeps with it. */
+	from the highlight to Annotate never cancels it. (The live
+	highlight itself is engine-owned: WebKit empties it on menu hover,
+	Chromium keeps it — the menu standing on its stored quote is the
+	contract both engines keep.) */
 	test("hovering the menu holds it past the timer", async ({ page }) => {
 		await selectWord(page);
 		const menu = page.locator(".sel-menu");
 		await expect(menu).toBeVisible();
 		await menu.hover();
-		// Past the 2.5s desktop auto-dismiss the menu still stands.
-		await page.waitForTimeout(3000);
+		// Past the 6s desktop idle window the hovered menu still stands.
+		await page.waitForTimeout(7000);
+		await expect(menu).toBeVisible();
+	});
+
+	/** Pointer activity holds the menu without hovering it: an aimer
+	steering toward Annotate never races the dismiss, and going still
+	lets it expire. */
+	test("pointer activity holds the menu without hovering", async ({ page }) => {
+		await selectWord(page);
+		const menu = page.locator(".sel-menu");
+		await expect(menu).toBeVisible();
+		// Wiggle over the text (never the menu) past the dismiss
+		// window: engagement holds it, highlight intact.
+		const body = page.locator("article .rendered").first();
+		const box = await body.boundingBox();
+		if (!box) throw new Error("message has no box");
+		for (let i = 0; i < 7; i++) {
+			await page.mouse.move(box.x + 30 + (i % 2) * 60, box.y + box.height / 2);
+			await page.waitForTimeout(1000);
+		}
 		await expect(menu).toBeVisible();
 		const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
 		expect(selected).not.toBe("");
+		// Hands off: the idle window expires and the menu stands down.
+		await page.waitForTimeout(7000);
+		await expect(menu).toHaveCount(0);
 	});
 
-	/** The menu floats down and left of the cursor that finished the
-	gesture (never under it), still above the highlight and clamped to
-	the viewport. */
-	test("menu sits down and left of the cursor", async ({ page }) => {
+	/** A body swap under the highlight (stream chunk, aid preview,
+	late enhancement) detaches the selection anchor: the menu stands
+	on its stored quote anyway, and Annotate still files the pill. */
+	test("menu survives a body swap under the highlight", async ({ page }) => {
+		await selectWord(page);
+		const menu = page.locator(".sel-menu");
+		await expect(menu).toBeVisible();
+		// Swap-collapse end state, deterministically: fresh nodes plus
+		// a collapsed selection still anchored at a detached node.
+		await page.evaluate(() => {
+			const body = document.querySelector("article .rendered");
+			const oldFirst = body?.firstChild ?? null;
+			if (body) body.innerHTML += "";
+			const sel = window.getSelection();
+			if (sel && oldFirst && !document.contains(oldFirst)) {
+				sel.setBaseAndExtent(oldFirst, 0, oldFirst, 0);
+			}
+		});
+		expect(await page.evaluate(() => window.getSelection()?.toString() ?? "")).toBe("");
+		await expect(menu).toBeVisible({ timeout: 5_000 });
+		await page.locator('.sel-menu button:has-text("Annotate")').click();
+		await expect(page.locator(".ann-pop")).toBeVisible({ timeout: 5_000 });
+	});
+
+	/** Sliding from the highlight to Annotate keeps the highlight and
+	the menu: WebKit empties the live highlight when the pointer
+	reaches the floating menu (engine behavior — no DOM change, no
+	press; Chromium keeps it), so menu hover puts the stored live
+	range back, and Annotate files the pill off the live selection. */
+	test("sliding to Annotate keeps the highlight, menu, and pill", async ({ page }) => {
+		await selectWord(page);
+		const menu = page.locator(".sel-menu");
+		await expect(menu).toBeVisible();
+		const button = page.locator('.sel-menu button:has-text("Annotate")');
+		const btnBox = await button.boundingBox();
+		if (!btnBox) throw new Error("annotate button has no box");
+		// Stepped slide from the word to the button center, the way a
+		// real aimer travels (fires every over/out/leave on the path).
+		await page.mouse.move(btnBox.x + btnBox.width / 2, btnBox.y + btnBox.height / 2, {
+			steps: 15
+		});
+		const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+		expect(selected).not.toBe("");
+		await expect(menu).toBeVisible({ timeout: 5_000 });
+		await waitForToastToFade(page);
+		await page.mouse.down();
+		await page.mouse.up();
+		await expect(page.locator(".ann-pop")).toBeVisible({ timeout: 5_000 });
+	});
+
+	/** A real body swap under the highlight (Shiki late-enhance, aid
+	rebuild, stream chunk) collapses the selection onto the ATTACHED
+	container — empty, collapsed, contained. The menu must stand on
+	its stored quote anyway, and Annotate still files the pill. */
+	test("menu survives a real body swap under the highlight", async ({ page }) => {
+		await selectWord(page);
+		const menu = page.locator(".sel-menu");
+		await expect(menu).toBeVisible();
+		// Same content, new nodes: what production swaps actually do.
+		await page.evaluate(() => {
+			const body = document.querySelector("article .rendered");
+			if (body) body.innerHTML = body.innerHTML;
+		});
+		const after = await page.evaluate(() => {
+			const sel = window.getSelection();
+			return {
+				text: sel?.toString() ?? "",
+				attached: !!sel?.anchorNode && document.contains(sel.anchorNode)
+			};
+		});
+		// The production collapse shape (NOT the detached anchor the
+		// older test fabricates).
+		expect(after.text).toBe("");
+		expect(after.attached).toBe(true);
+		await expect(menu).toBeVisible({ timeout: 5_000 });
+		await waitForToastToFade(page);
+		await page.locator('.sel-menu button:has-text("Annotate")').click();
+		await expect(page.locator(".ann-pop")).toBeVisible({ timeout: 5_000 });
+	});
+
+	/** The menu sits just above the cursor that finished the gesture
+	(never below it), left-shifted and clamped to the viewport. */
+	test("menu sits just above the cursor", async ({ page }) => {
 		const body = page.locator("article .rendered").first();
 		const box = await body.boundingBox();
 		if (!box) throw new Error("message has no box");
 		const cx = box.x + 20;
-		await page.mouse.dblclick(cx, box.y + box.height / 2);
+		const cy = box.y + box.height / 2;
+		await page.mouse.dblclick(cx, cy);
 		const menu = page.locator(".sel-menu");
 		await expect(menu).toBeVisible();
 		const menuBox = await menu.boundingBox();
 		if (!menuBox) throw new Error("menu has no box");
-		const geom = await page.evaluate(() => {
-			const r = window.getSelection()?.getRangeAt(0).getBoundingClientRect();
-			if (!r) return null;
-			return { top: r.top, viewport: window.innerWidth };
-		});
-		if (!geom) throw new Error("no selection rect");
+		const viewport = await page.evaluate(() => window.innerWidth);
 		// Left edge sits left of the cursor (was clamped exactly to it).
 		expect(menuBox.x).toBeLessThan(cx);
-		// Below the old above-slot, still hovering clear of the highlight.
-		expect(menuBox.y).toBeGreaterThan(geom.top - 47);
-		expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(geom.top + 1);
+		// Bottom edge hugs the cursor from above: a short trip up.
+		expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(cy);
+		expect(cy - (menuBox.y + menuBox.height)).toBeLessThan(70);
 		// Viewport clamping holds on both edges.
 		expect(menuBox.x).toBeGreaterThanOrEqual(0);
-		expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(geom.viewport);
+		expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(viewport);
 	});
 
 	/** Right-clicking empty space never starts audio: nothing speaks and nothing selects. */

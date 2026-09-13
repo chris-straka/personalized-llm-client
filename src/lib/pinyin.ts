@@ -1,6 +1,6 @@
 import { pinyin } from "pinyin-pro";
 import { escapeHtml } from "./render";
-import { classifyAidLine, RUBY_SCRIPT_RE, type LocalAid } from "./reading";
+import { classifyAidLine, codeAwareLines, RUBY_SCRIPT_RE, type LocalAid } from "./reading";
 
 /**
  * Pinyin readings for Chinese text: per-character readings (pinyin-pro
@@ -52,9 +52,12 @@ export function pinyinRuby(text: string): string {
  * unaffected.
  */
 export function pinyinBlock(text: string, preferred: LocalAid | null = null): string {
-	return text
-		.split("\n")
-		.map((line) => (classifyAidLine(line, preferred) === "pinyin" ? pinyinRuby(line) : escapeHtml(line)))
+	// Fenced code never converts: readings inside code are noise, and
+	// the buttons already ignore those lines at detection time.
+	return codeAwareLines(text)
+		.map(({ line, code }) =>
+			!code && classifyAidLine(line, preferred) === "pinyin" ? pinyinRuby(line) : escapeHtml(line)
+		)
 		.join("\n");
 }
 

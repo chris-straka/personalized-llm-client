@@ -24,11 +24,11 @@ test("own-bubble toggle reads as Enable background on my messages", async ({ pag
 	await expect(page.locator(".settings-panel").getByText("Enable background on my messages")).toBeVisible();
 });
 
-/** Text size caps at 600% on desktop, 400% on phones. */
-test("desktop text slider caps at 600 percent", async ({ page }) => {
+/** Text size caps at 800% on desktop, 400% on phones. */
+test("desktop text slider caps at 800 percent", async ({ page }) => {
 	await expect(page.locator('.settings-panel input[aria-label="Text size percent"]')).toHaveAttribute(
 		"max",
-		"600"
+		"800"
 	);
 });
 
@@ -50,7 +50,7 @@ test("own-bubble checkbox follows the hover row", async ({ page }) => {
 			}
 			return null;
 		};
-		return { hover: find("Message buttons only on hover"), bubble: find("Enable background on my messages") };
+		return { hover: find("message buttons only on hover"), bubble: find("Enable background on my messages") };
 	});
 	expect(tops.hover).not.toBeNull();
 	expect(tops.bubble).not.toBeNull();
@@ -120,7 +120,7 @@ test("gutter double-click recomputes from the live width", async ({ page }) => {
 			.toBe("");
 	await expect(sidebar).toHaveClass(/collapsed/);
 	// Wide column: a point just inside its live left edge is content,
-	// not gutter (articles cap at 85%, so a fixed x can't prove this).
+	// not gutter (articles cap at 90%, so a fixed x can't prove this).
 	await slider.fill("80");
 	expect(await chatVar()).toBe("80");
 	const leftEdge = await page
@@ -171,4 +171,14 @@ test("own-bubble switch keeps left alignment, background follows", async ({ page
 	await page.locator(".settings-panel").getByText("Enable background on my messages").click();
 	await expect(bubble).toHaveCSS("background-color", "rgb(241, 241, 244)");
 	await expect(bubble).toHaveCSS("text-align", "left");
+});
+
+/** Background opacity slider applies the alpha var and resets to opaque. */
+test("background opacity slider applies and resets", async ({ page }) => {
+	const slider = page.locator('.settings-panel input[aria-label="Background opacity percent"]');
+	await expect(slider).toHaveAttribute("max", "100");
+	await slider.fill("50");
+	await expect(page.locator(".app")).toHaveAttribute("style", /--bg-alpha: 0\.5/);
+	await page.locator('.settings-panel button[title="Reset to fully opaque"]').click();
+	await expect(page.locator(".app")).toHaveAttribute("style", /--bg-alpha: 1/);
 });

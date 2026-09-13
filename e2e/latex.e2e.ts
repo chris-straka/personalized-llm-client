@@ -23,24 +23,35 @@ test.beforeEach(async ({ page }) => {
 	await expect(page.locator(".ccez-math").first()).toBeVisible({ timeout: 60_000 });
 });
 
-/** Display math renders KaTeX in a headless body-only block: no fold bar, no buttons. */
-test("display block renders headless with KaTeX", async ({ page }) => {
+/** Display math renders KaTeX with copy + `$` chrome and a hidden folded label. */
+test("display block carries copy, $ toggle, and folded label", async ({ page }) => {
 	const block = page.locator(".ccez-math").first();
-	await expect(block.locator(".ccez-math-head")).toHaveCount(0);
-	await expect(block.locator("button")).toHaveCount(0);
 	await expect(block.locator(".ccez-math-body")).toBeVisible();
 	expect(await block.locator(".katex").count()).toBeGreaterThan(0);
+	await expect(block.locator(".ccez-math-copy")).toBeVisible();
+	await expect(block.locator(".ccez-math-tex")).toBeVisible();
+	await expect(block.locator(".ccez-math-foldedlabel")).toBeHidden();
+	await expect(block.locator(".ccez-math-raw")).toBeHidden();
 });
 
-/** Body-click copies the TeX wrapped in $$ delimiters (a paste re-renders as display math) plus a toast. */
-test("body click copies tex with delimiters plus a toast", async ({ page }) => {
+/** Body click never copies: only the copy icon writes the clipboard. */
+test("body click selects without copying", async ({ page }) => {
+	await page.evaluate(() => navigator.clipboard.writeText("SENTINEL"));
 	const block = page.locator(".ccez-math").first();
 	await block.locator(".ccez-math-body").click();
-	await expect(page.locator(".toast")).toHaveText("Copied", { timeout: 10_000 });
-	const clip = await page.evaluate(() => navigator.clipboard.readText());
-	expect(clip).toContain("E_n");
-	expect(clip.trim().startsWith("$$")).toBe(true);
-	expect(clip.trim().endsWith("$$")).toBe(true);
+	await page.waitForTimeout(500);
+	expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("SENTINEL");
+	await expect(page.locator(".toast")).toHaveCount(0);
+	// The body is an I-beam surface: a drag selects equation text.
+	const body = block.locator(".ccez-math-body");
+	const box = await body.boundingBox();
+	if (!box) throw new Error("math body has no box");
+	await page.mouse.move(box.x + 8, box.y + box.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(box.x + box.width - 8, box.y + box.height / 2, { steps: 5 });
+	await page.mouse.up();
+	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+	expect(selected).not.toBe("");
 });
 
 /** Inline math renders bare with no chrome at all. */
@@ -86,7 +97,7 @@ test("composer does not render latex", async ({ page }) => {
 });
 
 /** Right-clicking the math block toggles the fold and never starts audio: zero speaking classes and the live highlight keeps. */
-test("right-click on the math block toggles the fold and stays silent", async ({
+test("right-click folds math, left-click unfolds, and both stay silent", async ({
 	page
 }) => {
 	const para = page.locator("article .rendered p").first();
@@ -103,12 +114,82 @@ test("right-click on the math block toggles the fold and stays silent", async ({
 	await body.click({ button: "right" });
 	await expect(block).toHaveAttribute("data-folded", "1");
 	await expect(body).toBeHidden();
+	await expect(block.locator(".ccez-math-foldedlabel")).toBeVisible();
+	await expect(block.locator(".ccez-math-foldedlabel")).toHaveText("latex · 1 LOC");
 	await page.waitForTimeout(500);
 	await expect(page.locator("article.speaking, article.speaking-sel")).toHaveCount(0);
 	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
 	expect(selected).not.toBe("");
+	// A second right-click never unfolds.
 	await block.click({ button: "right" });
+	await expect(block).toHaveAttribute("data-folded", "1");
+	// Left-click on the folded label unfolds.
+	await block.locator(".ccez-math-foldedlabel").click();
+	await expect(block).not.toHaveAttribute("data-folded", "1");
 	await expect(body).toBeVisible();
+});
+
+/** A latex fence duplicating its neighboring display block renders exactly once. */
+test("fence-plus-display pair shows once", async ({ page }) => {
+	await seedChat(page, [
+		{ role: "user", content: "quad" },
+		{ role: "assistant", content: "Quad:\n\n```latex\n$$x = 1$$\n```\n\n$$x = 1$$" }
+	]);
+	await page.goto("/");
+	const blocks = page.locator("article.assistant .ccez-math");
+	await expect(blocks).toHaveCount(1, { timeout: 60_000 });
+	await expect(page.locator("article.assistant .ccez-code")).toHaveCount(0);
+	await expect(blocks.first().locator(".ccez-math-body")).toBeVisible();
+});
+
+/** A lone latex fence renders as display math (not a code block). */
+test("lone latex fence renders as math", async ({ page }) => {
+	await seedChat(page, [
+		{ role: "user", content: "quad" },
+		{ role: "assistant", content: "Quad:\n\n```latex\nx = 1\n```" }
+	]);
+	await page.goto("/");
+	const blocks = page.locator("article.assistant .ccez-math");
+	await expect(blocks).toHaveCount(1, { timeout: 60_000 });
+	await expect(page.locator("article.assistant .ccez-code")).toHaveCount(0);
+	expect(await blocks.first().locator(".katex").count()).toBeGreaterThan(0);
+});
+
+/** The `$` toggle flips the rendered equation and its raw source. */
+test("$ toggle shows raw source and back", async ({ page }) => {
+	const block = page.locator(".ccez-math").first();
+	const raw = block.locator(".ccez-math-raw");
+	await expect(raw).toBeHidden();
+	await block.locator(".ccez-math-tex").click();
+	await expect(raw).toBeVisible();
+	await expect(raw).toContainText("E_n");
+	await expect(block.locator(".ccez-math-body")).toBeHidden();
+	await block.locator(".ccez-math-tex").click();
+	await expect(raw).toBeHidden();
+	await expect(block.locator(".ccez-math-body")).toBeVisible();
+});
+
+/** The math copy button copies the TeX with delimiters plus a toast. */
+test("math copy button copies tex", async ({ page }) => {
+	const block = page.locator(".ccez-math").first();
+	await block.locator(".ccez-math-copy").click();
+	await expect(page.locator(".toast")).toHaveText("Copied", { timeout: 10_000 });
+	const clip = await page.evaluate(() => navigator.clipboard.readText());
+	expect(clip).toContain("E_n");
+	expect(clip.trim().startsWith("$$")).toBe(true);
+	expect(clip.trim().endsWith("$$")).toBe(true);
+});
+
+/** Folded math shrinks to its label: no dead space right of the LOC. */
+test("folded math hugs its label", async ({ page }) => {
+	const block = page.locator(".ccez-math").first();
+	await block.locator(".ccez-math-body").click({ button: "right" });
+	await expect(block).toHaveAttribute("data-folded", "1");
+	const widths = await block.evaluate((el) => {
+		const label = el.querySelector(".ccez-math-foldedlabel") as HTMLElement;
+		return { block: el.getBoundingClientRect().width, label: label.getBoundingClientRect().width };
+	});
+	expect(widths.block).toBeLessThan(widths.label + 8);
 });
 
 /** Equation granularity decision: a partial pick inside one equation

@@ -25,7 +25,9 @@ import {
 	LOCAL_AID_ADD_TITLE,
 	aidTargetLines,
 	spliceAidResult,
-	resolveAidKinds
+	resolveAidKinds,
+	codeAwareLines,
+	stripCodeForDetection
 } from "./reading";
 import { pinyinBlock, pinyinRuby } from "./pinyin";
 import { isFuriganaCached } from "./furigana";
@@ -324,5 +326,31 @@ describe("furigana", () => {
 		// Cache keys are exact input text, not prefixes of it — and an
 		// empty cache stays empty without a worker to fill it.
 		expect(isFuriganaCached("漢字を読む")).toBe(false);
+	});
+});
+
+describe("code-aware aid lines", () => {
+	it("tags fenced runs and their fences as code", () => {
+		const tagged = codeAwareLines("見る\n```py\nprint('日本語')\n```\n読む");
+		expect(tagged).toEqual([
+			{ line: "見る", code: false },
+			{ line: "```py", code: true },
+			{ line: "print('日本語')", code: true },
+			{ line: "```", code: true },
+			{ line: "読む", code: false }
+		]);
+	});
+	it("an unclosed fence owns the rest", () => {
+		const tagged = codeAwareLines("見る\n```\n日本語");
+		expect(tagged[2]).toEqual({ line: "日本語", code: true });
+	});
+	it("strips fenced blocks and inline spans for detection", () => {
+		expect(stripCodeForDetection("```py\nprint('日本語')\n```")).toBe("");
+		expect(stripCodeForDetection("見る `日本語` code")).toBe("見る  code");
+		expect(stripCodeForDetection("見る\n```\n日本語\n```\n読む")).toBe("見る\n読む");
+	});
+	it("code-only Japanese summons no aid script", () => {
+		expect(detectScripts(stripCodeForDetection("```py\nprint('日本語')\n```"))).toEqual([]);
+		expect(detectScripts(stripCodeForDetection("見る\n```\n日本語\n```"))).toEqual(["ja"]);
 	});
 });

@@ -85,7 +85,9 @@ describe("desktop seal", () => {
 
 	it("keeps desktop autofocus (phones never pop the keyboard on launch)", () => {
 		const source = pageSource();
-		expect(source).toContain("if (!androidUI) {");
+		// Always-hide mode also skips the mount steal: the prompt is
+		// visible exactly while the composer holds focus.
+		expect(source).toContain("if (!androidUI && settings.promptIdleSec !== PROMPT_IDLE_ALWAYS) {");
 		expect(source).toContain("editor?.focus();");
 	});
 

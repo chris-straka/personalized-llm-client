@@ -90,11 +90,11 @@ test("slider label text never resets any row", async ({ page }) => {
 	await expect(width).toHaveValue("36");
 
 	const idle = page.locator(
-		'.settings-panel input[aria-label="Idle seconds before the prompt hides (top is never)"]'
+		'.settings-panel input[aria-label="Idle seconds before the prompt hides (bottom is always, top is never)"]'
 	);
 	await idle.fill("10");
 	await expect(idle).toHaveValue("10");
-	await clickLabelText(page, "Idle seconds before the prompt hides (top is never)");
+	await clickLabelText(page, "Idle seconds before the prompt hides (bottom is always, top is never)");
 	await expect(idle).toHaveValue("10");
 	await page.locator(".settings-panel button", { hasText: "(6s)" }).click();
 	await expect(idle).toHaveValue("6");
@@ -137,8 +137,8 @@ test("idle prompt restores only on i, Enter, Space, or real click", async ({ pag
 	await expect(prompt).not.toHaveClass(/prompt-idle/, { timeout: 5_000 });
 });
 
-/** Selection drags keep the prompt hidden; a plain click brings it back; math never summons keys. */
-test("idle prompt ignores drags and math, answers plain clicks", async ({ page }) => {
+/** Selection drags keep the prompt hidden; plain clicks never summon; keys do; math never summons keys. */
+test("idle prompt ignores drags, clicks, and math, answers keys", async ({ page }) => {
 	await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
 	await seedIdleChat(page, [
 		{ role: "user", content: "show me the levels" },
@@ -160,8 +160,12 @@ test("idle prompt ignores drags and math, answers plain clicks", async ({ page }
 	await page.waitForTimeout(800);
 	await expect(prompt).toHaveClass(/prompt-idle/);
 
-	// A plain click on message text restores and focuses the composer.
+	// A plain click on message text never summons; the i key restores
+	// and focuses the composer.
 	await page.locator("article.assistant .rendered").first().click();
+	await page.waitForTimeout(600);
+	await expect(prompt).toHaveClass(/prompt-idle/);
+	await page.keyboard.press("i");
 	await expect(prompt).not.toHaveClass(/prompt-idle/, { timeout: 5_000 });
 	await expect
 		.poll(() => page.evaluate(() => !!document.activeElement?.closest?.(".prompt")))
@@ -178,21 +182,17 @@ test("idle prompt ignores drags and math, answers plain clicks", async ({ page }
 });
 
 /** Idle hide uncovers the tail: the prompt leaves the flow and stuck readers pin to the bottom. */
-test("idle hide grows the column and reveals the tail", async ({ page }) => {
+test("idle hide floats and moves nothing", async ({ page }) => {
 	await seedIdleChat(page, idleTurns());
 	await expect(page.locator(".cm-content").first()).toBeVisible({ timeout: 60_000 });
 	const geometry = () =>
 		page.evaluate(() => {
 			const box = document.querySelector(".messages") as HTMLElement | null;
 			const prompt = document.querySelector(".prompt") as HTMLElement | null;
-			const last = document.querySelector("main article:last-of-type") as HTMLElement | null;
-			const boxRect = box?.getBoundingClientRect();
-			const lastRect = last?.getBoundingClientRect();
 			return {
 				boxH: box?.clientHeight ?? 0,
 				position: prompt ? getComputedStyle(prompt).position : "?",
-				tailVisible:
-					lastRect && boxRect ? lastRect.bottom <= boxRect.bottom + 1 : false
+				promptTop: prompt?.offsetTop ?? -1
 			};
 		});
 	// Park at the bottom like a stuck reader, then go idle hands-off.
@@ -200,13 +200,13 @@ test("idle hide grows the column and reveals the tail", async ({ page }) => {
 		const box = document.querySelector(".messages") as HTMLElement | null;
 		if (box) box.scrollTop = box.scrollHeight;
 	});
-	const h0 = (await geometry()).boxH;
+	const before = await geometry();
 	await expect(page.locator(".prompt")).toHaveClass(/prompt-idle/, { timeout: 15_000 });
 	await page.waitForTimeout(700);
 	const after = await geometry();
+	// Floating card in both states: hiding changes no geometry.
 	expect(after.position).toBe("absolute");
-	expect(after.boxH - h0).toBeGreaterThan(50);
-	expect(after.tailVisible).toBe(true);
+	expect(after).toEqual(before);
 });
 
 /** Middle-click toggles the shortcuts modal: open when closed, close when open. */

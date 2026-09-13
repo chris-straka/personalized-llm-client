@@ -6,11 +6,10 @@ import { seedChat } from "./helpers";
  * smooth-scroll the chat, d/u fast smooth-scroll, gg goes to top,
  * G to the bottom, and z/Z land the hovered message's top/bottom.
  * Holds glide at the scrollkeys.ts velocities (j/k 720px/s, d/u
- * 2520px/s — d/u deliberately faster); a tap of Escape still
- * dismisses overlays exactly as today, and an Escape HOLD keeps the
- * dismiss path (exiting fullscreen needs a real window chrome,
- * which playwright cannot cover: see the unverified-on-device note
- * on exitFullscreenFromHold in +page.svelte).
+ * 2520px/s — d/u deliberately faster); Escape still dismisses
+ * overlays exactly as today and never exits fullscreen (only the
+ * Esc+f chord does, which needs a real window chrome that
+ * playwright cannot cover: see exitFullscreen in +page.svelte).
  *
  * Editor selector note: desktop composes in CodeMirror
  * (`.cm-content`); the plain textarea (`.ta-input`,
@@ -155,6 +154,35 @@ test("gg goes to top, G to the bottom", async ({ page }) => {
 	expect(await scrollTop(page)).toBeLessThanOrEqual(8);
 });
 
+/** Ctrl+G with the prompt unfocused enters scroll mode at the message
+in view (not the newest): j then walks from the view cursor. */
+test("ctrl+g lands the cursor on the message in view", async ({ page }) => {
+	// msg-6 flush to the top of the view: it is the topmost visible
+	// (direct scrollTop: scrollIntoView would honor the strip's
+	// scroll-padding and park it 44px down instead).
+	await page.evaluate(() => {
+		const box = document.querySelector(".messages") as HTMLElement | null;
+		const el = document.getElementById("msg-6");
+		if (box && el)
+			box.scrollTop = el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+	});
+	await page.waitForFunction(() => {
+		const box = document.querySelector(".messages") as HTMLElement | null;
+		const el = document.getElementById("msg-6");
+		if (!box || !el) return false;
+		return Math.abs(el.getBoundingClientRect().top - box.getBoundingClientRect().top) < 4;
+	});
+	// Body-focused (edit mode, prompt unfocused): the composer owns no keys.
+	await expect
+		.poll(() => page.evaluate(() => !!document.activeElement?.closest?.(".prompt")))
+		.toBe(false);
+	await page.keyboard.press("Control+g");
+	await expect(page.locator(".app[data-focus-mode='scroll']")).toHaveCount(1, { timeout: 5_000 });
+	await expect(page.locator("#msg-6.selected")).toBeVisible({ timeout: 5_000 });
+	await page.keyboard.press("j");
+	await expect(page.locator("#msg-7.selected")).toBeVisible({ timeout: 5_000 });
+});
+
 test("z/Z land the hovered message top/bottom", async ({ page }) => {
 	// Hovering never moves focus, so the body focus from beforeEach
 	// survives: each press re-hovers first (leaving the article
@@ -210,4 +238,100 @@ test("held Escape past ESCAPE_HOLD_MS still dismisses overlays", async ({ page }
 	await page.waitForTimeout(700);
 	await page.keyboard.up("Escape");
 	await expect(page.locator(".modal", { hasText: "Keyboard shortcuts" })).toBeHidden({ timeout: 10_000 });
+});
+
+/** j on the last message never leaves scroll mode: it lands the
+bottom in view (a no-op when already there) and stays parked. */
+test("j on the last message scrolls to the bottom, never the prompt", async ({ page }) => {
+	await page.keyboard.press("Control+g");
+	await expect(page.locator(".app[data-focus-mode='scroll']")).toHaveCount(1, { timeout: 5_000 });
+	await page.keyboard.press("G");
+	await expect(page.locator("#msg-11.selected")).toBeVisible({ timeout: 5_000 });
+	// Park mid-chat with the cursor still on the last message.
+	await page.evaluate(() => {
+		const box = document.querySelector(".messages") as HTMLElement | null;
+		if (box) box.scrollTop = Math.max(0, box.scrollHeight - box.clientHeight * 2);
+	});
+	await page.waitForFunction(
+		() => {
+			const box = document.querySelector(".messages") as HTMLElement | null;
+			return box !== null && box.scrollHeight - box.scrollTop - box.clientHeight > box.clientHeight * 0.5;
+		},
+		undefined,
+		{ timeout: 10_000 }
+	);
+	await page.keyboard.press("j");
+	await page.waitForFunction(
+		() => {
+			const box = document.querySelector(".messages") as HTMLElement | null;
+			return box !== null && box.scrollHeight - box.scrollTop - box.clientHeight <= 8;
+		},
+		undefined,
+		{ timeout: 10_000 }
+	);
+	await expect(page.locator(".app[data-focus-mode='scroll']")).toHaveCount(1);
+	await expect(page.locator("#msg-11.selected")).toBeVisible();
+});
+
+/** u/d in scroll mode fast-scroll a half page and never move the
+message cursor (the old ±4 message jumps are gone). */
+test("u/d fast-scroll in scroll mode without moving the cursor", async ({ page }) => {
+	// Park mid-chat first so both directions have room.
+	await page.evaluate(() => {
+		const box = document.querySelector(".messages") as HTMLElement | null;
+		if (box) box.scrollTop = Math.max(0, box.scrollHeight - box.clientHeight * 2);
+	});
+	await page.keyboard.press("Control+g");
+	await expect(page.locator(".app[data-focus-mode='scroll']")).toHaveCount(1, { timeout: 5_000 });
+	const sel = await page.evaluate(() => document.querySelector("article.selected")?.id ?? null);
+	expect(sel).not.toBeNull();
+	const half = await page.evaluate(() => {
+		const box = document.querySelector(".messages") as HTMLElement | null;
+		return box ? Math.floor(box.clientHeight / 2) : 0;
+	});
+	expect(half).toBeGreaterThan(0);
+	const before = await scrollTop(page);
+	await page.keyboard.press("d");
+	await page.waitForFunction(
+		({ prev, min }) => {
+			const box = document.querySelector(".messages") as HTMLElement | null;
+			return box !== null && box.scrollTop - prev >= min;
+		},
+		{ prev: before, min: half * 0.8 },
+		{ timeout: 10_000 }
+	);
+	expect(await page.evaluate(() => document.querySelector("article.selected")?.id ?? null)).toBe(sel);
+	const down = await scrollTop(page);
+	await page.keyboard.press("u");
+	await page.waitForFunction(
+		(prev) => {
+			const box = document.querySelector(".messages") as HTMLElement | null;
+			return box !== null && box.scrollTop < prev - 50;
+		},
+		down,
+		{ timeout: 10_000 }
+	);
+	expect(await page.evaluate(() => document.querySelector("article.selected")?.id ?? null)).toBe(sel);
+});
+
+/** Held u/d in scroll mode glide at half-page velocity without moving
+the cursor (taps land one discrete half-page on release). */
+test("u/d hold glides in scroll mode, cursor stays put", async ({ page }) => {
+	await page.evaluate(() => {
+		const box = document.querySelector(".messages") as HTMLElement | null;
+		if (box) box.scrollTop = Math.max(0, box.scrollHeight - box.clientHeight * 2);
+	});
+	await page.keyboard.press("Control+g");
+	await expect(page.locator(".app[data-focus-mode='scroll']")).toHaveCount(1, { timeout: 5_000 });
+	const sel = await page.evaluate(() => document.querySelector("article.selected")?.id ?? null);
+	expect(sel).not.toBeNull();
+	const before = await scrollTop(page);
+	await page.keyboard.down("d");
+	await page.waitForTimeout(400);
+	await page.keyboard.up("d");
+	await page.waitForTimeout(400);
+	const dist = (await scrollTop(page)) - before;
+	// A 400ms hold at 2520px/s glides ~1k px: far past one tap step.
+	expect(dist).toBeGreaterThan(400);
+	expect(await page.evaluate(() => document.querySelector("article.selected")?.id ?? null)).toBe(sel);
 });

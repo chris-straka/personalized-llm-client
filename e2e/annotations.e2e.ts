@@ -46,11 +46,41 @@ test("triple-click on the second sentence selects the paragraph", async ({ page 
 	expect(selected).toBe("テストを確認しました。何かお手伝いできることはありますか？");
 });
 
+/** The basic flow: drag-select, slide to the menu, click Annotate,
+file the pill. The menu and the highlight must survive the slide. */
+test("drag, slide to Annotate, and file the pill", async ({ page }) => {
+	const body = page.locator("article .rendered").first();
+	const box = await body.boundingBox();
+	if (!box) throw new Error("message has no box");
+	const y = box.y + box.height / 2;
+	await page.mouse.move(box.x + 30, y);
+	await page.mouse.down();
+	await page.mouse.move(box.x + 160, y, { steps: 8 });
+	await page.mouse.up();
+	const menu = page.locator(".sel-menu");
+	await expect(menu).toBeVisible({ timeout: 5_000 });
+	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+	expect(selected).not.toBe("");
+	const btn = menu.locator('button:has-text("Annotate")');
+	const btnBox = await btn.boundingBox();
+	if (!btnBox) throw new Error("annotate button has no box");
+	await page.mouse.move(btnBox.x + btnBox.width / 2, btnBox.y + btnBox.height / 2, { steps: 6 });
+	const mid = await page.evaluate(() => ({
+		menu: !!document.querySelector(".sel-menu"),
+		sel: window.getSelection()?.toString() ?? ""
+	}));
+	expect(mid.menu).toBe(true);
+	expect(mid.sel).toBe(selected);
+	await btn.click();
+	await expect(page.locator(".ann-pop")).toBeVisible({ timeout: 5_000 });
+});
+
 /** Plain clicks on blank space drop a stale highlight, never re-summon. */
 test("clicking blank space deselects instead of reopening the menu", async ({ page }) => {
 	await clickText(page, 2);
 	await expect(page.locator(".sel-menu")).toBeVisible();
-	await page.waitForTimeout(2700);
+	// Past the 6s idle window with no pointer activity: expired.
+	await page.waitForTimeout(7000);
 	await expect(page.locator(".sel-menu")).toHaveCount(0);
 	await page.mouse.click(10, 300);
 	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
@@ -408,13 +438,16 @@ test("pencil edit saves and resends", async ({ page }) => {
 	await expect(article).toBeVisible();
 	await article.hover();
 	await article.locator('.actions button[aria-label="Edit this message"]').click();
-	// Nothing is deleted; the text is in the composer to fix.
+	// Nothing is deleted; the text opens in an in-place editor where the
+	// message sat (the composer keeps its own empty draft).
+	const inline = page.locator(".msg-edit .cm-content");
+	await expect(inline).toContainText("helo world");
 	await expect(page.locator("article.user")).toHaveCount(1);
 	await expect(page.locator("article.assistant")).toHaveCount(1);
-	await expect(page.locator(".cm-content")).toContainText("helo world");
+	await expect(page.locator(".prompt .cm-content")).not.toContainText("helo world");
 	// Fix the typo and save: the message rewrites, the stale reply is
 	// replaced by a fresh answer to the edit.
-	await page.locator(".cm-content").click();
+	await inline.click();
 	await page.keyboard.press("Control+a");
 	await page.keyboard.type("hello world");
 	await page.keyboard.press("Enter");
@@ -422,6 +455,25 @@ test("pencil edit saves and resends", async ({ page }) => {
 	await expect(page.locator("article.user")).toHaveCount(1);
 	await expect(page.locator("article.assistant")).toHaveCount(1);
 	await expect(page.locator("article.assistant .rendered")).toContainText("Mock reply");
+});
+
+/** The in-place edit keeps syntax colors: fenced code highlights. */
+test("in-place edit keeps code highlighting", async ({ page }) => {
+	await seedChat(page, [{ role: "user", content: "```python\nprint('hi')\n```" }]);
+	await page.reload();
+	const article = page.locator("article.user");
+	await expect(article).toBeVisible();
+	await article.hover();
+	await article.locator('.actions button[aria-label="Edit this message"]').click();
+	const inline = page.locator(".msg-edit .cm-content");
+	await expect(inline).toContainText("print");
+	// Highlighting is active: markdown decorates fence markers and code
+	// tokens with styled spans (plain text renders as bare text nodes).
+	await expect(inline.locator(".cm-line span").first()).toBeVisible();
+	// Cancel keeps history untouched.
+	await page.keyboard.press("Escape");
+	await expect(page.locator(".msg-edit")).toHaveCount(0);
+	await expect(page.locator("article.user .rendered")).toContainText("print");
 });
 
 /** Hovering an own message and hitting E starts editing it. */
@@ -434,10 +486,12 @@ test("E key edits the hovered own message", async ({ page }) => {
 	await article.locator(".rendered").click();
 	await article.hover();
 	await page.keyboard.press("e");
-	await expect(page.locator(".cm-content")).toContainText("helo world");
-	// Esc cancels: history untouched, composer empty.
+	await expect(page.locator(".msg-edit .cm-content")).toContainText("helo world");
+	// Esc cancels: history untouched, the inline editor unmounts, the
+	// composer stays empty.
 	await page.keyboard.press("Escape");
-	await expect(page.locator(".cm-content")).not.toContainText("helo world");
+	await expect(page.locator(".msg-edit")).toHaveCount(0);
+	await expect(page.locator(".prompt .cm-content")).not.toContainText("helo world");
 	await expect(page.locator("article.user .rendered")).toContainText("helo world");
 });
 

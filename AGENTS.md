@@ -16,6 +16,20 @@ privileged (Keychain, updater, native TTS).
   HMR. Never run these while a dev server is up and someone is looking at it;
   batch them when the servers are idle.
 
+## Verification economy (slow gates, run once)
+
+- Unit: run only the touched `*.test.ts` while iterating; full `bun run test`
+  once at the end.
+- `check`: once at the end, not after every edit.
+- Playwright: one invocation per file with combined `-g` patterns for every
+  new/affected test in it, then the full file once at the end. Never one
+  single-test invocation after another — each pays the dev-server wait again.
+- Read failure output from that same run (list reporter prints the error);
+  don't re-run just to collect details.
+- Pristine-tree attribution (`git stash` + rerun) only when a failure
+  plausibly relates to the change and blocks; no throwaway debug specs when
+  reasoning plus one targeted run can answer it.
+
 ## Architecture rules (learned the hard way)
 
 - Chat state is a plain object in `$state` with function updates

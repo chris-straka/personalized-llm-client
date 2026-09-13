@@ -10,6 +10,7 @@ import {
 	ggArmed,
 	halfPageDy,
 	holdIsTap,
+	indexAtViewportLine,
 	isEscapeHold,
 	messageEdgeScrollTop,
 	resolveSidebarSpaceEnter,
@@ -141,5 +142,32 @@ describe("holdIsTap", () => {
 		expect(holdIsTap(1000, 1000 + SCROLL_HOLD_TAP_MS)).toBe(false);
 		expect(holdIsTap(1000, 1500)).toBe(false);
 		expect(holdIsTap(0, 50)).toBe(false);
+	});
+});
+
+describe("indexAtViewportLine", () => {
+	it("picks the message covering the line", () => {
+		const rects = [
+			{ top: 0, bottom: 100 },
+			{ top: 100, bottom: 220 },
+			{ top: 220, bottom: 300 }
+		];
+		expect(indexAtViewportLine(rects, 150)).toBe(1);
+		expect(indexAtViewportLine(rects, 0)).toBe(0);
+		expect(indexAtViewportLine(rects, 299)).toBe(2);
+	});
+
+	it("falls back to the nearest center in a gap", () => {
+		const rects = [
+			{ top: 0, bottom: 100 },
+			{ top: 200, bottom: 300 }
+		];
+		// Gap 100–200, midpoint 150: equidistant centers tie to the first.
+		expect(indexAtViewportLine(rects, 150)).toBe(0);
+		expect(indexAtViewportLine(rects, 180)).toBe(1);
+	});
+
+	it("returns -1 when empty", () => {
+		expect(indexAtViewportLine([], 150)).toBe(-1);
 	});
 });

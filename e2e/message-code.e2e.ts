@@ -103,7 +103,9 @@ test("code body click selects without copying", async ({ page }) => {
 	if (!box) throw new Error("code pre has no box");
 	await page.mouse.move(box.x + 8, box.y + 8);
 	await page.mouse.down();
-	await page.mouse.move(box.x + box.width * 0.5, box.y + box.height - 8, { steps: 5 });
+	// To near the pre's right edge (inside the icon gutter, past the
+	// text): selects the full last line whatever the gutter width.
+	await page.mouse.move(box.x + box.width - 8, box.y + box.height - 8, { steps: 5 });
 	await page.mouse.up();
 	const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
 	expect(selected).toContain('print("hi")');
@@ -111,10 +113,8 @@ test("code body click selects without copying", async ({ page }) => {
 	expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("SENTINEL");
 });
 
-/** Right-clicking the code block toggles the fold and never starts audio. */
-test("right-click on the code block toggles the fold and stays silent", async ({
-	page
-}) => {
+/** Right-click folds, left-click on the folded label unfolds, and neither starts audio. */
+test("right-click folds and left-click unfolds, staying silent", async ({ page }) => {
 	const block = page.locator(".ccez-code").first();
 	const pre = block.locator("pre");
 	await expect(pre).toBeVisible();
@@ -123,21 +123,25 @@ test("right-click on the code block toggles the fold and stays silent", async ({
 	await expect(pre).toBeHidden();
 	await page.waitForTimeout(500);
 	await expect(page.locator("article.speaking, article.speaking-sel")).toHaveCount(0);
+	// A second right-click never unfolds.
 	await block.click({ button: "right" });
+	await expect(block).toHaveAttribute("data-folded", "1");
+	await expect(pre).toBeHidden();
+	// Left-click on the folded label unfolds.
+	await block.locator(".ccez-code-foldedlabel").click();
+	await expect(block).not.toHaveAttribute("data-folded", "1");
 	await expect(pre).toBeVisible();
 });
 
-/** Thoughts grow with the message font scale instead of stranding at 0.8rem. */
-test("thoughts scale with font size", async ({ page }) => {
-	const base = await page.evaluate(() =>
-		getComputedStyle(document.querySelector(".ccez-thoughts") as HTMLElement).fontSize
-	);
-	await page.evaluate(() => {
-		(document.querySelector(".app") as HTMLElement).style.setProperty("--font-scale", "2");
+/** Folded code shrinks to its label: no dead space right of the LOC. */
+test("folded code hugs its label", async ({ page }) => {
+	const block = page.locator(".ccez-code").first();
+	await block.locator("pre").click({ button: "right" });
+	await expect(block).toHaveAttribute("data-folded", "1");
+	const widths = await block.evaluate((el) => {
+		const label = el.querySelector(".ccez-code-foldedlabel") as HTMLElement;
+		return { block: el.getBoundingClientRect().width, label: label.getBoundingClientRect().width };
 	});
-	const scaled = await page.evaluate(() =>
-		getComputedStyle(document.querySelector(".ccez-thoughts") as HTMLElement).fontSize
-	);
-	expect(parseFloat(base)).toBeGreaterThan(0);
-	expect(parseFloat(scaled)).toBeCloseTo(parseFloat(base) * 2, 0);
+	// Label width plus border, not the 12rem unfolded floor.
+	expect(widths.block).toBeLessThan(widths.label + 8);
 });

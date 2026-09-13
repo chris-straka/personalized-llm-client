@@ -84,7 +84,7 @@ test("own message docks right with symmetric insets on a phone", async ({ browse
 });
 
 /** A wrapped own message keeps a left gutter on a phone: long text
-wraps at 85% instead of going full-bleed, so the message still reads
+wraps at 90% instead of going full-bleed, so the message still reads
 as right-docked rather than a centered block. */
 test("wrapped own message keeps its right dock on a phone", async ({ browser }) => {
 	const ctx = await browser.newContext({ ...devices["iPhone 15"] });
@@ -103,14 +103,19 @@ test("wrapped own message keeps its right dock on a phone", async ({ browser }) 
 			const r = (sel: string) => document.querySelector(sel)?.getBoundingClientRect();
 			const user = r("article.user");
 			const bubble = r("article.user .bubble");
-			if (!user || !bubble) throw new Error("missing boxes");
+			const msgs = r(".messages");
+			if (!user || !bubble || !msgs) throw new Error("missing boxes");
 			return {
 				rightGap: Math.round(user.right - bubble.right),
-				leftGap: Math.round(bubble.left - user.left)
+				// Visible gutter is article-vs-column now: at the wider
+				// cap the bubble can fill its shrink-wrapped article (the
+				// action row no longer stretches it), while the article
+				// itself keeps clear of the left edge.
+				articleInset: Math.round(user.left - msgs.left)
 			};
 		});
 		expect(info.rightGap).toBe(0);
-		expect(info.leftGap).toBeGreaterThan(10);
+		expect(info.articleInset).toBeGreaterThan(10);
 	} finally {
 		await ctx.close();
 	}

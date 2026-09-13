@@ -14,9 +14,10 @@
 		pasteFoldButton,
 		highlightRendered,
 		mathCopyText,
+		foldPreviewText,
 		type RenderedMessage
 	} from "$lib/render";
-	import { codeRunSummary, runCodeBlock } from "$lib/coderun";
+	import { codeRunBody, runCodeBlock } from "$lib/coderun";
 	import type { ChatMsg, ChatMsgId } from "$lib/chat";
 	import { applyMarks, annRefsFor, type AnnotationMark, type AnnotationId } from "$lib/annotations";
 
@@ -52,6 +53,12 @@
 		onToast?: (message: string) => void;
 		/** Paste-fold marker click (parent replaces the message). */
 		onFoldToggle?: (index: number) => void;
+		/**
+		 * Folded-preview click: the preview is the unfold affordance (a
+		 * folded equation leaves nothing else clickable). Undefined keeps
+		 * the preview inert.
+		 */
+		onUnfold?: () => void;
 	/** Badge hover (paints the quote wash while pointed at). Null on leave. */
 	onBadgeHover?: (id: string | null) => void;
 		/**
@@ -103,6 +110,7 @@
 		onBadgeClick,
 		onToast,
 		onFoldToggle,
+		onUnfold,
 		onBadgeHover,
 		textOverride = null,
 		contentOverride = null,
@@ -327,44 +335,61 @@
 			onFoldToggle?.(Number(fold.dataset.pasteFold ?? -1));
 			return;
 		}
-		// Headless math chrome: display blocks are body-only (folding
-		// rides `data-folded`, wired to right-click elsewhere).
+		// Display math chrome: `$` flips rendered/raw, the copy icon
+		// copies the TeX, and a left click on a folded block unfolds it
+		// (the reverse never folds — only right-click folds).
 		const mathWrap = (event.target as HTMLElement).closest<HTMLElement>("[data-math-index]");
 		if (mathWrap && rendered) {
 			const index = Number(mathWrap.dataset.mathIndex ?? -1);
 			const entry = rendered.maths[index];
+			// Entry lookup stays: copy needs the TeX.
 			if (!entry) return;
-			// Display body click copies the TeX with its `$$`
-			// delimiters plus a toast. Inline math stays bare and
-			// copies nothing (its TeX is one message-copy away). A live
-			// selection means the click ends a drag — never clobber the
-			// clipboard for it.
-			if (
-				mathWrap.classList.contains("ccez-math") &&
-				(event.target as HTMLElement).closest(".ccez-math-body") &&
-				window.getSelection()?.isCollapsed !== false
-			) {
+			if ((event.target as HTMLElement).closest(".ccez-math-tex")) {
+				if (mathWrap.dataset.mathRaw === "1") mathWrap.removeAttribute("data-math-raw");
+				else mathWrap.dataset.mathRaw = "1";
+				return;
+			}
+			if ((event.target as HTMLElement).closest(".ccez-math-copy")) {
 				if (!navigator.clipboard) onToast?.("Couldn't copy to the clipboard.");
 				else
 					void navigator.clipboard.writeText(mathCopyText(entry.tex)).then(
 						() => onToast?.("Copied"),
 						() => onToast?.("Couldn't copy to the clipboard.")
 					);
+				return;
 			}
+			if (mathWrap.classList.contains("ccez-math") && mathWrap.dataset.folded === "1") {
+				mathWrap.removeAttribute("data-folded");
+				return;
+			}
+			// Bodies never copy: rendered and raw TeX are plain
+			// I-beam selection surfaces (annotatable like any text),
+			// and the copy icon is the only clipboard path. Inline
+			// math stays bare and copies nothing (its TeX is one
+			// message-copy away).
 			return;
 		}
 		// Headless code chrome: the pre is a native selection surface,
 		// so clicks there never copy. Copy lives on the icon button
-		// alone (folding rides `data-folded`, wired elsewhere).
+		// alone (folding rides `data-folded`, wired elsewhere). A left
+		// click on a folded block unfolds it; the reverse never folds.
 		const codeBlock = (event.target as HTMLElement).closest<HTMLElement>(".ccez-code");
 		if (!codeBlock || !rendered) return;
+		if (codeBlock.dataset.folded === "1") {
+			codeBlock.removeAttribute("data-folded");
+			return;
+		}
 		const copyButton = (event.target as HTMLElement).closest<HTMLElement>("[data-code-copy]");
 		const runButton = (event.target as HTMLElement).closest<HTMLElement>("[data-code-run]");
 		if (runButton) {
 			onRunBlock(Number(runButton.dataset.codeRun ?? -1));
 			return;
 		}
-		if (!copyButton) return;
+		if (!copyButton) {
+			// Plain clicks on code select normally; code is never
+			// edited in place.
+			return;
+		}
 		const index = Number(copyButton.dataset.codeCopy ?? -1);
 		const entry = rendered.codes[index];
 		if (!entry) return;
@@ -391,6 +416,11 @@
 			if (Number.isNaN(index) || index < 0) continue;
 			const output = runOutputs[index];
 			if (runningBlocks[index] !== true && output === undefined) continue;
+			if (output === "") {
+				// Silent run: no tray at all (a re-run clears a stale one).
+				el.querySelector(":scope > .ccez-code-output")?.remove();
+				continue;
+			}
 			let out = el.querySelector<HTMLElement>(":scope > .ccez-code-output");
 			if (!out) {
 				out = document.createElement("div");
@@ -414,22 +444,21 @@
 		runningBlocks[index] = true;
 		stampRunOutputs();
 		void runCodeBlock(entry.lang, entry.code).then((outcome) => {
-			const shown = codeRunSummary(entry.lang, outcome);
-			const body =
-				outcome.kind === "ok"
-					? [shown, outcome.result.stdout, outcome.result.stderr]
-						.filter((part) => part.trim() !== "")
-						.join("\n")
-				: shown;
 			delete runningBlocks[index];
-			runOutputs[index] = body;
+			runOutputs[index] = codeRunBody(outcome);
 			stampRunOutputs();
 		});
 	}
 </script>
 
 {#if folded}
-	<div class="folded-preview">{foldPreview ?? (message.content.split("\n")[0] ?? "").slice(0, 140)}</div>
+	<button
+		type="button"
+		class="folded-preview"
+		aria-label="Unfold this message"
+		title="Unfold this message"
+		onclick={() => onUnfold?.()}
+	>{foldPreviewText(message.content, foldPreview)}</button>
 {:else}
 	<!-- Delegated in-block code copy buttons live inside the sanitized HTML. -->
 	<!-- The key swaps only for pinned model-aid text: previews and local
@@ -455,11 +484,18 @@
 		cursor: text;
 	}
 	.folded-preview {
+		display: block;
+		background: none;
+		border: 0;
+		padding: 0;
+		font-family: inherit;
 		color: #6e6e73;
 		font-size: 0.85rem;
+		text-align: left;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
+		cursor: pointer;
 	}
 	/* Injected paste-fold marker (sanitized HTML): inline bold text in
 	badge blue, never a pill — still a button, so it clicks to expand. */
@@ -544,8 +580,8 @@
 		left: 50%;
 		transform: translateX(-50%);
 		/* Optical: readings sit right of their kanji, so pull back
-		two pixels (absolute, never layout). */
-		margin-left: -2px;
+		(absolute, never layout). */
+		margin-left: -3px;
 		white-space: nowrap;
 		font-size: 0.62em;
 		line-height: 1.2;
@@ -564,21 +600,21 @@
 	platform keeps its own tuned value — Android gets its line here
 	once it's eyeballed on-device. */
 	:global(.app[data-ios]) .rendered :global(.frt) {
-		margin-left: -8px;
+		margin-left: -9px;
 	}
 	/* Same leftward pull on Android (eyeballed on-device to match
 	iOS). data-android is also set on iPhones (any phone), so iOS
 	is excluded — it keeps its own line above. */
 	:global(.app[data-android]:not([data-ios])) .rendered :global(.frt) {
-		margin-left: -8px;
+		margin-left: -9px;
 	}
 	/* Same pull on macOS desktop: its kana also renders in Hiragino
 	with the same left bearing (Range-ink measurement: readings sit
-	~5px right of their kanji at the default -2px, so -8px centers
-	them like iOS). data-mac is also set on iPads in desktop mode —
-	iOS keeps its own line above. */
+	~5px right of their kanji; eyeballed one further pixel left, so
+	-10px centers them like iOS). data-mac is also set on iPads in
+	desktop mode — iOS keeps its own line above. */
 	:global(.app[data-mac]:not([data-ios])) .rendered :global(.frt) {
-		margin-left: -8px;
+		margin-left: -10px;
 	}
 	@keyframes frt-in {
 		from {
@@ -631,6 +667,9 @@
 		border-left: 3px solid #c7c7cc;
 		color: #6e6e73;
 	}
+	.rendered :global(.ccez-code code) {
+		cursor: text;
+	}
 	.rendered :global(.ccez-code) {
 		position: relative;
 		margin: 0.5em 0;
@@ -665,23 +704,24 @@
 		color: #1c1c1e;
 		color: var(--ink);
 	}
-	.rendered :global(.ccez-code-copy .action-glyph) {
+	.rendered :global(.ccez-code-copy .action-glyph),
+	.rendered :global(.ccez-code-run .action-glyph) {
 		height: 1rem;
 		width: 1rem;
 	}
-	/* Code Run: text button pinned top-right beside copy (top-left stays
-	a clean selection surface for drag-selects),
-	plus the captured-output tray under the pre. */
+	/* Code Run: play-icon button pinned top-right beside copy (top-left
+	stays a clean selection surface for drag-selects), plus the
+	captured-output tray under the pre. */
 	.rendered :global(.ccez-code-run) {
 		position: absolute;
 		top: 0.3rem;
-		right: 2rem;
+		right: 1.7rem;
+		display: inline-flex;
+		align-items: center;
 		border: 0;
 		background: none;
-		padding: 0.15rem 0.35rem;
-		font: inherit;
-		font-size: 0.72rem;
-		line-height: 1.2;
+		padding: 0.15rem;
+		line-height: 0;
 		color: #6e6e73;
 		color: var(--muted);
 		cursor: pointer;
@@ -707,6 +747,9 @@
 		margin: 0;
 		border-radius: 0;
 		background: #fff;
+		/* Right gutter clears the run + copy icons pinned top-right,
+		so code never slides underneath them. */
+		padding: 0.4rem 3.4rem 0.4rem 0.6rem;
 		cursor: text;
 		user-select: text;
 		-webkit-user-select: text;
@@ -723,16 +766,29 @@
 		color: #6e6e73;
 		white-space: nowrap;
 	}
+	/* Folded code is label-only: no 12rem floor, so no dead space
+	sits right of the LOC. */
+	.rendered :global(.ccez-code[data-folded="1"]) {
+		min-width: 0;
+	}
 	.rendered :global(.ccez-code[data-folded="1"] pre) {
 		display: none;
 	}
 	.rendered :global(.ccez-code[data-folded="1"] .ccez-code-foldedlabel) {
 		display: block;
 	}
-	/* LaTeX math (main chat only): body-only display blocks (folding
-	rides `data-folded`), and clicking the body copies the TeX with its
-	delimiters. Inline math renders bare. */
+	/* Folded code is label-only: the copy and Run buttons belong to
+	the body, so they hide with the pre instead of floating over the
+	collapsed label. */
+	.rendered :global(.ccez-code[data-folded="1"] .ccez-code-copy),
+	.rendered :global(.ccez-code[data-folded="1"] .ccez-code-run) {
+		display: none;
+	}
+	/* LaTeX math (main chat only): display blocks carry copy + `$`
+	chrome, fold into a `latex · N LOC` label, and clicking the body
+	copies the TeX with its delimiters. Inline math renders bare. */
 	.rendered :global(.ccez-math) {
+		position: relative;
 		margin: 0.5em 0;
 		border: 1px solid #e5e5ea;
 		border-radius: 8px;
@@ -741,14 +797,95 @@
 		max-width: 100%;
 		min-width: min(12rem, 100%);
 	}
-	.rendered :global(.ccez-math-body) {
-		padding: 0.6rem 0.8rem;
-		background: #fff;
-		overflow-x: auto;
+	/* Folded math is label-only: no 12rem floor and no buttons, so no
+	dead space sits right of the LOC. */
+	.rendered :global(.ccez-math[data-folded="1"]) {
+		min-width: 0;
+	}
+	.rendered :global(.ccez-math-copy),
+	.rendered :global(.ccez-math-tex) {
+		position: absolute;
+		top: 0.3rem;
+		display: inline-flex;
+		align-items: center;
+		border: 0;
+		background: none;
+		padding: 0.15rem;
+		line-height: 1;
+		color: #6e6e73;
+		color: var(--muted);
 		cursor: pointer;
 	}
-	.rendered :global(.ccez-math[data-folded="1"] .ccez-math-body) {
+	.rendered :global(.ccez-math-copy) {
+		right: 0.3rem;
+		line-height: 0;
+	}
+	.rendered :global(.ccez-math-tex) {
+		right: 1.7rem;
+		font-family:
+			ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+		font-size: 0.85rem;
+		font-style: italic;
+	}
+	.rendered :global(.ccez-math-copy:hover),
+	.rendered :global(.ccez-math-tex:hover) {
+		color: #1c1c1e;
+		color: var(--ink);
+	}
+	.rendered :global(.ccez-math-copy .action-glyph) {
+		height: 1rem;
+		width: 1rem;
+	}
+	.rendered :global(.ccez-math-foldedlabel) {
 		display: none;
+		padding: 0.4rem 0.6rem;
+		background: #fff;
+		font-family:
+			ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+		font-size: 0.75rem;
+		color: #6e6e73;
+		white-space: nowrap;
+	}
+	.rendered :global(.ccez-math[data-folded="1"] .ccez-math-foldedlabel) {
+		display: block;
+	}
+	.rendered :global(.ccez-math[data-folded="1"] .ccez-math-body),
+	.rendered :global(.ccez-math[data-folded="1"] .ccez-math-raw),
+	.rendered :global(.ccez-math[data-folded="1"] .ccez-math-copy),
+	.rendered :global(.ccez-math[data-folded="1"] .ccez-math-tex) {
+		display: none;
+	}
+	.rendered :global(.ccez-math-body) {
+		/* Right gutter clears the `$` + copy icons pinned top-right,
+		so equations never slide underneath them. */
+		padding: 0.6rem 3.4rem 0.6rem 0.8rem;
+		background: #fff;
+		overflow-x: auto;
+		cursor: text;
+		user-select: text;
+		-webkit-user-select: text;
+	}
+	/* Raw source view (`$` toggle): the rendered body hides and the
+	TeX shows as selectable text. */
+	.rendered :global(.ccez-math-raw) {
+		display: none;
+		margin: 0;
+		padding: 0.6rem 3.4rem 0.6rem 0.8rem;
+		background: #fff;
+		font-family:
+			ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+		font-size: 0.8rem;
+		white-space: pre-wrap;
+		word-break: break-word;
+		cursor: text;
+		user-select: text;
+		-webkit-user-select: text;
+	}
+	.rendered :global(.ccez-math[data-math-raw="1"] .ccez-math-body) {
+		display: none;
+	}
+	.rendered :global(.ccez-math[data-math-raw="1"] .ccez-math-raw) {
+		display: block;
 	}
 	/* Inline math renders bare — no bar mid-sentence — so the line
 	keeps its rhythm; KaTeX inherits the message color and scale. */
@@ -772,18 +909,6 @@
 	.rendered :global(.ccez-math .katex),
 	.rendered :global(.ccez-math-inline .katex) {
 		color: inherit;
-	}
-	.rendered :global(.ccez-thoughts) {
-		/* Thoughts use the SAME size as chat text (.rendered is
-		0.92rem × scale): a smaller factor stranded them below the
-		body at every text size. */
-		font-size: calc(0.92rem * var(--font-scale, 1));
-		color: #98989f;
-		margin-bottom: 0.4em;
-	}
-	.rendered :global(.ccez-thoughts summary) {
-		cursor: pointer;
-		display: inline-block;
 	}
 	.rendered :global(mark.ccez-ann) {
 		background: #fff3b0;
@@ -1002,6 +1127,19 @@
 	:global(html[data-theme="dark"]) .rendered :global(.ccez-math-body),
 	:global(html[data-theme="dark"]) .rendered :global(.ccez-math-inline) {
 		background: #101013;
+	}
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-math-copy),
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-math-tex) {
+		color: #98989f;
+	}
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-math-copy:hover),
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-math-tex:hover) {
+		color: #f2f2f7;
+	}
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-math-foldedlabel),
+	:global(html[data-theme="dark"]) .rendered :global(.ccez-math-raw) {
+		background: #101013;
+		color: #98989f;
 	}
 	:global(html[data-theme="dark"]) .rendered :global(.ccez-code pre) {
 		background: #101013;

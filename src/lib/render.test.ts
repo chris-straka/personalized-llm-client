@@ -16,7 +16,9 @@ import {
 	mathHtml,
 	mathTexPreview,
 	foldedCodeLabel,
-	mathCopyText
+	mathCopyText,
+	foldPreviewText,
+	stripLatexFenceDupes
 } from "./render";
 
 describe("thoughts", () => {
@@ -76,6 +78,18 @@ describe("markdown rendering", () => {
 		expect(html).toContain("python · 1 LOC");
 	});
 
+	it("runs only runnable fences: text and unknown labels get copy alone", () => {
+		for (const fence of ["text", "", "haskell"]) {
+			const { html } = renderMarkdown("```" + fence + "\nhello\n```");
+			expect(html).toContain('class="ccez-code-copy"');
+			expect(html).not.toContain("ccez-code-run");
+		}
+		for (const fence of ["python", "js", "bash"]) {
+			const { html } = renderMarkdown("```" + fence + "\nhello\n```");
+			expect(html).toContain('class="ccez-code-run"');
+		}
+	});
+
 	it("labels multi-line blocks with their line count", () => {
 		const { html } = renderMarkdown("```js\na\nb\nc\n```");
 		expect(html).toContain("js · 3 LOC");
@@ -98,20 +112,16 @@ describe("markdown rendering", () => {
 		expect(html).toContain("hello");
 	});
 
-	it("renders thoughts collapsed above the body", () => {
+	it("strips thoughts: body only, never displayed", () => {
 		const { html, codes } = renderMessage("<think>hmm</think>```js\nx()\n```", false);
-		expect(html).toContain('class="ccez-thoughts"');
-		expect(html).toContain("hmm");
-		expect(html.indexOf("ccez-thoughts")).toBeLessThan(html.indexOf("ccez-code"));
-		// Shared code index space: no real code in thoughts here, one block total.
+		expect(html).not.toContain("ccez-thoughts");
+		expect(html).not.toContain("hmm");
+		expect(html).toContain("ccez-code");
 		expect(codes).toHaveLength(1);
 	});
 
-	it("keeps code indices unique across thoughts and body", () => {
-		const { html, codes } = renderMessage(
-			"<think>```py\na\n```</think>```js\nb\n```",
-			false
-		);
+	it("keeps code indices unique across the body", () => {
+		const { html, codes } = renderMessage("```py\na\n```\n\n```js\nb\n```", false);
 		expect(codes.map((c) => c.lang)).toEqual(["py", "js"]);
 		expect(html).toContain('data-code-index="0"');
 		expect(html).toContain('data-code-index="1"');
@@ -178,19 +188,49 @@ describe("highlighting", () => {
 });
 
 describe("latex math", () => {
-	it("renders display math body-only, with no chrome at all", () => {
+	it("renders display math with copy, $ toggle, folded label, and raw source", () => {
 		const { html, maths } = renderMarkdown("Here:\n\n$$x^2 + y^2$$\n\ndone");
 		expect(maths).toEqual([{ kind: "display", tex: "x^2 + y^2", raw: "$$x^2 + y^2$$" }]);
 		expect(html).toContain('data-math-index="0"');
 		expect(html).toContain("ccez-math-body");
-		expect(html).not.toContain("ccez-math-head");
-		expect(html).not.toContain("ccez-math-chev");
-		expect(html).not.toContain("ccez-math-tex");
-		expect(html).not.toContain("ccez-math-lang");
-		expect(html).not.toContain("data-math-action");
-		expect(html).not.toContain(">Fold<");
-		expect(html).not.toContain(">Copy<");
+		expect(html).toContain("ccez-math-copy");
+		expect(html).toContain("ccez-math-tex");
+		expect(html).toContain("ccez-math-foldedlabel");
+		expect(html).toContain("latex · 1 LOC");
+		expect(html).toContain("ccez-math-raw");
 		expect(html).toContain("katex");
+	});
+
+	it("drops a latex fence duplicating its neighboring display block", () => {
+		const src = "```latex\n$$x^2$$\n```\n\n$$x^2$$";
+		expect(stripLatexFenceDupes(src)).toBe("$$x^2$$");
+		// Reversed order collapses the same way.
+		expect(stripLatexFenceDupes("$$x^2$$\n\n```latex\n$$x^2$$\n```")).toBe("$$x^2$$");
+		// Different equations stay twice.
+		const other = "```latex\n$$x^2$$\n```\n\n$$y^2$$";
+		expect(stripLatexFenceDupes(other)).toBe(other);
+		// Fence delimiters aside, whitespace aside.
+		expect(stripLatexFenceDupes("```latex\nx^2\n```\n\n$$x^2$$")).toBe("$$x^2$$");
+	});
+
+	it("renders a lone latex fence as display math, once", () => {
+		const { html, maths, codes } = renderMarkdown("Work:\n\n```latex\n$$\\frac{a}{b}$$\n```\ndone");
+		expect(codes).toHaveLength(0);
+		expect(html).not.toContain("ccez-code");
+		expect(maths).toHaveLength(1);
+		expect(maths[0]?.kind).toBe("display");
+		expect(maths[0]?.tex).toBe("\\frac{a}{b}");
+		expect(html).toContain("ccez-math-copy");
+		expect(html).toContain("katex");
+	});
+
+	it("shows a fenced-plus-display pair exactly once", () => {
+		const { html } = renderMessage(
+			"Quad:\n\n```latex\n$$x = 1$$\n```\n\n$$x = 1$$",
+			false
+		);
+		expect(html.match(/data-math-index="0"/g)).toHaveLength(1);
+		expect(html).not.toContain("ccez-code");
 	});
 
 	it("renders inline math bare, with no chrome at all", () => {
@@ -216,6 +256,31 @@ describe("latex math", () => {
 		const long = mathTexPreview("a".repeat(60), 48);
 		expect(long).toHaveLength(49);
 		expect(long.endsWith("…")).toBe(true);
+	});
+
+	it("prefers the override for folded previews", () => {
+		expect(foldPreviewText("anything", "\"quoted\"")).toBe("\"quoted\"");
+	});
+
+	it("previews plain text as the first line, as before", () => {
+		expect(foldPreviewText("hello world", null)).toBe("hello world");
+		expect(foldPreviewText(`${"a".repeat(200)}\nsecond`, null)).toBe("a".repeat(140));
+	});
+
+	it("folds display math into parenthesized latex", () => {
+		expect(foldPreviewText("$$E = mc^2$$", null)).toBe("\\(E = mc^2\\)");
+		expect(foldPreviewText("\\[a + b\\]", null)).toBe("\\(a + b\\)");
+		expect(foldPreviewText("$$\nx^2\n$$", null)).toBe("\\(x^2\\)");
+	});
+
+	it("folds inline math up to its closing delimiter", () => {
+		expect(foldPreviewText("$x^2$ and more", null)).toBe("\\(x^2\\)");
+	});
+
+	it("truncates long folded equations with an ellipsis", () => {
+		const preview = foldPreviewText(`$$${"a".repeat(200)}$$`, null);
+		expect(preview.startsWith("\\(")).toBe(true);
+		expect(preview.endsWith("…\\)")).toBe(true);
 	});
 
 	it("keeps invalid math as plain text, never fatal", () => {
@@ -244,12 +309,12 @@ describe("latex math", () => {
 		expect(html).toContain("ccez-code");
 	});
 
-	it("keeps math indices unique across thoughts and body", () => {
+	it("never renders thoughts math: body indices only", () => {
 		const { html, maths } = renderMessage("<think>$$a$$</think>See \\(b\\) and $$c$$", false);
-		expect(maths.map((m) => m.tex)).toEqual(["a", "b", "c"]);
+		expect(maths.map((m) => m.tex)).toEqual(["b", "c"]);
 		expect(html).toContain('data-math-index="0"');
 		expect(html).toContain('data-math-index="1"');
-		expect(html).toContain('data-math-index="2"');
+		expect(html).not.toContain('data-math-index="2"');
 	});
 
 	it("renders single-dollar inline math bare like paren inline math", () => {

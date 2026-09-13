@@ -4,6 +4,7 @@ import {
 	contentFitsViewport,
 	draggedSliderPastTop,
 	formatIdleTimeout,
+	IDLE_SLIDER_BOTTOM,
 	IDLE_SLIDER_TOP,
 	idleSettingToSlider,
 	idleSliderToSetting,
@@ -11,6 +12,7 @@ import {
 	SLIDER_DRAG_RESET_PX
 } from "./chrome";
 import {
+	PROMPT_IDLE_ALWAYS,
 	PROMPT_IDLE_DEFAULT,
 	PROMPT_IDLE_MAX,
 	PROMPT_IDLE_MIN,
@@ -69,6 +71,13 @@ describe("idle slider mapping", () => {
 	it("reads the top tick as never, the rest as seconds", () => {
 		expect(formatIdleTimeout(PROMPT_IDLE_NEVER)).toBe("never");
 		expect(formatIdleTimeout(6)).toBe("6 s");
+	});
+
+	it("parks always-hide on the bottom tick", () => {
+		expect(IDLE_SLIDER_BOTTOM).toBe(1);
+		expect(idleSliderToSetting(IDLE_SLIDER_BOTTOM)).toBe(PROMPT_IDLE_ALWAYS);
+		expect(idleSettingToSlider(PROMPT_IDLE_ALWAYS)).toBe(IDLE_SLIDER_BOTTOM);
+		expect(formatIdleTimeout(PROMPT_IDLE_ALWAYS)).toBe("always");
 	});
 });
 

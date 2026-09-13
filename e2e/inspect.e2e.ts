@@ -35,6 +35,43 @@ async function selectWord(page: Page): Promise<void> {
 	await expect(page.locator(".sel-menu")).toBeVisible();
 }
 
+/**
+ * Highlight exactly one character: double-clicking grabs the whole
+ * CJK word (multi-char, no Inspect button), so the range is set
+ * directly and a synthetic mouseup summons the menu off it.
+ */
+async function selectChar(page: Page, ch: string): Promise<void> {
+	const body = page.locator("article .rendered").first();
+	await expect(body).toBeVisible();
+	await body.evaluate((el, c) => {
+		const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+		let node: Text | null = null;
+		let idx = -1;
+		let cur: Node | null = walker.nextNode();
+		while (cur) {
+			const i = (cur as Text).data.indexOf(c);
+			if (i >= 0) {
+				node = cur as Text;
+				idx = i;
+				break;
+			}
+			cur = walker.nextNode();
+		}
+		if (!node || idx < 0) throw new Error(`char ${c} not found in message`);
+		const range = document.createRange();
+		range.setStart(node, idx);
+		range.setEnd(node, idx + 1);
+		const sel = window.getSelection();
+		sel?.removeAllRanges();
+		sel?.addRange(range);
+		const rect = range.getBoundingClientRect();
+		el.dispatchEvent(
+			new MouseEvent("mouseup", { bubbles: true, button: 0, clientX: rect.left, clientY: rect.top })
+		);
+	}, ch);
+	await expect(page.locator(".sel-menu")).toBeVisible();
+}
+
 test("no Inspect button anywhere when the setting is off", async ({ page }) => {
 	await seedWithInspect(page, false, "語");
 	await selectWord(page);
@@ -111,10 +148,94 @@ test("Inspect resolves splits beyond the hand table via the data fallback", asyn
 	await expect(modal).toContainText("食");
 });
 
+test("single-char Inspect guesses Japanese from surrounding kana", async ({ page }) => {
+	await seedWithInspect(page, true, "漢字のテスト");
+	await selectChar(page, "字");
+	await page.locator('.sel-menu button:has-text("Inspect")').click();
+	const modal = page.locator(".inspect-modal");
+	await expect(modal).toBeVisible();
+	await expect(modal.getByRole("button", { name: "Show Japanese reading" })).toHaveAttribute(
+		"aria-pressed",
+		"true"
+	);
+	// JP face: Japanese readings only, no Mandarin row.
+	await expect(modal).toContainText("On/Kun:");
+	await expect(modal).not.toContainText("Mandarin:");
+	// Flipping to 中文 swaps faces: Mandarin appears, Japanese rows go.
+	await modal.getByRole("button", { name: "Show Chinese reading" }).click();
+	await expect(modal).toContainText("Mandarin:");
+	await expect(modal).not.toContainText("On/Kun:");
+});
+
+test("single-char Inspect defaults to Chinese without kana", async ({ page }) => {
+	await seedWithInspect(page, true, "汉字测试");
+	await selectChar(page, "字");
+	await page.locator('.sel-menu button:has-text("Inspect")').click();
+	const modal = page.locator(".inspect-modal");
+	await expect(modal).toBeVisible();
+	await expect(modal.getByRole("button", { name: "Show Chinese reading" })).toHaveAttribute(
+		"aria-pressed",
+		"true"
+	);
+	// CN face: Mandarin only, no Japanese rows.
+	await expect(modal).toContainText("Mandarin:");
+	await expect(modal).not.toContainText("On/Kun:");
+});
+
 test("settings panel gates the feature behind a checkbox", async ({ page }) => {
 	await seedWithInspect(page, false, "語");
 	await page.keyboard.press("Meta+,");
 	await expect(page.locator(".settings-panel")).not.toHaveClass(/closed/);
 	const box = page.locator(".settings-panel").getByText("Show Inspect for single kanji/hanzi highlights");
 	await expect(box).toBeVisible();
+});
+
+test("decomposition replaces the stroke bar", async ({ page }) => {
+	await seedWithInspect(page, true, "語");
+	await selectWord(page);
+	await page.locator('.sel-menu button:has-text("Inspect")').click();
+	const modal = page.locator(".inspect-modal");
+	await expect(modal).toBeVisible();
+	const decomp = modal.locator(".inspect-decomp");
+	await expect(decomp).toBeVisible();
+	await expect(decomp).toContainText("語");
+	await expect(decomp).toContainText("→");
+	await expect(page.locator(".inspect-bar")).toHaveCount(0);
+});
+
+test("stepper arrows and h/l step manually, never autoplay", async ({ page }) => {
+	await seedWithInspect(page, true, "語");
+	await selectWord(page);
+	await page.locator('.sel-menu button:has-text("Inspect")').click();
+	const modal = page.locator(".inspect-modal");
+	await expect(modal).toBeVisible();
+	const count = modal.locator(".inspect-count");
+	// The stepper never shows without its drawing: arrows wait for vectors.
+	await expect(modal.locator(".inspect-svg")).toBeVisible({ timeout: 60_000 });
+	await expect(count).toHaveText("1 / 14");
+	// No autoplay: still on step 1 after the old interval elapsed twice.
+	await page.waitForTimeout(1500);
+	await expect(count).toHaveText("1 / 14");
+	await modal.locator('button[aria-label="Next stroke (l)"]').click();
+	await expect(count).toHaveText("2 / 14");
+	await page.keyboard.press("l");
+	await expect(count).toHaveText("3 / 14");
+	await page.keyboard.press("h");
+	await expect(count).toHaveText("2 / 14");
+	await modal.locator('button[aria-label="Previous stroke (h)"]').click();
+	await expect(count).toHaveText("1 / 14");
+});
+
+test("readings render as one comma-joined on/kun line", async ({ page }) => {
+	await seedWithInspect(page, true, "語");
+	await selectWord(page);
+	await page.locator('.sel-menu button:has-text("Inspect")').click();
+	const modal = page.locator(".inspect-modal");
+	await expect(modal).toBeVisible();
+	await modal.locator('button:has-text("日本語")').click();
+	const line = modal.locator(".inspect-onkun");
+	await expect(line).toBeVisible();
+	await expect(line).toContainText("On/Kun:");
+	await expect(line).not.toContainText("On:");
+	await expect(line).not.toContainText("Kun:");
 });

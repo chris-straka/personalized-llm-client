@@ -1,6 +1,6 @@
 import { escapeHtml, sanitize } from "./render";
 import { pinyinRuby, plainParagraphs } from "./pinyin";
-import { classifyAidLine, type LocalAid } from "./reading";
+import { classifyAidLine, codeAwareLines, type LocalAid } from "./reading";
 
 /**
  * Japanese furigana via lindera (IPAdic) in a Web Worker. Conversion
@@ -128,11 +128,13 @@ export async function furiganaHtml(text: string, preferred: LocalAid | null = nu
 	// Only kana (Japanese) lines convert — readings the tokenizer
 	// invents for Chinese Han characters are wrong readings, so
 	// Han-only lines pass through escaped, exactly like the dual path.
-	const lines = text.split("\n");
+	const lines = codeAwareLines(text);
 	const converted = await Promise.all(
-		lines.map((line) => {
+		lines.map(({ line, code }) => {
 			if (!line.trim()) return Promise.resolve("");
-			if (classifyAidLine(line, preferred) !== "furigana") return Promise.resolve(escapeHtml(line));
+			// Fenced code never converts, same as the pinyin path.
+			if (code || classifyAidLine(line, preferred) !== "furigana")
+				return Promise.resolve(escapeHtml(line));
 			return fragment(line);
 		})
 	);
@@ -146,10 +148,11 @@ export async function furiganaHtml(text: string, preferred: LocalAid | null = nu
  * parts. Same paragraph shape as the single-aid paths.
  */
 export async function dualAidHtml(text: string, preferred: LocalAid | null = null): Promise<string> {
-	const lines = text.split("\n");
+	const lines = codeAwareLines(text);
 	const converted = await Promise.all(
-		lines.map((line) => {
+		lines.map(({ line, code }) => {
 			if (!line.trim()) return Promise.resolve("");
+			if (code) return Promise.resolve(escapeHtml(line));
 			const kind = classifyAidLine(line, preferred);
 			if (kind === "furigana") return fragment(line);
 			if (kind === "pinyin") return Promise.resolve(pinyinRuby(line));

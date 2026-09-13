@@ -5,8 +5,10 @@ import {
 	SIDE_VIEW_DOCK_WIDTH,
 	clampSideviewWidth,
 	isSideviewUrlAllowed,
+	pushBrowserHistory,
 	resolveBrowserUrl,
 	sideviewLayout,
+	stepBrowserHistory,
 	toggleSideviewOpen
 } from "./sideview";
 
@@ -78,6 +80,61 @@ describe("toggleSideviewOpen", () => {
 	it("flips the open state", () => {
 		expect(toggleSideviewOpen(false)).toBe(true);
 		expect(toggleSideviewOpen(true)).toBe(false);
+	});
+});
+
+describe("pushBrowserHistory", () => {
+	it("commits the first URL at index 0", () => {
+		const next = pushBrowserHistory({ entries: [], index: -1 }, "https://example.com/");
+		expect(next).toEqual({ entries: ["https://example.com/"], index: 0 });
+	});
+
+	it("appends and drops forward entries on a new commit", () => {
+		const stepped = stepBrowserHistory(
+			{ entries: ["https://a.example/", "https://b.example/"], index: 1 },
+			-1
+		);
+		const next = pushBrowserHistory(stepped, "https://c.example/");
+		expect(next).toEqual({
+			entries: ["https://a.example/", "https://c.example/"],
+			index: 1
+		});
+	});
+
+	it("re-committing the current page does not fork a duplicate", () => {
+		const prev = { entries: ["https://a.example/"], index: 0 };
+		expect(pushBrowserHistory(prev, "https://a.example/")).toEqual(prev);
+	});
+
+	it("caps the entries", () => {
+		const prev = { entries: ["https://a.example/", "https://b.example/"], index: 1 };
+		const next = pushBrowserHistory(prev, "https://c.example/", 2);
+		expect(next).toEqual({
+			entries: ["https://b.example/", "https://c.example/"],
+			index: 1
+		});
+	});
+});
+
+describe("stepBrowserHistory", () => {
+	it("steps back and forward, clamping at both ends", () => {
+		const prev = {
+			entries: ["https://a.example/", "https://b.example/"],
+			index: 1
+		};
+		expect(stepBrowserHistory(prev, -1)).toEqual({ ...prev, index: 0 });
+		expect(stepBrowserHistory(prev, 1)).toEqual({ ...prev, index: 1 });
+		expect(stepBrowserHistory({ ...prev, index: 0 }, -1)).toEqual({
+			...prev,
+			index: 0
+		});
+	});
+
+	it("stays put on empty history", () => {
+		expect(stepBrowserHistory({ entries: [], index: -1 }, -1)).toEqual({
+			entries: [],
+			index: -1
+		});
 	});
 });
 

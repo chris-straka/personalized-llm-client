@@ -38,6 +38,33 @@ describe("createTextareaEditor", () => {
 		expect(options.onSubmit).not.toHaveBeenCalled();
 	});
 
+	it("Shift-Enter on a fence opener completes the fence with the caret between", () => {
+		const { editor, ta } = setup();
+		editor.setText("```py");
+		ta.setSelectionRange(5, 5);
+		key(ta, { key: "Enter", shiftKey: true });
+		expect(editor.getText()).toBe("```py\n\n```");
+		expect(ta.selectionStart).toBe(6);
+	});
+
+	it("Shift-Enter in an empty fence body exits past the fence", () => {
+		const { editor, ta } = setup();
+		editor.setText("```py\n\n```");
+		ta.setSelectionRange(6, 6);
+		key(ta, { key: "Enter", shiftKey: true });
+		expect(editor.getText()).toBe("```py\n\n```\n");
+		expect(ta.selectionStart).toBe(11);
+	});
+
+	it("Shift-Enter on plain text sends nothing and types nothing", () => {
+		const { editor, ta, options } = setup();
+		editor.setText("hi");
+		ta.setSelectionRange(2, 2);
+		key(ta, { key: "Enter", shiftKey: true });
+		expect(options.onSubmit).not.toHaveBeenCalled();
+		expect(editor.getText()).toBe("hi");
+	});
+
 	it("never hijacks Enter during IME composition", () => {
 		const { ta, options } = setup();
 		// jsdom KeyboardEvent supports isComposing via the init dict.

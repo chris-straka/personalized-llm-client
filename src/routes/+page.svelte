@@ -26,7 +26,6 @@
 		waypointLabel,
 		sendMessage,
 		setPasteFold,
-		visibleMessageCount,
 		isSending,
 		type Chat,
 		type ChatMsg,
@@ -44,6 +43,7 @@
 		CHAT_WIDTH_DEFAULT,
 		CHAT_WIDTH_MIN,
 		CHAT_WIDTH_MAX,
+		PROMPT_IDLE_ALWAYS,
 		type AppSettings
 	} from "$lib/settings";
 	import { cycleThinkingId } from "$lib/providers/thinking";
@@ -78,10 +78,12 @@
 	} from "$lib/editor";
 	import { createTextareaEditor } from "$lib/textarea-editor";
 	import {
+		SCROLLKEY_DU_VELOCITY_PX_S,
 		SCROLLKEY_LINE_PX,
 		ggArmed,
 		halfPageDy,
 		holdIsTap,
+		indexAtViewportLine,
 		isEscapeHold,
 		messageEdgeScrollTop,
 		resolveSidebarSpaceEnter,
@@ -136,7 +138,14 @@
 	import { createRefMemo } from "$lib/aidLoading";
 	import { hoverTranslateWithProvider } from "$lib/builtinAi";
 	import { switchChatWithTransition } from "$lib/viewTransitions";
-	import { getInspectData, shouldShowInspect } from "$lib/inspect";
+	import {
+		decomposeTree,
+		getInspectData,
+		inspectLangFor,
+		onKunLine,
+		shouldShowInspect
+	} from "$lib/inspect";
+	import { fetchStrokePaths } from "$lib/kanjivg";
 	import {
 		clampSideviewWidth,
 		hideSideview,
@@ -166,6 +175,7 @@
 		detectScripts,
 		localAidsFor,
 		hasAmbiguousAidLine,
+		stripCodeForDetection,
 		preferredLocalAid,
 		LOCAL_AID_BUTTON,
 		LOCAL_AID_SHOW_ORIGINAL,
@@ -174,7 +184,6 @@
 		MODEL_AID_FOR_SCRIPT,
 		extractWordAt,
 		ttsLangFor,
-		hanOverlayLangFor,
 		isHanOverlayLangUncertain,
 		HAN_OVERLAY_LANG_TAG,
 		runModelAid,
@@ -226,6 +235,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		nativeTtsSupported,
 		quoteLangFor,
 		quoteLangForContext,
+		sentenceForQuote,
 		currentKeyboardInputSource
 	} from "$lib/nativeTts";
 	import { startNativeDictation } from "$lib/nativeDictate";
@@ -310,6 +320,13 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		}, 200);
 	}
 	let focusMode: "edit" | "scroll" = $state("edit");
+	/**
+	 * Whether scroll mode started in the prompt: only then does Ctrl+G
+	 * hop back to a focused, type-ready composer. Entering from a
+	 * deactivated prompt (Ctrl+G at the view, search/find landings)
+	 * stays out — there is nothing to hop back to.
+	 */
+	let scrollFromPrompt = false;
 	let selectedIdx = $state(-1);
 	let hoveredIdx = $state(-1);
 	let missingKey = $state(false);
@@ -495,9 +512,9 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	/** Held scroll key (j/k/d/u glide): pacing state, null when idle. */
 	let scrollHold: { key: string; velocity: number; downAt: number; lastT: number; raf: number } | null = null;
 	/**
-	 * Escape keydown timestamp for the fullscreen hold: releasing
-	 * after ESCAPE_HOLD_MS exits fullscreen, a quicker tap keeps the
-	 * keydown dismiss path exactly as today. 0 when no press is held.
+	 * Escape keydown timestamp for the exit-fullscreen chord: F while
+	 * Escape is held exits fullscreen (Escape alone never does). 0
+	 * when no press is held.
 	 */
 	let escDownAt = 0;
 	/**
@@ -519,9 +536,19 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	let pasting = $state(false);
 	let editingId: AnnotationId | null = $state(null);
 	let editDraft = $state("");
-	/** Own message loaded into the composer for editing (null when the
-	composer is a fresh send). Enter rewrites it in place; Esc cancels. */
+	/** Own message under in-place edit (null when no edit is open).
+	Enter saves + resends; Alt+Enter saves without resending; Esc cancels. */
 	let editingMsgId: ChatMsgId | null = $state(null);
+	/** In-place editor handle (null unless an own-message edit is mounted). */
+	let msgEditor: PromptEditor | null = null;
+	/** Seed text for the in-place editor (prose plus image-marker lines). */
+	let editingSeed = $state("");
+	/** Attachments of the message under edit (the composer's own stay untouched). */
+	let editingAttachments = $state<Attachment[]>([]);
+	/** Last reconciled marker count inside the in-place editor. */
+	let editingPrevMarkers = 0;
+	/** Programmatic inline edits must not reconcile against themselves. */
+	let editingMarkerMuted = false;
 	let highlightAnnId: AnnotationId | null = $state(null);
 	/** Badge currently hovered (paints its quote wash as a preview). */
 	let hoverBadgeId: string | null = $state(null);
@@ -551,13 +578,22 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		left: number;
 		w: number;
 		quote: string;
+		/** Containing paragraph text: the single-char guess reads it for kana. */
+		context: string;
 		messageId: ChatMsgId;
+		/** Live range at summon time: menu hover puts the highlight
+		back when WebKit empties it (no DOM change, so still valid). */
+		range: Range | null;
 	} | null>(null);
 	/**
 	 * An unanswered selection menu never lingers (clicking away still
-	 * dismisses instantly). Touch holds it 1.8x longer: a thumb takes
+	 * dismisses instantly). Desktop gives a 6s idle window, and any
+	 * pointer activity inside it re-arms: an aimer steering toward
+	 * Annotate must never race the dismiss. Touch holds it while the
+	 * highlight is live instead (no hover there): a thumb takes
 	 * longer to reach than a cursor.
 	 */
+	const SEL_MENU_IDLE_MS = 6000;
 	let selMenuTimer: ReturnType<typeof setTimeout> | null = null;
 	/**
 	 * True while the pointer hovers the selection menu: the auto-dismiss
@@ -584,9 +620,16 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 						arm();
 						return;
 					}
+					// Engaged hands hold the menu: pointer activity (stamped
+					// by the shared activity listener) inside the window
+					// re-arms instead of dismissing.
+					if (!androidUI && !selMenuHover && Date.now() - lastInputAt < SEL_MENU_IDLE_MS) {
+						arm();
+						return;
+					}
 					selMenu = null;
 				},
-				androidUI ? 4500 : 2500
+				androidUI ? 4500 : SEL_MENU_IDLE_MS
 			);
 		};
 		arm();
@@ -607,6 +650,43 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	function noteMenuPress(): void {
 		menuPressAt = Date.now();
 	}
+	/**
+	 * Swap-vs-press discrimination for the selectionchange
+	 * auto-dismiss below. Message bodies swap their HTML under a live
+	 * highlight (Shiki late-enhance, aid rebuilds, stream chunks):
+	 * WebKit fires selectionchange for the collapse this causes
+	 * (Chromium stays silent), and the collapsed-attached shape reads
+	 * exactly like a genuine clear. A MutationObserver stamps every
+	 * structural/text swap; presses stamp separately. A collapse newer
+	 * than the last press is the swap's, so the menu stands on its
+	 * stored quote — genuine clears always arrive on a press (pointer
+	 * travel and hovers stamp nothing) and still dismiss.
+	 */
+	let lastBodySwapAt = 0;
+	let lastPressAt = 0;
+	let swapObserverOn = false;
+	function ensureSwapObserver(): void {
+		if (swapObserverOn) return;
+		const root = document.querySelector(".messages");
+		if (!root) return;
+		swapObserverOn = true;
+		const observer = new MutationObserver(() => {
+			lastBodySwapAt = Date.now();
+		});
+		observer.observe(root, { childList: true, subtree: true, characterData: true });
+	}
+	$effect(() => {
+		ensureSwapObserver();
+		const stampPress = (): void => {
+			lastPressAt = Date.now();
+		};
+		window.addEventListener("pointerdown", stampPress, { passive: true });
+		window.addEventListener("keydown", stampPress);
+		return () => {
+			window.removeEventListener("pointerdown", stampPress);
+			window.removeEventListener("keydown", stampPress);
+		};
+	});
 	let menuBtnTouchStart: { x: number; y: number } | null = null;
 	function noteMenuBtnTouch(event: TouchEvent): void {
 		const t = event.changedTouches[0];
@@ -749,6 +829,112 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		setTimeout(restore, 100);
 	}
 	let shortcutsOpen = $state(false);
+	/** Filter text for the shortcuts modal (⌘F focuses it while open). */
+	let shortcutQuery = $state("");
+	let shortcutInputEl: HTMLInputElement | null = $state(null);
+
+	interface ShortcutRow {
+		name: string;
+		keys: string;
+	}
+	/** Touch gestures list, data-driven so the modal filter can search it. */
+	function touchShortcuts(): ShortcutRow[] {
+		return [
+			{ name: "Chats list", keys: "Swipe right from the left edge or two-finger double-tap" },
+			{ name: "Newer / older chat", keys: "Two-finger swipe right / left" },
+			{ name: "Delete current chat", keys: "Double three-finger tap" },
+			{ name: "Annotate", keys: "Select text · Annotate" },
+			{ name: "Message buttons", keys: "Tap a message" },
+			{ name: "Fold a message", keys: "Swipe right on it" }
+		];
+	}
+	/** Desktop shortcuts, data-driven so the modal filter can search them. */
+	function desktopShortcuts(): ShortcutRow[] {
+		const meta = isMac ? "⌘" : "Ctrl+";
+		return [
+			{ name: "Shortcuts show/hide", keys: `${isMac ? "⇧⌘/" : "Ctrl+Shift+/"} · middle-click` },
+			{ name: "New line", keys: "Shift+Enter" },
+			{ name: "Send message", keys: `Enter · ${meta}Enter anywhere` },
+			{ name: "Stage message", keys: `${altm}+Enter` },
+			{ name: "Focus composer", keys: `${isMac ? "⇧⌘Space" : "Ctrl+Shift+Space"}` },
+			{ name: "Switch model / key", keys: `Ctrl+${altm}+← / →` },
+			{ name: "Thinking level", keys: `Ctrl+${altm}+↓ / ↑` },
+			{ name: "Scroll messages", keys: "J / K walk · gg top · G bottom · U / D half-page" },
+			{
+				name: "Scroll chat (nothing selected)",
+				keys: "J / K glide on hold · U / D half-page · gg / G top / bottom · z / Z hovered edges"
+			},
+			{ name: "Exit fullscreen", keys: "Hold Esc 2s · Esc+F" },
+			{
+				name: "Chat list",
+				keys: `${isMac ? "⌘B / ⇧⌘H" : "Ctrl+B / Ctrl+Shift+H"} · J / K walk · Space enters`
+			},
+			{ name: "Export chat", keys: "Row icon, left of ×" },
+			{
+				name: "Search chats",
+				keys: `${meta}P · J / K move · Enter jumps unselected`
+			},
+			{
+				name: "Find in chat",
+				keys: `${meta}F · Enter cycles · repeat closes · 1 hit closes bare`
+			},
+			{ name: "Fullscreen", keys: `${isMac ? "⌘E or ⌃⌘F" : "Ctrl+Meta+F"} toggle` },
+			{
+				name: "Newer / older chat",
+				keys: `${isMac ? "⇧⌘J / ⇧⌘K" : "Ctrl+Shift+J / Ctrl+Shift+K"} · past newest mints one`
+			},
+			{ name: "New chat", keys: `${isMac ? "⌘N or ⇧⌘N" : "Ctrl+N or Ctrl+Shift+N"}` },
+			{ name: "Voice readback on/off", keys: `Ctrl+${altm}+S` },
+			{ name: "Pasted text expand/collapse", keys: "Ctrl+O" },
+			{
+				name: "Translate selection",
+				keys: `${meta}T over text · feeds annotation`
+			},
+			{
+				name: "Browser side panel",
+				keys: `${meta}T · Esc closes`
+			},
+			{ name: "Stop voice / close menus", keys: "Esc" },
+			{ name: "Speak text aloud", keys: "Right-click · again stops" },
+			// ⌘D is meta-only (Ctrl+D fast-scrolls in scroll mode); Shift+D works everywhere.
+			{
+				name: "Delete a message",
+				keys: isMac ? "Hover + ⌘D / Shift+D" : "Hover + Shift+D"
+			},
+			{
+				name: "Fold / unfold message",
+				keys: `Hover + F / ${isMac ? "Option" : "Alt"}-click`
+			},
+			{
+				name: "Fold / unfold code",
+				keys: "Right-click folds · left-click unfolds"
+			},
+			{ name: "Rerun a prompt", keys: "Rerun button · deletes after" },
+			{
+				name: "Reply language",
+				keys: `${isMac ? "⌘1…⌘0" : "Ctrl+1…Ctrl+0"} · repeat a key to clear`
+			},
+			{ name: "Delete this chat", keys: `${meta}Delete` },
+			{ name: "Delete every chat", keys: `${isMac ? "⇧⌘Delete" : "Ctrl+Shift+Delete"}` },
+			{ name: "Cut / delete hovered message", keys: "X cuts · Shift+D deletes" },
+			{ name: "Edit own message", keys: "Hover own + E" },
+			{ name: "Reading aid toggle", keys: "Hover + A · M pinyin · N furigana" },
+			{ name: "Inspect stroke step", keys: "H / L while Inspect is open" },
+			{ name: "Text size up / down", keys: `${mod}+ / ${mod}−` },
+			{ name: "Chat width + / −", keys: `⇧${mod}+ / ⇧${mod}−` }
+		];
+	}
+	/** Modal filter: matches action or keys, case-insensitive. */
+	function filteredShortcuts(rows: ShortcutRow[]): ShortcutRow[] {
+		const q = shortcutQuery.trim().toLowerCase();
+		if (!q) return rows;
+		return rows.filter((row) => `${row.name} ${row.keys}`.toLowerCase().includes(q));
+	}
+	/** Open the shortcuts modal with a fresh filter. */
+	function openShortcuts(): void {
+		shortcutQuery = "";
+		shortcutsOpen = true;
+	}
 	/**
 	 * Inspect overlay: the single Han character under review, or null
 	 * when closed. Same modal-veil/modal pattern as the shortcuts
@@ -763,35 +949,38 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	 * small JP/中文 toggle that writes this state.
 	 */
 	let inspectLang = $state<HanOverlayLang>("zh");
-	/** Current step of the schematic stroke preview (1-based). */
+	/** Current stroke step (1-based, manual only — never autoplay). */
 	let inspectStroke = $state(1);
 	const inspectData = $derived(inspectChar ? getInspectData(inspectChar) : null);
+	/** KanjiVG stroke paths for the open character (null until loaded). */
+	let inspectStrokes = $state<string[] | null>(null);
 	$effect(() => {
-		// Schematic stroke-step preview: advances through the stroke
-		// count on a timer until the KanjiVG path-data follow-up lands.
-		// Reduced-motion users get a static first step instead.
-		const total = inspectData?.strokeCount;
-		if (!inspectChar || !total) return;
+		const ch = inspectChar;
 		inspectStroke = 1;
-		let reduced = false;
-		try {
-			reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-		} catch {
-			reduced = false;
-		}
-		if (reduced) return;
-		const timer = setInterval(() => {
-			inspectStroke = inspectStroke >= total ? 1 : inspectStroke + 1;
-		}, 600);
-		return () => clearInterval(timer);
+		inspectStrokes = null;
+		if (!ch) return;
+		let live = true;
+		void fetchStrokePaths(ch).then((paths) => {
+			if (!live || inspectChar !== ch) return;
+			if (paths && paths.length > 0) inspectStrokes = paths;
+		});
+		return () => {
+			live = false;
+		};
 	});
+	/** Step the stroke preview, clamped to 1..total (never wraps). */
+	function stepInspect(delta: number): void {
+		const total = inspectStrokes?.length ?? inspectData?.strokeCount ?? 1;
+		const top = Math.max(total, 1);
+		inspectStroke = Math.min(Math.max(inspectStroke + delta, 1), top);
+	}
 	/** Open the Inspect overlay for the live selection (single Han char only). */
 	function openInspect(): void {
 		if (!selMenu) return;
 		const quote = selMenu.quote.trim();
 		if (!shouldShowInspect(quote, settings.inspectEnabled)) return;
 		inspectChar = quote;
-		inspectLang = hanOverlayLangFor(quote);
+		inspectLang = inspectLangFor(quote, selMenu.context);
 		clearSelection();
 		selMenu = null;
 	}
@@ -863,11 +1052,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		const query = sideSearch.trim();
 		if (!query) return chatState.chats;
 		return chatState.chats.filter((item) =>
-			chatMatchesQuery(
-				chatLabel(item.createdAt, visibleMessageCount(chatState, item)),
-				item.messages.map((m) => m.content),
-				query
-			)
+			chatMatchesQuery(chatLabel(item.createdAt), item.messages.map((m) => m.content), query)
 		);
 	}
 
@@ -1191,11 +1376,14 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		if (hit.doc.msgId) {
 			const index = chat.messages.findIndex((m) => m.id === hit.doc.msgId);
 			if (index >= 0) {
-				// Native focus order matches the highlighted message:
-				// scroll mode owns j/k/arrows from here and Tab walks
-				// the same message order.
-				enterScrollMode();
-				selectedIdx = index;
+				// The jump lands silently: the message scrolls into view
+				// and takes DOM focus (Tab still walks message order),
+				// but nothing is selected — edit mode owns j/k from here
+				// so they glide instead of walking from a cursor. (No
+				// enterEditMode: focus stays on the message, not the
+				// composer.)
+				focusMode = "edit";
+				selectedIdx = -1;
 				requestAnimationFrame(() => {
 					const el = document.getElementById(`msg-${index}`);
 					el?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -1268,6 +1456,13 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		findOpen = false;
 		findQuery = "";
 		findCursor = 0;
+		// The bar's cursor dies with it. landFindHit parked scroll mode
+		// on a hit, but composer focus flips mode to edit on the way in
+		// (see onFocusIn), so a stale selectedIdx would only strand the
+		// next scroll entry on a ghost message. Clear it outright —
+		// single hit or several, Enter, Esc, or repeat Cmd+F.
+		focusMode = "edit";
+		selectedIdx = -1;
 		editor?.focus();
 	}
 
@@ -1350,21 +1545,35 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	/**
 	 * Idle-hide for the main prompt: any mouse, keyboard, touch, or
 	 * wheel input stamps lastInputAt (delaying the hide); a 500ms
-	 * ticker hides it (slides down out of view) once the effective
-	 * timeout elapses with no input. Restoring is allowlisted: only
-	 * the i / Enter / Space keys (see idleRestoreKey, wired at the top
-	 * of onKey) or a real left click (see onIdleClick below) bring the
-	 * prompt back — pointer travel, wheel, and other keys merely
-	 * re-arm the timer, so selection drags never summon it. The
-	 * timeout and mobile reads subscribe the effect, so a settings
-	 * change or the phone detection landing re-arms the ticker. An
-	 * empty chat never hides, and neither does a thread shorter than
-	 * the viewport (contentFitsViewport, contract-tested in
-	 * chrome.test.ts): with nothing to uncover, the prompt and its
-	 * attachment strip stay put.
+	 * ticker hides it (a short settle-down plus fade) once the
+	 * effective timeout elapses with no input. The prompt is a
+	 * floating card over a full-bleed column, so hiding and restoring
+	 * move no messages and clip no text.
+	 * Restoring is keys-only on desktop: only the i / Enter / Space
+	 * keys (see idleRestoreKey, wired at the top of onKey) bring the
+	 * prompt back — clicks never summon it, so selecting,
+	 * double-clicking, and dismissing highlights leave it hidden.
+	 * Phones keep tap-to-summon (no keyboard for i). Pointer travel,
+	 * wheel, control clicks, and other keys merely re-arm the timer.
+	 * The timeout and mobile reads subscribe the effect, so a
+	 * settings change or the phone detection landing re-arms the
+	 * ticker. An empty chat never hides, and neither does a thread
+	 * shorter than the viewport (contentFitsViewport, contract-tested
+	 * in chrome.test.ts): hiding frees no room, so a short thread
+	 * would only strand its composer.
 	 */
 	let lastInputAt = $state(Date.now());
-	let promptIdle = $state(false);
+	/**
+	 * Boot parks hidden under always-hide when the synchronously loaded
+	 * chat already has messages: starting visible would flash the
+	 * composer for a frame before the late-seed effect hides it. Short
+	 * threads never hide, so the correction effect below releases the
+	 * park once measured (async loads keep today's hide-on-arrival).
+	 */
+	let bootParked =
+		settings.promptIdleSec === PROMPT_IDLE_ALWAYS &&
+		(activeChat(chatState)?.messages.length ?? 0) > 0;
+	let promptIdle = $state(bootParked);
 	/** Any activity delays the hide; restoring is allowlisted below. */
 	function stampInput(): void {
 		lastInputAt = Date.now();
@@ -1373,6 +1582,30 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	function restorePrompt(): void {
 		stampInput();
 		promptIdle = false;
+	}
+	/**
+	 * Parked composer: idle-hidden OR a sidebar owns the stage (chats
+	 * list or settings). Parking is visual only — promptIdle keeps its
+	 * own state, so closing the sidebar returns exactly the prior
+	 * idle state instead of summoning a hidden prompt.
+	 */
+	function promptParked(): boolean {
+		return promptIdle || settingsOpen || !settings.sidebarCollapsed;
+	}
+	/**
+	 * Always-hide park: hide unless focus is (or is heading) inside
+	 * the composer, with the same empty and short-thread guards as the
+	 * timed path. Takes the focus destination explicitly because during
+	 * focusout the active element is already gone (relatedTarget reads
+	 * where focus is heading; null when it leaves the window).
+	 */
+	function hideForAlways(next: HTMLElement | null): void {
+		if (settings.promptIdleSec !== PROMPT_IDLE_ALWAYS) return;
+		if (next?.closest(".prompt")) return;
+		if (viewChat.messages.length === 0) return;
+		const box = scrollBox;
+		if (box && contentFitsViewport(box.scrollHeight, box.clientHeight)) return;
+		promptIdle = true;
 	}
 	/**
 	 * Blind keystrokes into the hidden composer that die silently:
@@ -1400,15 +1633,38 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	 */
 	function idleRestoreKey(event: KeyboardEvent): boolean {
 		if (event.isComposing) return false;
+		// Held keys never re-summon: the first press summons, and
+		// repeats after a space-dismiss would otherwise bounce the
+		// prompt straight back open.
+		if (event.repeat) return false;
 		if (event.metaKey || event.ctrlKey || event.altKey) return false;
 		if (event.key !== "i" && event.key !== "I" && event.key !== "Enter" && event.key !== " ") {
 			return false;
 		}
 		const target = event.target as HTMLElement | null;
-		if (target?.closest(".prompt .cm-content, .prompt .ta-input")) return true;
+		if (target?.closest(".prompt .cm-content, .prompt .ta-input")) {
+			// Stale send key: always-hide blurs the composer on send, so a
+			// keydown still targeted there but with focus already gone (the
+			// send Enter bubbling up) must not summon the prompt back.
+			const active = document.activeElement as HTMLElement | null;
+			if (!active?.closest(".prompt")) return false;
+			return true;
+		}
 		// An open overlay owns bare keys (Enter activates, Space
 		// clicks a focused control): never yank focus to the prompt.
-		if (shortcutsOpen || searchOpen || inspectChar !== null || findOpen) return false;
+		// A sidebar or panel owns the stage too (settings, chats list,
+		// docked browser): Space out there is a no-op, never a summon
+		// from behind it — focus may sit on the body while one is open.
+		if (
+			shortcutsOpen ||
+			searchOpen ||
+			inspectChar !== null ||
+			findOpen ||
+			settingsOpen ||
+			sideviewOpen ||
+			!settings.sidebarCollapsed
+		)
+			return false;
 		if (
 			target?.closest(
 				"input, textarea, select, [contenteditable], button, a, summary, aside, .modal, .modal-veil, .find-bar, .search-palette, .sel-menu, .review, .translate-panel, .lang-menu"
@@ -1429,25 +1685,81 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		};
 		// Press point for the drag-vs-click read in onIdleClick: a
 		// press that traveled is a selection drag, never a restore.
+		// idleDownControl remembers a press that STARTED on a control:
+		// a mid-press re-render (toast, Shiki) can swap the node under
+		// the cursor, retargeting the click to an ancestor — the press
+		// is still a control press, never a restore.
 		let idleDown: { x: number; y: number } | null = null;
+		let idleDownControl = false;
+		// Whether the prompt was visible when the press started: a press
+		// that begins visible is the dismissing gesture (its blur hides),
+		// so its click must not restore — only a press that starts
+		// hidden summons.
+		let idleDownVisible = false;
+		let idleDownHadSel = false;
 		const onIdleDown = (event: PointerEvent): void => {
 			idleDown = event.button === 0 ? { x: event.clientX, y: event.clientY } : null;
+			// Summonable only from a fully shown prompt: a press that
+			// starts idle-hidden OR sidebar-parked (e.g. the click that
+			// dismisses a sidebar) never restores on its click.
+			idleDownVisible = event.button === 0 && !promptParked();
+			// A press that starts on a live highlight is its dismissal —
+			// the click that clears it must not summon the prompt.
+			idleDownHadSel = event.button === 0 && (window.getSelection()?.toString() ?? "") !== "";
+			const downTarget = event.target instanceof Element ? event.target : null;
+			const downControl =
+				downTarget?.closest(
+					"button, a, input, textarea, select, summary, [contenteditable], .ccez-code"
+				) ?? null;
+			idleDownControl = event.button === 0 && downControl !== null;
 		};
 		/**
-		 * Click restore for the hidden prompt: a real left click
-		 * brings it back (plain surfaces also focus the composer, via
-		 * the prompt floor's own control guard). Selection drags
-		 * never restore, and latex-math taps never summon the
-		 * keyboard back: the math body is its own copy affordance.
+		 * Desktop clicks never restore the hidden prompt — summoning
+		 * is keys-only (bare i / Enter / Space) — so selecting,
+		 * double-clicking, and dismissing text never flash it. Phones
+		 * keep tap-to-summon (no keyboard to press i on): the guards
+		 * below are the old shared path, now phone-only. The visible
+		 * floor tap stays for both: with the prompt already up,
+		 * tapping its floor lands the caret.
 		 */
 		const onIdleClick = (event: MouseEvent): void => {
-			if (!promptIdle) return;
+			const target = event.target instanceof Element ? event.target : null;
+			if (!promptIdle) {
+				// Visible already: a tap on the prompt floor itself still
+				// lands the caret (an unfocused-but-visible composer is
+				// routine in always-hide mode). Controls keep their guard
+				// inside focusPromptFloor; everywhere else ignores clicks.
+				if (target?.closest(".prompt")) focusPromptFloor(event);
+				return;
+			}
+			// Hidden on desktop: no click summons, full stop.
+			if (!androidUI) return;
 			if (event.button !== 0) return;
 			const down = idleDown;
+			const downControl = idleDownControl;
+			const downVisible = idleDownVisible;
+			const downHadSel = idleDownHadSel;
 			idleDown = null;
+			idleDownControl = false;
+			idleDownVisible = false;
+			idleDownHadSel = false;
+			if (downControl) return;
+			// The dismissing gesture's own click: the blur it caused hid
+			// the prompt, and this click must not undo that.
+			if (downVisible) return;
+			// The press began on a live highlight: this click only clears
+			// it, and must not summon the prompt.
+			if (downHadSel) return;
 			if (down && Math.hypot(event.clientX - down.x, event.clientY - down.y) > 6) return;
-			const target = event.target instanceof Element ? event.target : null;
 			if (target?.closest("[data-math-index]")) return;
+			// Controls act where they land, never summon: code copy/run,
+			// fold, icon buttons, and code bodies (click-to-edit lives
+			// there) keep their own behavior while the prompt is hidden
+			// (mirrors the key path's control guard).
+			if (
+				target?.closest("button, a, input, textarea, select, summary, [contenteditable], .ccez-code")
+			)
+				return;
 			restorePrompt();
 			if (target?.closest("aside, .modal, .modal-veil, .find-bar, .search-palette")) return;
 			// Same deferred landing as the key path: the composer is
@@ -1455,10 +1767,38 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			const floorEvent = event;
 			void tick().then(() => focusPromptFloor(floorEvent));
 		};
+		/**
+		 * Always-hide mode (slider bottom tick): the prompt is visible
+		 * exactly while the composer holds focus. Focus landing in the
+		 * composer restores; focus leaving it hides (see hideForAlways
+		 * at component scope).
+		 */
+		const onFocusInIdle = (event: FocusEvent): void => {
+			if (settings.promptIdleSec !== PROMPT_IDLE_ALWAYS) return;
+			const target = event.target as HTMLElement | null;
+			if (!target?.closest(".prompt .cm-content, .prompt .ta-input")) return;
+			restorePrompt();
+		};
+		const onFocusOutIdle = (event: FocusEvent): void => {
+			hideForAlways(event.relatedTarget as HTMLElement | null);
+		};
 		window.addEventListener("pointermove", on, { passive: true });
+		window.addEventListener("focusin", onFocusInIdle);
+		window.addEventListener("focusout", onFocusOutIdle);
 		window.addEventListener("pointerdown", on, { passive: true });
 		window.addEventListener("pointerdown", onIdleDown, { passive: true });
 		window.addEventListener("pointerdown", onDown);
+		// Find-bar outside dismiss: any press outside the bar closes it.
+		// Prompt-summon safety is structural on desktop (clicks never
+		// summon — keys-only restore); the phone tap path keeps its
+		// own press guards below.
+		const onFindOutside = (event: PointerEvent): void => {
+			if (!findOpen) return;
+			const target = event.target instanceof Element ? event.target : null;
+			if (target?.closest(".find-bar")) return;
+			findOpen = false;
+		};
+		window.addEventListener("pointerdown", onFindOutside, { passive: true });
 		window.addEventListener("keydown", on);
 		window.addEventListener("wheel", on, { passive: true });
 		window.addEventListener("touchstart", on, { passive: true });
@@ -1471,26 +1811,21 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		const timer = window.setInterval(() => {
 			if (!isPromptIdle(lastInputAt, Date.now(), idleSec)) return;
 			if (viewChat.messages.length === 0) return;
-			// Short threads never hide: with nothing to uncover, the
-			// prompt only strands itself (see contentFitsViewport).
+			// Short threads never hide: everything already fits, so
+			// hiding only strands the composer (see contentFitsViewport).
 			const box = scrollBox;
 			if (box && contentFitsViewport(box.scrollHeight, box.clientHeight)) return;
 			if (promptIdle) return;
 			promptIdle = true;
-			// The hidden prompt leaves the flow (see .prompt-idle), so
-			// the column grows into its room: pin stuck readers to the
-			// bottom so the uncovered tail lands fully in view instead
-			// of parked half cut off. Readers scrolled up keep their
-			// spot — history never yanks.
-			if (stick && !holding && box) {
-				box.scrollTo({ top: box.scrollHeight, behavior: "instant" });
-			}
 		}, 500);
 		return () => {
 			window.removeEventListener("pointermove", on);
+			window.removeEventListener("focusin", onFocusInIdle);
+			window.removeEventListener("focusout", onFocusOutIdle);
 			window.removeEventListener("pointerdown", on);
 			window.removeEventListener("pointerdown", onIdleDown);
 			window.removeEventListener("pointerdown", onDown);
+			window.removeEventListener("pointerdown", onFindOutside);
 			window.removeEventListener("keydown", on);
 			window.removeEventListener("wheel", on);
 			window.removeEventListener("touchstart", on);
@@ -1499,6 +1834,65 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			window.removeEventListener("online", handleOnline);
 			window.clearInterval(timer);
 		};
+	});
+	/**
+	 * Late seeds re-evaluate the always-hide park: the mount pass can
+	 * run before the chat loads (an empty guard skips the hide), so
+	 * message arrival parks an unfocused composer instead of leaving
+	 * it stranded visible.
+	 */
+	$effect(() => {
+		void viewChat.messages.length;
+		hideForAlways(document.activeElement as HTMLElement | null);
+	});
+	$effect(() => {
+		// Boot-park correction (see bootParked): a parked boot on a
+		// thread that fits the viewport was never meant to hide.
+		if (!bootParked) return;
+		bootParked = false;
+		const box = scrollBox;
+		if (!box) return;
+		if (viewChat.messages.length > 0 && contentFitsViewport(box.scrollHeight, box.clientHeight))
+			promptIdle = false;
+	});
+	/**
+	 * Tail clearance for the floating composer: content padding keeps
+	 * the last line above the card in every scroll position (a static
+	 * guess can't track a growing draft, and scroll-padding only
+	 * steers programmatic scrolls while clicks still land under the
+	 * card). Falls back to the stylesheet's 1rem while hidden, so the
+	 * tail reaches the window's own bottom edge.
+	 */
+	$effect(() => {
+		const card = promptEl?.closest(".prompt") as HTMLElement | null;
+		const box = scrollBox;
+		if (!card || !box) return;
+		const sync = (): void => {
+			box.style.paddingBottom = promptParked()
+				? ""
+				: `${Math.ceil(card.getBoundingClientRect().height) + 24}px`;
+			// Scrollbar gutter the messages reserve (classic thin bar,
+			// zero with overlay scrollbars): the floating card centers in
+			// the full column, so it rides this much right of the
+			// articles without compensation (see --sbw on .prompt).
+			card.style.setProperty("--sbw", `${Math.max(0, box.offsetWidth - box.clientWidth)}px`);
+		};
+		sync();
+		const ro = new ResizeObserver(sync);
+		ro.observe(card);
+		ro.observe(box);
+		return () => ro.disconnect();
+	});
+	/**
+	 * Parking drops the caret: a sidebar opening with focus still
+	 * in the composer would type behind the panel. Focus already in
+	 * the sidebar (or anywhere outside the prompt) stays put, and
+	 * closing returns the prior idle state untouched.
+	 */
+	$effect(() => {
+		if (!promptParked()) return;
+		const active = document.activeElement;
+		if (active instanceof HTMLElement && active.closest(".prompt")) editor?.blur();
 	});
 	/**
 	 * Sleep prevention during speech/streaming (desktop shell only):
@@ -1719,6 +2113,10 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			resetDraftExtras();
 			newChat(chatState);
 			scrollBox?.scrollTo({ top: 0, behavior: "smooth" });
+			// Minting brings you home (see doNewChat): an open
+			// sidebar would park the prompt we are landing in.
+			settings.sidebarCollapsed = true;
+			persistSettings();
 			if (focus) enterEditMode();
 			restartStepSlide(direction);
 			return;
@@ -1786,6 +2184,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		editingId = null;
 		editDraft = "";
 		editingMsgId = null;
+		editingAttachments = [];
 		editor?.setPlaceholder(promptPlaceholder());
 		highlightAnnId = null;
 		settleAnnPop();
@@ -1822,9 +2221,16 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		resetDraftExtras();
 		newChat(chatState);
 		scrollBox?.scrollTo({ top: 0, behavior: "smooth" });
-		// Phones stay out of the prompt: auto-focus pops the keyboard
-		// over the composer instead of pushing it up. Tap in when ready.
-		if (!androidUI) editor?.focus();
+		// A minted chat always shows its composer: focusing a hidden
+		// bar focuses nothing (and the hidden restyle drops focus). An
+		// open sidebar parks the prompt, so minting also brings you
+		// home: the list closes like a row-pick.
+		// Phones stay unfocused: auto-focus pops the keyboard over the
+		// composer instead of pushing it up. Tap in when ready.
+		settings.sidebarCollapsed = true;
+		persistSettings();
+		if (!androidUI) enterEditMode();
+		else restorePrompt();
 	}
 
 	const useMock = mockProviderEnabled();
@@ -2045,14 +2451,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		});
 	}
 
-	function toggleThoughts(): void {
-		const blocks = scrollBox?.querySelectorAll("details.ccez-thoughts");
-		if (!blocks || blocks.length === 0) return;
-		const open = [...blocks].some((b) => !(b as HTMLDetailsElement).open);
-		blocks.forEach((b) => {
-			(b as HTMLDetailsElement).open = open;
-		});
-	}
+
 
 	/** Article element owning a DOM node, or null outside messages. */
 	function articleOf(node: Node | null): Element | null {
@@ -2068,7 +2467,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		return chat.messages[index]?.id ?? null;
 	}
 
-	function currentQuote(): { quote: string; messageId: ChatMsgId } | null {
+	function currentQuote(): { quote: string; context: string; messageId: ChatMsgId } | null {
 		const selection = window.getSelection();
 		if (!selection || selection.isCollapsed) return null;
 		const inRendered = selection.anchorNode instanceof Element
@@ -2098,7 +2497,17 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		if (!quote) return null;
 		const messageId = selectedMessageId(selection);
 		if (!messageId) return null;
-		return { quote, messageId };
+		// The paragraph holding the highlight: a lone Han char can
+		// never carry kana itself, so Inspect guesses its locale from
+		// this text instead. Ruby readings ride along in textContent,
+		// but furigana only annotates Japanese lines, so the guess
+		// still points the right way.
+		const anchorEl =
+			selection.anchorNode instanceof Element
+				? selection.anchorNode
+				: selection.anchorNode?.parentElement;
+		const context = (anchorEl?.closest("p, li")?.textContent ?? "").slice(0, 2000);
+		return { quote, context, messageId };
 	}
 
 	function onSelectEnd(event: MouseEvent, cursorX?: number): void {
@@ -2111,27 +2520,34 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		// mid-word snap out to the word's edges before the menu reads
 		// the quote (CJK has no word characters, so it never snaps).
 		if (live) snapSelectionToWordEdges(live);
-		placeSelMenu(cursorX);
+		placeSelMenu(cursorX, event.clientY);
 	}
 
-	function placeSelMenu(cursorX?: number): void {
+	function placeSelMenu(cursorX?: number, cursorY?: number): void {
+		ensureSwapObserver();
 		const found = currentQuote();
 		if (!found) {
 			selMenu = null;
 			return;
 		}
-		const rect = window.getSelection()?.getRangeAt(0).getBoundingClientRect();
+		const live = window.getSelection();
+		const rect = live?.rangeCount ? live.getRangeAt(0).getBoundingClientRect() : null;
 		if (!rect) {
 			selMenu = null;
 			return;
 		}
+		// The live range, so menu hover can put the highlight back:
+		// WebKit empties the document selection when the pointer moves
+		// onto the floating menu (no DOM change, no press). Nothing
+		// mutates in that path, so these nodes stay valid.
+		const stored = live && live.rangeCount > 0 ? live.getRangeAt(0).cloneRange() : null;
 		const width = 320;
 		// The menu docks near the cursor that finished the gesture, not
 		// the selection's start — a full-sentence pick shouldn't strand
 		// it lines above where the pointer is.
 		const at = cursorX ?? rect.left;
-		// The popup sits down and left of the cursor that finished the
-		// gesture (never under it), still clamped to the viewport.
+		// The popup sits just below the cursor (never under it), still
+		// clamped to the viewport.
 		const x = Math.min(Math.max(8, at - 16), window.innerWidth - width - 8);
 		// Android: the OS text toolbar (Copy / Translate / Read Aloud)
 		// docks above the selection, so ours goes below it instead of
@@ -2152,10 +2568,45 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			if (y < 8) y = rect.bottom + 30;
 			if (y + 44 > window.innerHeight) y = Math.max(8, window.innerHeight - 52);
 		} else {
-			y = rect.top - 41;
-			if (y < 8) y = rect.bottom + 14;
+			// Desktop: always above the cursor that finished the
+			// gesture (never below it), clamped to the viewport top.
+			const cy = cursorY ?? rect.top;
+			y = Math.max(8, cy - 48 - 8);
 		}
-		selMenu = { x, y, left: rect.left, w: rect.width, quote: found.quote, messageId: found.messageId };
+		selMenu = {
+			x,
+			y,
+			left: rect.left,
+			w: rect.width,
+			quote: found.quote,
+			context: found.context,
+			messageId: found.messageId,
+			range: stored
+		};
+	}
+
+	/**
+	 * Menu hover enter: WebKit empties the document selection when the
+	 * pointer moves onto the floating menu (no DOM change, no press —
+	 * Chromium keeps it), so put the stored live range back and the
+	 * highlight survives the trip to Annotate. Nothing mutated, so the
+	 * stored nodes are still valid; never stomps a non-empty selection,
+	 * and one restore per enter is enough (the engine clears once).
+	 */
+	function enterSelMenu(): void {
+		selMenuHover = true;
+		const range = selMenu?.range;
+		if (!range) return;
+		const live = window.getSelection();
+		if (!live || live.toString() !== "") return;
+		try {
+			if (!document.contains(range.startContainer) || !document.contains(range.endContainer))
+				return;
+			live.removeAllRanges();
+			live.addRange(range);
+		} catch {
+			// Cosmetic: the menu stands on its stored quote regardless.
+		}
 	}
 
 	function clearSelection(): void {
@@ -2598,9 +3049,12 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	 * exactly the script-only list as before.
 	 */
 	function offeredLocalAids(text: string): LocalAid[] {
-		const kinds = localAidsFor(detectScripts(text));
+		// Code never summons reading aids: detection reads the prose
+		// with fenced blocks and inline spans stripped out.
+		const prose = stripCodeForDetection(text);
+		const kinds = localAidsFor(detectScripts(prose));
 		const preferred = preferredLocalAid(activeReplyCode);
-		if (preferred && hasAmbiguousAidLine(text) && !kinds.includes(preferred)) kinds.unshift(preferred);
+		if (preferred && hasAmbiguousAidLine(prose) && !kinds.includes(preferred)) kinds.unshift(preferred);
 		return kinds;
 	}
 
@@ -2620,18 +3074,29 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 
 	/**
 	 * Hover in: preview the aid, but only when it is already here (cached
-	 * model aid, cached furigana, kind clicked before). Fetching happens
-	 * on click alone — hovering must never spend a model call or start
-	 * furigana's dictionary load (that work now runs in a worker, but the
-	 * rule stands: hover previews, click fetches). The swap lock wins over
-	 * everything: right after a click the button under a stationary cursor
+	 * model aid, cached furigana, kind clicked before). Pinyin never
+	 * previews on hover — its swap looped show/hide forever, so it is
+	 * click-to-show only. Fetching happens on click alone — hovering
+	 * must never spend a model call or start furigana's dictionary load
+	 * (that work now runs in a worker, but the rule stands: hover
+	 * previews, click fetches). The swap lock wins over everything:
+	 * right after a click the button under a stationary cursor
 	 * is new, not hovered.
 	 */
 	function peekAid(msg: ChatMsg, aidId: string | null, kind?: LocalAid): void {
+		// A live selection menu owns the highlight: hover previews swap
+		// the body HTML, which collapses the selection (and strands the
+		// menu) mid-slide toward Annotate. Previews resume on close.
+		if (selMenu) return;
 		if (aidNoPeek.has(msg.id)) return;
 		if (aidId) {
 			if (vocalized[msg.id] === undefined) return;
 		} else {
+			// Pinyin previews on click alone, never hover: after its
+			// readings render, the button under a stationary cursor is
+			// a new node, and hover-out/in around the swap looped
+			// show/hide forever. Pinyin hovers stay color-only.
+			if (kind === "pinyin") return;
 			// First hover is color-only: previews start after that kind's
 			// first click (pin), never a sibling kind's.
 			if (kind === undefined || !aidSeen.has(aidSeenKey(msg.id, kind))) return;
@@ -2652,6 +3117,9 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	 * enter counts as a genuine hover.
 	 */
 	function unpeekAid(msg: ChatMsg): void {
+		// Frozen with peek above: clearing mid-menu would swap the body
+		// back and take the highlight with it.
+		if (selMenu) return;
 		if (aidPeek?.id === msg.id) aidPeek = null;
 		aidNoPeek.delete(msg.id);
 	}
@@ -3063,23 +3531,29 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	 * Latin scripts), so a French highlight gets a French voice even when
 	 * the message around it is English.
 	 */
-	async function speakQuote(quote: string, messageId: ChatMsgId, keepMenu = false): Promise<void> {
+	async function speakQuote(
+		quote: string,
+		messageId: ChatMsgId,
+		keepMenu = false,
+		context: string = quote
+	): Promise<void> {
 		// The highlight stays: hearing the quote shouldn't clear the
 		// selection it came from. Touch auto-read keeps the menu too,
 		// so Annotate stays one tap away after listening.
-		const gateLang = effectiveSpeechLang(ttsLangFor(quote, latinFallback()), webVoices());
-		if (!speechAttemptable(gateLang)) {
+		// Route off the surrounding paragraph, not the bare quote: two
+		// kanji identify nothing on their own (Han reads Chinese by
+		// default), so a kanji-only highlight inside Japanese text
+		// reads Japanese — the quote alone would read Chinese.
+		const sentence = sentenceForQuote(context, quote);
+		const probe = sentence ?? context;
+		const lang = effectiveSpeechLang(await quoteLangForContext(probe, context, latinFallback()), webVoices());
+		if (!speechAttemptable(lang)) {
 			selMenu = null;
 			setVoiceError("No voice for this language.");
 			return;
 		}
 		if (!keepMenu) selMenu = null;
 		speakingSelection = messageId;
-		// Two kanji identify nothing on their own (Han reads Chinese by
-		// default): the quote's sentence picks a Japanese voice when the
-		// highlight sits in one.
-		const context = speechText(chat.messages.find((m) => m.id === messageId)?.content ?? quote);
-		const lang = effectiveSpeechLang(await quoteLangForContext(quote, context, latinFallback()), webVoices());
 		startSpeech("selection", quote, speechLangsFor(lang));
 	}
 
@@ -3242,18 +3716,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			// everything from the edited message on is answered fresh. If
 			// the edited message vanished mid-edit, fall through below and
 			// send the composer text as a fresh message instead.
-			const target = chat.messages.find((m) => m.id === editingMsgId);
-			if (target && target.role === "user") {
-				const index = chat.messages.indexOf(target);
-				saveMessageEdit();
-				// A reply already streaming keeps its run: truncating under
-				// it would orphan the stream, so the resend waits for quiet
-				// (the save itself still lands).
-				if (!chatState.sending) rerunFrom(index);
-				else scrollToBottom();
-				return;
-			}
-			editingMsgId = null;
+			if (commitMessageEdit()) return;
 			editor?.setPlaceholder(promptPlaceholder());
 		}
 		const provider = resolveProvider();
@@ -3363,6 +3826,10 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		// reply streams (same gate the button uses — see canSubmit).
 		if (!canSubmit) return;
 		if (kind === "send" && Date.now() < sendGuardUntil) return;
+		// Always-hide mode: sending yields focus, so the prompt hides
+		// behind the reply (the focusout below does the hiding; this
+		// just drops the caret).
+		if (settings.promptIdleSec === PROMPT_IDLE_ALWAYS) editor?.blur();
 		if (kind === "stage") {
 			// ⌥+Enter: most recent message, no reply; the next submit
 			// carries the full history in order.
@@ -3386,22 +3853,26 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		void resend();
 	}
 
-	/** Composer placeholder while an own message is being edited. */
+	/** In-place editor placeholder for the cleared-message edge. */
 	const EDIT_PLACEHOLDER = "Editing message — Enter saves + resends, Esc cancels";
 
 	/**
-	 * Pencil (or E) on an own message: pull its display text into the
-	 * composer for editing. Enter rewrites the message in place and
-	 * resends it (later messages are replaced by the fresh reply); Esc
-	 * cancels. The baked annotation block is provider context, not
-	 * composer text, so only the prose returns; its refs come back as
-	 * pending annotations so saving re-bakes the same context.
-	 * Attachments ride along too. No-op mid-send.
+	 * Pencil (or E) on an own message: open it for in-place editing
+	 * where it sits (a second press toggles back off). The baked
+	 * annotation block is provider context, not edit text, so only the
+	 * prose seeds the editor; its refs come back as pending annotations
+	 * so saving re-bakes the same context. Attachments ride along on
+	 * their own state — the composer's draft stays untouched. No-op
+	 * mid-send.
 	 */
 	function editMessage(index: number) {
 		if (chatState.sending) return;
 		const msg = chat.messages[index];
 		if (!msg || msg.role !== "user") return;
+		if (editingMsgId === msg.id) {
+			cancelMessageEdit();
+			return;
+		}
 		const refs = annRefsFor(msg.content);
 		annotations = refs
 			? refs.refs.map((r) => ({
@@ -3411,50 +3882,174 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 					comment: r.comment
 				}))
 			: [];
-		attachments = msg.attachments ? [...msg.attachments] : [];
-		editingMsgId = msg.id;
+		editingAttachments = msg.attachments ? [...msg.attachments] : [];
+		// Message content carries no stripped markers on save, so the
+		// seed keeps its marker lines: recount instead of reconciling,
+		// or the message's own image attachments would drop as
+		// "deleted tags".
+		editingSeed = refs ? refs.text : msg.content;
+		editingPrevMarkers = countMarkerLines(editingSeed);
 		reviewOpen = false;
 		editingId = null;
 		highlightAnnId = null;
 		settleAnnPop();
 		annPop = null;
-		// Message content carries no marker lines (send strips them):
-		// recount instead of reconciling, or the just-loaded image
-		// attachments would drop as "deleted tags".
-		markerSyncMuted = true;
-		try {
-			editor?.setText(refs ? refs.text : msg.content);
-			prevMarkerCount = countMarkerLines(editor?.getText() ?? "");
-		} finally {
-			markerSyncMuted = false;
-		}
-		editor?.setPlaceholder(EDIT_PLACEHOLDER);
-		editor?.focus();
-		scrollToBottom();
+		editingMsgId = msg.id;
+		// The edit action focuses on mount; keep the message on screen
+		// without yanking it (the composer-at-bottom jump is gone).
+		requestAnimationFrame(() =>
+			document.getElementById(`msg-${index}`)?.scrollIntoView({ block: "nearest" })
+		);
+	}
+
+	/**
+	 * Inline-edit-only reset: drops the edit (annotations, attachments,
+	 * edit id) while leaving the composer's own draft exactly alone.
+	 */
+	function resetInlineEdit(): void {
+		annotations = [];
+		reviewOpen = false;
+		editingId = null;
+		editDraft = "";
+		editingMsgId = null;
+		editingAttachments = [];
+		highlightAnnId = null;
+		settleAnnPop();
+		annPop = null;
+		annDraft = "";
 	}
 
 	/** Esc during an edit: drop the draft, keep history untouched. */
 	function cancelMessageEdit(): void {
-		editor?.clear();
-		resetDraftExtras();
+		resetInlineEdit();
 	}
 
 	/**
-	 * Enter while editing: rewrite the edited message in place (text plus
-	 * re-baked annotations, attachments, folds). The caller resends from
-	 * it unless a reply is already streaming.
+	 * Rewrite the edited message in place (text plus re-baked
+	 * annotations, attachments, folds). Reads the in-place editor when
+	 * it is mounted, so a send from the composer mid-edit still saves
+	 * the message text rather than the composer draft.
 	 */
 	function saveMessageEdit(): void {
 		const id = editingMsgId;
 		if (id) {
-			const { text, folds } = sendPasteFolds(editor?.getText() ?? "", editor?.getPastes() ?? []);
+			const src = msgEditor ?? editor;
+			const { text, folds } = sendPasteFolds(src?.getText() ?? "", src?.getPastes() ?? []);
 			editMessageContent(chatState, id, withAnnotations(text, annotations), {
-				attachments,
+				attachments: editingAttachments,
 				pasteFolds: folds
 			});
 		}
-		editor?.clear();
-		resetDraftExtras();
+		resetInlineEdit();
+	}
+
+	/**
+	 * Enter in the in-place editor (or send from the composer mid-edit):
+	 * save, then resend from the edited message (later messages are
+	 * replaced by the fresh reply) unless a reply is already streaming.
+	 * Returns false when the edited message vanished — the caller then
+	 * falls through to a fresh send.
+	 */
+	function commitMessageEdit(): boolean {
+		const id = editingMsgId;
+		const target = id ? chat.messages.find((m) => m.id === id) : undefined;
+		if (!target || target.role !== "user") {
+			resetInlineEdit();
+			return false;
+		}
+		const index = chat.messages.indexOf(target);
+		saveMessageEdit();
+		if (!chatState.sending) rerunFrom(index);
+		else scrollToBottom();
+		return true;
+	}
+
+	/** Pasted image while in-place editing: joins the edit's attachments. */
+	function onInlineImagePasted(file: File): void {
+		if (!editingMsgId) return;
+		void fileToAttachment(file)
+			.then((att) => {
+				if (!editingMsgId) return;
+				editingAttachments = [...editingAttachments, att];
+				insertInlineImageMarkers(1);
+			})
+			.catch((error: unknown) => {
+				attachError = error instanceof Error ? error.message : String(error);
+			});
+	}
+
+	/** One `[Pasted image]` tag per fresh image, caret after each tag's space. */
+	function insertInlineImageMarkers(count: number): void {
+		if (!msgEditor || count <= 0) return;
+		editingMarkerMuted = true;
+		try {
+			for (let i = 0; i < count; i++) {
+				msgEditor.insertText(imageMarkerInsert(msgEditor.getText()));
+			}
+			editingPrevMarkers = countMarkerLines(msgEditor.getText());
+		} finally {
+			editingMarkerMuted = false;
+		}
+	}
+
+	/**
+	 * Options for the in-place editor: the composer keymap (Enter sends,
+	 * Alt+Enter stages, Ctrl+G hops out, Shift+Enter stays fence-aware)
+	 * rebound to the edit — Enter commits (save + resend), Alt+Enter
+	 * saves without resending. Markdown highlighting stays on so code
+	 * keeps its colors while editing.
+	 */
+	function inlineOptions(): PromptEditorOptions {
+		return {
+			initialDoc: editingSeed,
+			onSubmit: (kind: SubmitKind) => {
+				if (kind === "send") commitMessageEdit();
+				else saveMessageEdit();
+			},
+			onHopOut: () => {
+				msgEditor?.blur();
+				enterScrollMode();
+			},
+			onImagePaste: onInlineImagePasted,
+			onDocChange: (text) => {
+				// Tag → attachment half of two-way removal, mirrored
+				// from the composer: deleting marker lines by hand drops
+				// the newest image attachments first.
+				if (editingMarkerMuted) return;
+				const now = countMarkerLines(text);
+				if (now < editingPrevMarkers) {
+					let drop = editingPrevMarkers - now;
+					const kept = [...editingAttachments];
+					for (let i = kept.length - 1; i >= 0 && drop > 0; i--) {
+						if (kept[i]?.kind === "image") {
+							kept.splice(i, 1);
+							drop--;
+						}
+					}
+					editingAttachments = kept;
+				}
+				editingPrevMarkers = now;
+			}
+		};
+	}
+
+	/**
+	 * Svelte action mounting the in-place editor inside the message.
+	 * Android gets the plain textarea (same WebView measurement reason
+	 * as the composer); desktop gets CodeMirror with markdown colors.
+	 */
+	function msgEditAction(node: HTMLElement): { destroy(): void } {
+		msgEditor = androidUI
+			? createTextareaEditor(node, inlineOptions())
+			: createPromptEditor(node, inlineOptions());
+		msgEditor.setPlaceholder(EDIT_PLACEHOLDER);
+		msgEditor.focus();
+		return {
+			destroy() {
+				msgEditor?.destroy();
+				msgEditor = null;
+			}
+		};
 	}
 
 	/** Stick-to-bottom: submit/resend/stage pins the view to the newest
@@ -3520,6 +4115,63 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		document.getElementById(`msg-${index}`)?.scrollIntoView({ block: "start", behavior: "smooth" });
 	}
 
+	/**
+	 * Ctrl+G with the prompt unfocused: enter scroll mode with the cursor
+	 * on the current message in view (topmost visible), so j/k/gg/G walk
+	 * from where the user is looking instead of the newest message.
+	 */
+	function scrollToViewCursor(): void {
+		// Detached entry: a later Ctrl+G stays out of the prompt (a
+		// stale prompt-entry must not hop back).
+		scrollFromPrompt = false;
+		enterScrollMode();
+		const messages = chat.messages;
+		if (messages.length === 0) return;
+		const viewport = scrollBox?.getBoundingClientRect();
+		const top = viewport?.top ?? 0;
+		const bottom = viewport?.bottom ?? window.innerHeight;
+		// The message crossing a line a few lines below the viewport
+		// top — a bottom sliver of the message above never wins, and a
+		// taller-than-viewport message still matches by coverage.
+		const line = top + Math.min(160, (bottom - top) * 0.25);
+		for (let i = 0; i < messages.length; i++) {
+			const el = document.getElementById(`msg-${i}`);
+			if (!el) continue;
+			const r = el.getBoundingClientRect();
+			if (r.bottom > line && r.top < bottom) {
+				selectedIdx = i;
+				el.focus({ preventScroll: true });
+				return;
+			}
+		}
+		selectedIdx = messages.length - 1;
+	}
+
+	/**
+	 * Index of the rendered message in the middle of the screen (the
+	 * m/n pick): viewport-center line through the message rects, -1
+	 * with no messages on screen. Missing nodes are skipped, so the
+	 * measured array re-aligns to rendered indexes before picking.
+	 */
+	function centerMessageIndex(): number {
+		const box = scrollBox;
+		if (!box) return -1;
+		const rect = box.getBoundingClientRect();
+		const line = rect.top + rect.height / 2;
+		const items: { index: number; top: number; bottom: number }[] = [];
+		for (let i = 0; i < viewChat.messages.length; i++) {
+			const el = document.getElementById(`msg-${i}`);
+			if (!el) continue;
+			const r = el.getBoundingClientRect();
+			items.push({ index: i, top: r.top, bottom: r.bottom });
+		}
+		const at = indexAtViewportLine(
+			items.map((item) => ({ top: item.top, bottom: item.bottom })),
+			line
+		);
+		return at < 0 ? -1 : (items[at]?.index ?? -1);
+	}
+
 	function enterScrollMode() {
 		focusMode = "scroll";
 		// The prompt goes fully dormant: no caret, a hop-back hint, and
@@ -3535,7 +4187,40 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	function enterEditMode() {
 		focusMode = "edit";
 		editor?.setPlaceholder(promptPlaceholder());
+		// A fresh editing context always shows the prompt: a minted
+		// chat (or any landing here) must never inherit a hidden bar.
+		restorePrompt();
 		editor?.focus();
+		// The visible flip (including its visibility ramp) lands async:
+		// arriving from a hidden or parked composer, the sync focus
+		// above hits a hidden node and no-ops. Retry on frames until
+		// the composer is truly focusable, unless focus has since moved
+		// somewhere meaningful (a message, modal, or field).
+		void tick().then(() => {
+			let frames = 0;
+			const land = (): void => {
+				const active = document.activeElement as HTMLElement | null;
+				if (active && active !== document.body) return;
+				const node = document.querySelector(".prompt .cm-content") as HTMLElement | null;
+				if (node && getComputedStyle(node).visibility !== "hidden") {
+					editor?.focus();
+					return;
+				}
+				if (++frames < 60) requestAnimationFrame(land);
+			};
+			requestAnimationFrame(land);
+		});
+	}
+
+	/**
+	 * Leave scroll mode without touching the prompt: for entries from
+	 * a deactivated prompt, Ctrl+G and Esc step back out to the same
+	 * deactivated state (nothing selected, no focus stolen).
+	 */
+	function exitScrollMode(): void {
+		focusMode = "edit";
+		selectedIdx = -1;
+		if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
 	}
 
 	/**
@@ -3572,7 +4257,8 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	/** Release a held key: quick taps land one discrete step, holds just stop. */
 	function releaseScrollHold(event: KeyboardEvent): void {
 		const hold = scrollHold;
-		if (!hold || event.key !== hold.key) return;
+		// Case-insensitive: a held Shift+D ("D") releases a "d" hold.
+		if (!hold || event.key.toLowerCase() !== hold.key.toLowerCase()) return;
 		cancelAnimationFrame(hold.raf);
 		scrollHold = null;
 		scrollBox?.style.removeProperty("scroll-behavior");
@@ -3622,7 +4308,33 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	 * chrome). Failures fall through silently: there is simply no
 	 * fullscreen to exit.
 	 */
-	async function exitFullscreenFromHold(): Promise<void> {
+	/**
+	 * Fullscreen toggle (Cmd+E, Ctrl+Cmd+F): Tauri window chrome when
+	 * shelled, the web Fullscreen API in a browser. The shell path
+	 * needs core:window:allow-is-fullscreen + allow-set-fullscreen in
+	 * the capability list; when both paths fail, say so instead of
+	 * dying silent (a trimmed capability list once made both chords
+	 * do nothing with zero feedback).
+	 */
+	async function toggleFullscreen(): Promise<void> {
+		try {
+			if (tauriBackendAvailable()) {
+				const win = getCurrentWindow();
+				await win.setFullscreen(!(await win.isFullscreen()));
+				return;
+			}
+		} catch {
+			// Fall through to the web Fullscreen API.
+		}
+		try {
+			if (document.fullscreenElement) await document.exitFullscreen();
+			else await document.documentElement.requestFullscreen();
+		} catch {
+			flashToast("Fullscreen unavailable");
+		}
+	}
+	/** Fullscreen exits: a 2s Escape hold or the Esc+f chord (a tap never exits). */
+	async function exitFullscreen(): Promise<void> {
 		try {
 			if (tauriBackendAvailable()) {
 				const win = getCurrentWindow();
@@ -3765,19 +4477,23 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		void resetVoiceLangFromKeyboard();
 	}
 
-	function chatLabel(createdAt: number, count: number): string {
+	function chatLabel(createdAt: number): string {
 		const date = new Date(createdAt);
 		const today = new Date();
 		const sameDay = date.toDateString() === today.toDateString();
-		const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+		// 2-digit hour keeps the list column aligned (01:30, never 1:30).
+		const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 		const day = sameDay ? "Today" : date.toLocaleDateString([], { month: "short", day: "numeric" });
-		return `${day} ${time} · ${count > 99 ? "99+" : count} msg`;
+		return `${day} ${time}`;
 	}
 
 	function promptOptions(): PromptEditorOptions {
 		return {
 			onSubmit,
-			onHopOut: enterScrollMode,
+			onHopOut: () => {
+				scrollFromPrompt = true;
+				enterScrollMode();
+			},
 			onImagePaste: onImagePasted,
 			onDocChange: (text) => {
 				hasText = text.trim().length > 0;
@@ -3875,7 +4591,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 				} else if (action === "prev-chat") {
 					stepChat(-1);
 				} else if (action === "shortcuts") {
-					shortcutsOpen = true;
+					openShortcuts();
 				} else if (action === "share-sheet") {
 					void shareCurrentChat();
 				} else if (action === "print-sheet") {
@@ -4351,7 +5067,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 				if (!el?.closest(".messages .rendered")) return;
 				const live = window.getSelection()?.toString() ?? "";
 				if (live === "" || live === start.sel) return;
-				placeSelMenu(touch.clientX);
+				placeSelMenu(touch.clientX, touch.clientY);
 				touchMenuAt = Date.now();
 				// Headphones in: the fresh selection reads itself aloud
 				// on release (when a voice fits). The menu stays up, so
@@ -4359,7 +5075,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 				// Phones never do this: every selection would talk.
 				if (!androidUI && settings.autoSpeakSelection) {
 					const fresh = currentQuote();
-					if (fresh) void speakQuote(fresh.quote, fresh.messageId, true);
+					if (fresh) void speakQuote(fresh.quote, fresh.messageId, true, fresh.context);
 				}
 			},
 			{ passive: true }
@@ -4374,7 +5090,36 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			if (!selMenu) return;
 			if (Date.now() - menuPressAt < 1000) return;
 			const live = window.getSelection();
-			if (!live || live.isCollapsed || live.toString() === "") selMenu = null;
+			if (!live || live.isCollapsed || live.toString() === "") {
+				// A body swap under the highlight (stream chunk, aid
+				// rebuild, late enhancement) detaches the anchor node:
+				// the stored quote still stands, so the menu stands with
+				// it and Annotate keeps working...
+				const anchor = live?.anchorNode;
+				if (anchor && !document.contains(anchor)) return;
+				// ...or collapses it onto the attached container (WebKit
+				// fires selectionchange for this; Chromium stays silent):
+				// when the collapse is newer than the last press it is
+				// the swap's, so the menu stands on its stored quote. A
+				// real clear always arrives on a press and still dismisses.
+				if (lastBodySwapAt > lastPressAt) return;
+				// WebKit also empties the document selection when the
+				// pointer moves onto the floating menu itself — no DOM
+				// change, no press, nothing to stamp (Chromium keeps
+				// it). While the pointer is over the menu the collapse
+				// is the engine's, so the menu stands on its stored
+				// quote and Annotate keeps working. The message must
+				// still be there: a Delete/cut with the pointer parked
+				// over the menu really does clear, and must dismiss.
+				const menuMessageId = selMenu?.messageId;
+				if (
+					selMenuHover &&
+					menuMessageId !== undefined &&
+					chat.messages.some((m) => m.id === menuMessageId)
+				)
+					return;
+				selMenu = null;
+			}
 		});
 		// Two-finger horizontal swipe steps chats (right = newer, left =
 		// older, no focus: the keyboard stays down); a two-finger double
@@ -4521,7 +5266,11 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		editor.setPlaceholder(promptPlaceholder());
 		// Desktop lands in the prompt on launch; phones don't — popping
 		// the keyboard on every cold start is the mobile annoyance.
-		if (!androidUI) {
+		// Always-hide mode never takes focus on its own: the prompt is
+		// visible exactly while the composer holds focus, so a mount
+		// steal would restore it straight back (and fight every
+		// remount, including hot reloads).
+		if (!androidUI && settings.promptIdleSec !== PROMPT_IDLE_ALWAYS) {
 			editor.focus();
 			// Mount-time focus can lose to hydration churn; retry on next
 			// frame so a fresh window and a new chat both land in the prompt.
@@ -4555,6 +5304,69 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 					event.preventDefault();
 					return;
 				}
+			}
+			// H/L step the Inspect stroke preview while it is open
+			// (never leaves the menu): bare keys only, never from a
+			// field, and never with modifiers.
+			if (
+				inspectChar !== null &&
+				(event.key === "h" || event.key === "l") &&
+				!event.metaKey &&
+				!event.ctrlKey &&
+				!event.altKey &&
+				!(event.target as HTMLElement | null)?.closest(
+					"input, textarea, select, [contenteditable], .shortcuts-filter"
+				)
+			) {
+				event.preventDefault();
+				event.stopPropagation();
+				stepInspect(event.key === "l" ? 1 : -1);
+				return;
+			}
+			// The shortcuts filter types freely: bare keys never reach
+			// the global bindings — only Esc (close) and ⌘F (focus)
+			// keep theirs, both handled below. Modified chords pass
+			// through like any other input.
+			if (
+				(event.target as HTMLElement | null)?.closest(".shortcuts-filter") &&
+				event.key !== "Escape" &&
+				event.code !== "KeyF" &&
+				!event.metaKey &&
+				!event.ctrlKey &&
+				!event.altKey
+			) {
+				return;
+			}
+			// Bare Space on an empty composer dismisses: no message
+			// starts with a space, so it is never content — blur (and
+			// always-hide hides on blur). Repeats are swallowed while
+			// focused; the restore path above already ignores repeats,
+			// so a held Space can't bounce the prompt back open. Own-
+			// message edits and attachment drafts are exempt: clearing
+			// real work must stay explicit (Escape).
+			if (
+				event.key === " " &&
+				!event.repeat &&
+				!event.isComposing &&
+				!event.metaKey &&
+				!event.ctrlKey &&
+				!event.altKey &&
+				editingMsgId === null &&
+				attachments.length === 0 &&
+				composerText() === "" &&
+				(event.target as HTMLElement | null)?.closest(".prompt .cm-content, .prompt .ta-input")
+			) {
+				event.preventDefault();
+				editor?.blur();
+				return;
+			}
+			if (
+				event.key === " " &&
+				event.repeat &&
+				(event.target as HTMLElement | null)?.closest(".prompt .cm-content, .prompt .ta-input")
+			) {
+				event.preventDefault();
+				return;
 			}
 			// Fullscreen-hold tracking rides above every Escape path:
 			// the keydown dismiss behavior below is untouched (a tap
@@ -4631,19 +5443,40 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 				return;
 			}
 				if (
+					!event.altKey &&
+					!event.shiftKey &&
+					((event.metaKey && !event.ctrlKey && event.code === "KeyE") ||
+						(event.metaKey && event.ctrlKey && event.code === "KeyF"))
+				) {
+					// Fullscreen toggle: Cmd+E and Ctrl+Cmd+F. Claimed
+					// before find below, so the dual-modifier chord never
+					// reads as Cmd/Ctrl+F.
+					event.preventDefault();
+					event.stopPropagation();
+					void toggleFullscreen();
+					return;
+				}
+				if (
 					(event.metaKey || event.ctrlKey) &&
 					!event.altKey &&
 					!event.shiftKey &&
 					event.code === "KeyF"
 				) {
 					// In-chat find across the visible messages, cycling hits.
+					// The fullscreen chords are claimed above, so
+					// Ctrl+Cmd+F never lands here.
 					event.preventDefault();
 					event.stopPropagation();
-					if (!findOpen) openFind();
-					else {
-						findInputEl?.focus();
-						findInputEl?.select();
+					if (shortcutsOpen) {
+						// The modal owns ⌘F while open: it filters this
+						// list only, never the chat.
+						shortcutInputEl?.focus();
+						shortcutInputEl?.select();
+						return;
 					}
+					// Repeat ⌘F closes the bar it opened.
+					if (findOpen) closeFind();
+					else openFind();
 					return;
 				}
 			if (isSummonHotkey(event) && !inEditor) {
@@ -4680,6 +5513,11 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 				return;
 			}
 		if (event.key === "Escape" && !inEditor) {
+				// Consumed: a bare Esc must never reach the OS/browser
+				// default that exits native fullscreen — Esc+f is the
+				// only way out. No text harm outside fields.
+				event.preventDefault();
+				event.stopPropagation();
 				selMenu = null;
 				inspectChar = null;
 				translate = null;
@@ -4687,21 +5525,23 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 				settingsOpen = false;
 				shortcutsOpen = false;
 				stopVoice();
+				// Scroll mode entered from a deactivated prompt steps
+				// back out on Esc (prompt-entry Esc keeps scroll mode).
+				if (focusMode === "scroll" && !scrollFromPrompt) exitScrollMode();
 				return;
 			}
 			if (event.ctrlKey && (event.key === "o" || event.key === "O")) {
-				// Pasted-text tags first: with the prompt focused and tags
+				// Pasted-text tags: with the prompt focused and tags
 				// present, Ctrl+O expands/collapses them all (Muse Code
-				// style). Otherwise the thoughts toggle keeps the shortcut.
+				// style). Anywhere else the chord does nothing — still
+				// swallowed so the browser won't open a file.
 				if (inEditor && editor?.togglePastes()) {
 					event.preventDefault();
 					event.stopPropagation();
 					return;
 				}
-				// Thoughts toggle works from anywhere, even inside the prompt.
 				event.preventDefault();
 				event.stopPropagation();
-				toggleThoughts();
 				return;
 			}
 			if (
@@ -4755,15 +5595,17 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			}
 			if (
 				(event.metaKey || event.ctrlKey) &&
-				event.shiftKey &&
+				!event.shiftKey &&
 				!event.altKey &&
-				(event.key === "Backspace" || event.key === "Delete")
+				(event.key === "Backspace" || event.key === "Delete") &&
+				!inEditor &&
+				!(event.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable]")
 			) {
-				// ⌘⇧Delete drops the whole current chat (a blank one takes
+				// ⌘Delete drops the whole current chat (a blank one takes
 				// its place, so the composer never strands) and resets the
 				// voice language to the checked keyboard. Mac Delete-key
-				// reports Backspace; forward-delete reports Delete. Plain
-				// ⌘Delete stays untouched for line-kill habits.
+				// reports Backspace; forward-delete reports Delete. Typing
+				// targets keep the chord for line-kill habits.
 				event.preventDefault();
 				event.stopPropagation();
 				dropChat(chat.id);
@@ -4773,10 +5615,12 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			if (
 				(event.metaKey || event.ctrlKey) &&
 				event.shiftKey &&
-				event.altKey &&
-				(event.key === "Backspace" || event.key === "Delete")
+				!event.altKey &&
+				(event.key === "Backspace" || event.key === "Delete") &&
+				!inEditor &&
+				!(event.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable]")
 			) {
-				// ⌥⌘⇧Delete drops EVERY chat (a blank one takes their
+				// ⌘⇧Delete drops EVERY chat (a blank one takes their
 				// place, so the composer never strands) and resets the
 				// voice language to the checked keyboard.
 				event.preventDefault();
@@ -4833,7 +5677,8 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 					// ⇧⌘/ (the "?" chord) toggles the shortcuts modal.
 					event.preventDefault();
 					event.stopPropagation();
-					shortcutsOpen = !shortcutsOpen;
+					if (shortcutsOpen) shortcutsOpen = false;
+					else openShortcuts();
 					return;
 				}
 				if (event.code === "KeyJ" || event.code === "KeyK") {
@@ -4923,7 +5768,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 				) {
 					// ⌘D deletes the hovered message. Ctrl+D is deliberately
 					// excluded: the prompt keeps it for editing and scroll
-					// mode uses it to skip down.
+					// mode fast-scrolls on it instead.
 					const target = chat.messages[hoveredIdx];
 					if (target) {
 						event.preventDefault();
@@ -4932,6 +5777,82 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 						return;
 					}
 				}
+			}
+			if (
+				event.key === "a" &&
+				!inEditor &&
+				hoveredIdx >= 0 &&
+				!event.metaKey &&
+				!event.ctrlKey &&
+				!event.altKey &&
+				!event.shiftKey &&
+				!(event.target as HTMLElement | null)?.closest("input, textarea, select")
+			) {
+				// A toggles every aid the hovered message offers — pinyin
+				// over Chinese lines, furigana over Japanese ones (dual
+				// rendering applies each to its own lines, so a mixed
+				// message reads end to end instead of favoring Japanese).
+				// Same offers the buttons show: refs-stripped display
+				// text over the rendered list, never raw stored content.
+				const target = viewChat.messages[hoveredIdx];
+				const kinds = target ? offeredLocalAids(aidDisplayText(target)) : [];
+				if (target && kinds.length > 0) {
+					event.preventDefault();
+					event.stopPropagation();
+					const pinned = pinnedKinds(target.id);
+					if (kinds.every((kind) => pinned.includes(kind))) {
+						for (const kind of kinds) unpinLocalAid(target, kind);
+					} else {
+						for (const kind of kinds) {
+							if (!pinned.includes(kind)) pinLocalAid(target, kind);
+						}
+					}
+					return;
+				}
+			}
+			if (
+				(event.key === "m" || event.key === "n") &&
+				!inEditor &&
+				!event.metaKey &&
+				!event.ctrlKey &&
+				!event.altKey &&
+				!event.shiftKey &&
+				!(event.target as HTMLElement | null)?.closest("input, textarea, select")
+			) {
+				// M pins pinyin, N pins furigana on the message in the
+				// middle of the screen (toggle — a second press lifts it).
+				// Kinds the center message doesn't offer stay off, exactly
+				// like A on an unoffered hover.
+				const idx = centerMessageIndex();
+				const target = idx >= 0 ? viewChat.messages[idx] : undefined;
+				const want: LocalAid = event.key === "m" ? "pinyin" : "furigana";
+				const kinds = target ? offeredLocalAids(aidDisplayText(target)) : [];
+				if (target && kinds.includes(want)) {
+					event.preventDefault();
+					event.stopPropagation();
+					if (pinnedKinds(target.id).includes(want)) unpinLocalAid(target, want);
+					else pinLocalAid(target, want);
+					return;
+				}
+			}
+			if (
+				(event.key === "f" || event.key === "F") &&
+				!event.metaKey &&
+				!event.ctrlKey &&
+				!event.altKey &&
+				!event.shiftKey &&
+				escDownAt !== 0 &&
+				!(event.target as HTMLElement | null)?.closest(
+					"input, textarea, select, [contenteditable], .shortcuts-filter"
+				)
+			) {
+				// Esc+f exits fullscreen — the only way out. Escape
+				// alone never exits (it keeps its dismiss job).
+				event.preventDefault();
+				event.stopPropagation();
+				escDownAt = 0;
+				void exitFullscreen();
+				return;
 			}
 			if (
 				(event.key === "f" || event.key === "F") &&
@@ -4979,27 +5900,29 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			!event.ctrlKey &&
 			!event.altKey &&
 			!event.shiftKey &&
-			!(event.target as HTMLElement | null)?.closest("input, textarea, select")
+			!(event.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable]")
 		) {
-				// X cuts the hovered message (copies, then deletes): the
-				// Delete key below deletes without touching the clipboard.
+				// X cuts the hovered message (copies, then deletes): Shift+D
+				// below deletes without touching the clipboard.
+				// An in-place code edit owns its keystrokes — X types x.
 				event.preventDefault();
 				cutHoverMessage(hoveredIdx);
 				return;
 		}
 		if (
-			(event.key === "Delete" || event.key === "Backspace") &&
+			event.code === "KeyD" &&
+			event.shiftKey &&
 			!inEditor &&
 			hoveredIdx >= 0 &&
 			!event.metaKey &&
 			!event.ctrlKey &&
 			!event.altKey &&
-			!event.shiftKey &&
-			!(event.target as HTMLElement | null)?.closest("input, textarea, select, button, a")
+			!(event.target as HTMLElement | null)?.closest("input, textarea, select, button, a, [contenteditable]")
 		) {
-			// Bare Delete drops the hovered message and copies nothing
-			// (X is the cut key). Buttons and links keep their own
-			// keys — space and enter still activate a focused control.
+			// Shift+D drops the hovered message and copies nothing
+			// (X is the cut key). Bare Delete never deletes — too easy
+			// to hit while reading. Physical code, so any layout's D
+			// works. Buttons and links keep their own keys.
 			event.preventDefault();
 			deleteMessage(chatState, hoveredIdx);
 			return;
@@ -5061,24 +5984,62 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 					return;
 				}
 			}
+			// Bare Space never changes modes: it belongs to typing and
+			// buttons, scrolls natively everywhere else, and summons
+			// the hidden prompt through the key path above — scroll
+			// mode is entered with Ctrl+G only.
 			if (
-				event.key === " " &&
+				event.ctrlKey &&
+				!event.metaKey &&
+				!event.altKey &&
+				(event.key === "g" || event.key === "G") &&
+				focusMode !== "scroll" &&
+				!inEditor &&
+				!androidUI &&
+				!shortcutsOpen &&
+				!searchOpen &&
+				!inspectChar &&
+				!(event.target as HTMLElement | null)?.closest(
+					"input, textarea, select, [contenteditable], button, a, aside, .modal, .modal-veil, .find-bar, .search-palette, .sel-menu, .review, .translate-panel"
+				)
+			) {
+				// Ctrl+G outside the composer enters scroll mode at the
+				// current message in view (scroll → edit stays on the
+				// branch below, like I).
+				event.preventDefault();
+				scrollToViewCursor();
+				return;
+			}
+			if (
+				shortcutsOpen &&
+				!searchOpen &&
+				inspectChar === null &&
+				!inEditor &&
+				!androidUI &&
 				!event.metaKey &&
 				!event.ctrlKey &&
 				!event.altKey &&
 				!event.shiftKey &&
-				settings.sidebarCollapsed &&
-				!(event.target as HTMLElement | null)?.closest(
-					"button, a, input, textarea, select, summary, .cm-content, [contenteditable]"
-				)
+				(event.key === "j" || event.key === "k" || event.key === "u" || event.key === "d") &&
+				!(event.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable]")
 			) {
-				// Space mirrors Ctrl+G while the sidebar is out of the way —
-				// but never from inside a control, where space belongs to
-				// typing and buttons.
-				event.preventDefault();
-				if (focusMode === "scroll") enterEditMode();
-				else enterScrollMode();
-				return;
+				// The shortcuts modal scrolls under j/k/u/d like the main
+				// chat, contained: the palette and Inspect keep their own
+				// keys, fields keep typing, and the main column never moves.
+				const modalBox = document.querySelector(".modal-veil .modal") as HTMLElement | null;
+				if (modalBox) {
+					const dy =
+						event.key === "j"
+							? SCROLLKEY_LINE_PX
+							: event.key === "k"
+								? -SCROLLKEY_LINE_PX
+								: Math.max(1, Math.floor(modalBox.clientHeight / 2)) *
+									(event.key === "d" ? 1 : -1);
+					event.preventDefault();
+					event.stopPropagation();
+					modalBox.scrollBy({ top: dy, behavior: "smooth" });
+					return;
+				}
 			}
 			if (focusMode !== "scroll" && !inEditor && !androidUI) {
 				// Desktop scrolling with nothing selected: no message
@@ -5124,10 +6085,12 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			if (event.key === "j" || event.key === "ArrowDown") {
 				event.preventDefault();
 				lastGAt = 0;
-				// Past the newest message drops back into the prompt:
-				// scroll mode is for visiting history, not parking.
-				if (selectedIdx >= chat.messages.length - 1) enterEditMode();
-				else jumpTo(selectedIdx + 1);
+				// Past the newest message never leaves scroll mode: land
+				// the bottom in view (a no-op when already there) and stay
+				// parked on the last message.
+				if (selectedIdx >= chat.messages.length - 1) {
+					if (scrollBox && !nearBottom(scrollBox)) scrollChatBottom();
+				} else jumpTo(selectedIdx + 1);
 			} else if (event.key === "k" || event.key === "ArrowUp") {
 				event.preventDefault();
 				lastGAt = 0;
@@ -5145,33 +6108,37 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 				lastGAt = 0;
 				jumpTo(chat.messages.length - 1);
 			} else if (
-				event.ctrlKey &&
 				!event.metaKey &&
 				!event.altKey &&
-				(event.key === "u" || event.key === "U")
+				(event.key === "u" || event.key === "U" || event.key === "d" || event.key === "D")
 			) {
+				// U/D fast-scroll a half page and never move the cursor:
+				// message jumps stole the scroll position out from under
+				// the selected message. Ctrl may or may not ride along
+				// (vim muscle memory); Shift+D keeps its delete job above.
+				// Held keys glide via the rAF loop — per-repeat smooth
+				// steps cancel-restart into a stutter instead (taps land
+				// one discrete half-page on release, same distance).
 				event.preventDefault();
 				lastGAt = 0;
-				jumpTo(Math.max(selectedIdx - 4, 0));
-			} else if (
-				event.ctrlKey &&
-				!event.metaKey &&
-				!event.altKey &&
-				(event.key === "d" || event.key === "D")
-			) {
-				event.preventDefault();
-				lastGAt = 0;
-				jumpTo(Math.min(selectedIdx + 4, chat.messages.length - 1));
-			} else if (
-				event.key === "i" ||
-				event.key === "Enter" ||
-				(event.ctrlKey && (event.key === "g" || event.key === "G"))
-			) {
-				// Ctrl+G hops both ways (the editor keymap handles edit →
-				// scroll; this covers scroll → edit, like I).
+				if (scrollBox && !event.repeat) {
+					const lower = event.key.toLowerCase();
+					startScrollHold(lower, (lower === "u" ? -1 : 1) * SCROLLKEY_DU_VELOCITY_PX_S);
+				}
+			} else if (event.key === "i" || event.key === "Enter") {
 				event.preventDefault();
 				lastGAt = 0;
 				enterEditMode();
+			} else if (event.ctrlKey && (event.key === "g" || event.key === "G")) {
+				// Ctrl+G returns to a focused, type-ready composer only
+				// when scroll mode started there (the editor keymap
+				// handles edit → scroll). Entering from a deactivated
+				// prompt steps back out instead. Either way swallow the
+				// chord: the browser would open find-next.
+				event.preventDefault();
+				lastGAt = 0;
+				if (scrollFromPrompt) enterEditMode();
+				else exitScrollMode();
 			}
 		};
 		const onFocusIn = (event: FocusEvent) => {
@@ -5235,7 +6202,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			if (!clickGuardsPass(event)) return;
 			const live = window.getSelection();
 			if (live) lockSelectionToMessage(live, articleOf);
-			placeSelMenu(event.clientX);
+			placeSelMenu(event.clientX, event.clientY);
 			if (androidUI) scrollActionsIntoView(event);
 		};
 		/**
@@ -5442,7 +6409,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			// appears.
 			if (androidUI && target?.closest(".messages .rendered")) {
 				if (currentQuote()) {
-					placeSelMenu(event.clientX);
+					placeSelMenu(event.clientX, event.clientY);
 					touchMenuAt = Date.now();
 				}
 				return;
@@ -5457,18 +6424,21 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			// the copy and Run icons stay silent via the control check.
 			const codeBlock = target?.closest(".ccez-code");
 			if (codeBlock && body.contains(codeBlock) && !target?.closest("[data-code-copy], [data-code-run]")) {
-				const el = codeBlock as HTMLElement;
-				if (el.dataset.folded === "1") el.removeAttribute("data-folded");
-				else el.dataset.folded = "1";
+				// Right-click folds only — never unfolds (a left click on
+				// the folded label opens it back up).
+				(codeBlock as HTMLElement).dataset.folded = "1";
 				return;
 			}
-			// Display math toggles the same way. Inline math has no
+			// Display math folds the same way. Inline math has no
 			// body chrome, so it falls through to speech below.
 			const mathWrap = target?.closest("[data-math-index]");
-			if (mathWrap && body.contains(mathWrap) && mathWrap.classList.contains("ccez-math")) {
-				const el = mathWrap as HTMLElement;
-				if (el.dataset.folded === "1") el.removeAttribute("data-folded");
-				else el.dataset.folded = "1";
+			if (
+				mathWrap &&
+				body.contains(mathWrap) &&
+				mathWrap.classList.contains("ccez-math") &&
+				!target?.closest(".ccez-math-copy, .ccez-math-tex")
+			) {
+				(mathWrap as HTMLElement).dataset.folded = "1";
 				return;
 			}
 			// Controls and links inside messages stay silent.
@@ -5488,7 +6458,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			const quoted = currentQuote();
 			if (quoted) {
 				if (stopIfPlaying(quoted.messageId)) return;
-				void speakQuote(quoted.quote, quoted.messageId);
+				void speakQuote(quoted.quote, quoted.messageId, false, quoted.context);
 				return;
 			}
 			// No selection: a word under the cursor reads just that word
@@ -5501,7 +6471,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			if (stopIfPlaying(msg.id)) return;
 			const word = wordUnderCursor(event, body);
 			if (word) {
-				void speakQuote(word, msg.id);
+				void speakQuote(word, msg.id, false, speechText(msg.content));
 				return;
 			}
 			void speakReply(msg);
@@ -5517,12 +6487,11 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		 */
 		const onEscapeUp = (event: KeyboardEvent) => {
 			if (event.key !== "Escape") return;
-			const held = isEscapeHold(escDownAt, Date.now());
+			// A 2s hold exits fullscreen (tap never does — keydown above
+			// already dismissed exactly as today). Device-only path, like
+			// the Esc+f chord: no window chrome here, no observable effect.
+			if (isEscapeHold(escDownAt, Date.now())) void exitFullscreen();
 			escDownAt = 0;
-			if (held) {
-				event.preventDefault();
-				void exitFullscreenFromHold();
-			}
 		};
 		const onBlur = () => {
 			altHeld = false;
@@ -5548,10 +6517,12 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 				return;
 			}
 			if (annPop && annPopBox) annPopBox.focus({ preventScroll: true });
-			else {
+			else if (settings.promptIdleSec !== PROMPT_IDLE_ALWAYS) {
 				// Remeasure first: occlusion or a DPR change while away
 				// leaves CodeMirror's cached line boxes stale, and the
 				// first keystroke would snap the prompt to a new height.
+				// Always-hide mode skips the focus steal: returning to the
+				// window must not summon a hidden prompt.
 				editor?.remeasure();
 				editor?.focus();
 			}
@@ -5698,7 +6669,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	data-shell={tauriBackendAvailable() ? "tauri" : "browser"}
 	data-android={androidUI || null}
 	data-ios={iosUI || null}
-	style="--font-scale: {androidUI ? Math.min(4, settings.fontScale) : settings.fontScale}; --chat-width: {androidUI ? 46 : (settings.chatWidth ?? 36)}"
+	style="--font-scale: {androidUI ? Math.min(4, settings.fontScale) : settings.fontScale}; --chat-width: {androidUI ? 46 : (settings.chatWidth ?? 36)}; --bg-alpha: {settings.bgOpacity ?? 1}"
 	data-mac={isMac && !androidUI || null}
 >
 	<aside class:collapsed={settings.sidebarCollapsed} inert={settings.sidebarCollapsed} data-fade-scroll
@@ -5760,7 +6731,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 							enterEditMode();
 						}}
 					>
-						{chatLabel(item.createdAt, visibleMessageCount(chatState, item))}
+						{chatLabel(item.createdAt)}
 					</button>
 					<button
 						type="button"
@@ -5817,6 +6788,11 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		active reply language shows on the send button instead).
 		Double-click zooms. -->
 		<header role="toolbar" aria-label="App" tabindex="-1" onmousedown={dragWindow} ondblclick={zoomWindow}>
+			<!-- Traffic-light veil: the native Overlay buttons paint
+			above the webview, so this bg-colored patch hides them at
+			rest and fades on header hover (see CSS). Clicks always
+			pass through; the buttons stay live underneath. -->
+			<span class="traffic-veil" aria-hidden="true"></span>
 			<!-- Browser side panel: Cmd+T docks a single-tab browser
 			right in the same window. Shortcut-only on purpose (no
 			toggle button): the combo opens from anywhere, including
@@ -5860,7 +6836,11 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 					onkeydown={(e) => {
 						if (e.key === "Enter") {
 							e.preventDefault();
-							stepFind(e.shiftKey ? -1 : 1);
+							// One hit is "done": close (the cursor dies
+							// with the bar). Several keep cycling; none
+							// keeps the bar.
+							if (currentFindHits().length === 1) closeFind();
+							else stepFind(e.shiftKey ? -1 : 1);
 						}
 					}}
 					placeholder="Find in chat"
@@ -6075,6 +7055,23 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 							</div>
 						</div>
 					{/if}
+					{#if editingMsgId === msg.id && msg.role === "user"}
+						<!-- In-place own-message edit: the editor mounts
+						where the text sat, colors intact; the actions row
+						below stays live (pencil toggles back off). -->
+						<div class="msg-edit">
+							<div class="msg-edit-box" use:msgEditAction></div>
+							<div class="msg-edit-bar">
+								<span class="msg-edit-hint">Enter saves + resends · Alt+Enter saves · Esc cancels</span>
+								<button type="button" class="msg-edit-btn" onclick={() => commitMessageEdit()}>
+									Save + resend
+								</button>
+								<button type="button" class="msg-edit-btn" onclick={() => cancelMessageEdit()}>
+									Cancel
+								</button>
+							</div>
+						</div>
+					{:else}
 					<div class:bubble={msg.role === "user"}>
 						<MessageBody
 							message={msg}
@@ -6088,6 +7085,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 							onBadgeClick={openBadgeClick}
 							onToast={flashToast}
 							onFoldToggle={(index: number) => togglePasteFold(msg, index)}
+						onUnfold={() => toggleFold(msg.id)}
 							textOverride={aidedTextFor(msg)}
 							contentOverride={sentRefs ? (refsOnly && !isFolded ? REFS_ONLY_BODY : sentRefs.text) : null}
 							aidPreview={aidPeek?.id === msg.id && !aidPin.has(msg.id)}
@@ -6097,6 +7095,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 							onAidError={(_id: ChatMsgId, reason?: string) => aidFailed(msg.id, reason)}
 						/>
 					</div>
+					{/if}
 					{#if !(streamingThis && msg.content.trim() === "") && !previewing}
 					<div
 						class="actions"
@@ -6249,7 +7248,15 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 						{/if}
 						{#if msg.error}
 							<span class="error">{msg.error}</span>
-							<button type="button" onclick={retryFailed}>Retry</button>
+							<button
+								type="button"
+								class="icon-btn"
+								data-tip="Retry"
+								aria-label="Retry"
+								onclick={retryFailed}
+							>
+								<ActionIcon kind="rerun" />
+							</button>
 						{/if}
 						<!-- Last in the row, always mounted (hidden when idle)
 						so it never shoves the buttons around. -->
@@ -6385,7 +7392,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			class:has-anns={annotations.length > 0}
 			class:has-mic={canMic && settings.micEnabled}
 			class:prompt-hidden={!!annPop && androidUI && !iosUI}
-			class:prompt-idle={promptIdle}
+			class:prompt-idle={promptParked()}
 			data-empty={!hasText}
 			bind:this={promptEl}
 			onclick={focusPromptFloor}
@@ -6694,9 +7701,15 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 										role="menuitem"
 										class:selected={activeReplyCode === lang.code}
 										title={quickKey ? `${lang.name} (${quickKey})` : lang.name}
-										onclick={() =>
-										activeReplyCode === lang.code && !quickKey ? clearReplyLang() : setReplyLang(lang.code)
-									}
+										onclick={() => {
+										if (activeReplyCode === lang.code && !quickKey) clearReplyLang();
+										else setReplyLang(lang.code);
+										// Picking a language hands focus to the composer:
+										// typing starts there next, and focus never
+										// lingers on the unmounted option (which left
+										// a stuck pointer behind).
+										editor?.focus();
+									}}
 									>
 										<span class="badge" aria-hidden="true">{lang.badge}</span>
 										{lang.name}
@@ -6770,7 +7783,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			transition:fade={{ duration: 150 }}
 			onmousedown={noteMenuPress}
 			ontouchstart={noteMenuPress}
-			onmouseenter={() => (selMenuHover = true)}
+			onmouseenter={enterSelMenu}
 			onmouseleave={() => (selMenuHover = false)}
 		>
 			<!-- Desktop only: Annotate floats above the highlight while
@@ -6782,6 +7795,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			everything else gets Annotate alone. -->
 			<button
 				type="button"
+				onmousedown={noteMenuPress}
 				onclick={annotate}
 				ontouchstart={noteMenuBtnTouch}
 				ontouchend={annotateTouch}
@@ -6888,12 +7902,22 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		</div>
 	{/if}
 
+	<!-- svelte-ignore a11y_no_static_element_interactions: double-click
+	on open space closes the panel; keyboard users keep Meta+,. -->
 	<aside
 		class="settings-panel"
 		class:closed={!settingsOpen}
 		data-fade-scroll
 		aria-label="Settings"
 		inert={!settingsOpen}
+		ondblclick={(e) => {
+			// Open space only: the tap must land on the panel's own
+			// padding (the aside, inner wrapper, or a section/fieldset
+			// box itself). Text, controls, and anything inside them
+			// keep their behavior — including double-click text picks.
+			const t = e.target instanceof Element ? e.target : null;
+			if (t?.closest("aside, .settings-inner, section, fieldset") === t) settingsOpen = false;
+		}}
 	>
 		<!-- Fixed-width inner: the panel clips instead of reflowing text mid-collapse. -->
 		<div class="settings-inner">
@@ -6904,7 +7928,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			settingsOpen = false;
 			pulseCursor();
 		}}
-			onShortcuts={() => (shortcutsOpen = true)}
+			onShortcuts={openShortcuts}
 			onExpand={zoomWindow}
 			tokensLabel="{formatTokens(split.prompt)} in / {formatTokens(split.completion)} out"
 			tokensTitle="{total} tokens total this chat"
@@ -6925,6 +7949,16 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			<div class="modal" role="dialog" aria-modal="true" aria-labelledby="shortcuts-heading" data-fade-scroll>
 				<div class="modal-head">
 					<h2 id="shortcuts-heading">{androidUI ? "Touch gestures" : "Keyboard shortcuts"}</h2>
+					<input
+						type="search"
+						class="shortcuts-filter"
+						bind:this={shortcutInputEl}
+						bind:value={shortcutQuery}
+						placeholder={isMac ? "Filter (⌘F)" : "Filter (Ctrl+F)"}
+						aria-label={androidUI ? "Filter gestures" : "Filter shortcuts"}
+						autocomplete="off"
+						spellcheck={false}
+					/>
 					<button
 						type="button"
 						aria-label="Close shortcuts"
@@ -6938,49 +7972,19 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 					<!-- Android milestone: key chords don't exist on a phone,
 					so the same modal teaches the touch equivalents. -->
 					<dl class="keys">
-						<div><dt>Chats list</dt><dd>Swipe right from the left edge or two-finger double-tap</dd></div>
-					<div><dt>Newer / older chat</dt><dd>Two-finger swipe right / left</dd></div>
-					<div><dt>Delete current chat</dt><dd>Double three-finger tap</dd></div>
-						<div><dt>Annotate</dt><dd>Select text and tap Annotate in the prompt</dd></div>
-						<div><dt>Message buttons</dt><dd>Tap a message</dd></div>
-						<div><dt>Fold a message</dt><dd>Swipe right on it</dd></div>
+						{#each filteredShortcuts(touchShortcuts()) as row (row.name)}
+							<div><dt>{row.name}</dt><dd>{row.keys}</dd></div>
+						{:else}
+							<div class="keys-empty">No matches</div>
+						{/each}
 					</dl>
 				{:else}
 				<dl class="keys">
-					<div><dt>Shortcuts show/hide</dt><dd>{isMac ? "⇧⌘/" : "Ctrl+Shift+/"} · middle-click</dd></div>
-					<div><dt>New line</dt><dd>Shift+Enter</dd></div>
-					<div><dt>Send message</dt><dd>Enter in the prompt · {isMac ? "⌘Enter" : "Ctrl+Enter"} anywhere</dd></div>
-					<div><dt>Stage message</dt><dd>{altm}+Enter</dd></div>
-					<div><dt>Focus composer</dt><dd>{isMac ? "⇧⌘Space" : "Ctrl+Shift+Space"} from anywhere outside the prompt</dd></div>
-					<div><dt>Switch model / key</dt><dd>Ctrl+{altm}+← / →</dd></div>
-					<div><dt>Thinking level</dt><dd>Ctrl+{altm}+↓ / ↑ cycle levels</dd></div>
-					<div><dt>Scroll messages</dt><dd>J / K · gg top · G bottom · Ctrl+U / Ctrl+D skip</dd></div>
-					<div><dt>Scroll chat (nothing selected)</dt><dd>J / K glide on hold · D / U fast · gg top · G bottom · z / Z hovered top / bottom</dd></div>
-					<div><dt>Exit fullscreen</dt><dd>Hold Esc 2s · a tap still closes menus</dd></div>
-					<div><dt>Chat list</dt><dd>{isMac ? "⌘B or ⇧⌘H" : "Ctrl+B or Ctrl+Shift+H"} · opens on the current chat · J / K walk · Space enters</dd></div>
-					<div><dt>Export chat</dt><dd>Chats-list row icon, left of ×</dd></div>
-					<div><dt>Search chats</dt><dd>{isMac ? "⌘P" : "Ctrl+P"} · J / K move · Esc to list · Enter jumps</dd></div>
-					<div><dt>Find in chat</dt><dd>{isMac ? "⌘F" : "Ctrl+F"} · Enter cycles hits</dd></div>
-					<div><dt>Newer / older chat</dt><dd>{isMac ? "⇧⌘J / ⇧⌘K" : "Ctrl+Shift+J / Ctrl+Shift+K"} · J past newest mints one</dd></div>
-					<div><dt>New chat</dt><dd>{isMac ? "⌘N or ⇧⌘N" : "Ctrl+N or Ctrl+Shift+N"}</dd></div>
-					<div><dt>Voice readback on/off</dt><dd>Ctrl+{altm}+S</dd></div>
-					<div><dt>Thoughts show/hide</dt><dd>Ctrl+O</dd></div>
-					<div><dt>Pasted text expand/collapse</dt><dd>Ctrl+O in the prompt</dd></div>
-					<div><dt>Translate selection</dt><dd>{isMac ? "⌘T" : "Ctrl+T"} over message text · to English · feeds annotation</dd></div>
-					<div><dt>Browser side panel</dt><dd>{isMac ? "⌘T" : "Ctrl+T"} anywhere · address bar takes focus · Esc closes · one tab</dd></div>
-					<div><dt>Stop voice / close menus</dt><dd>Esc outside the prompt</dd></div>
-					<div><dt>Speak text aloud</dt><dd>Right click message or selection · again stops</dd></div>
-					<!-- ⌘D is meta-only (Ctrl+D skips in scroll mode), so Windows names Delete alone. -->
-					<div><dt>Delete a message</dt><dd>{isMac ? "Hover the message, then ⌘D or Delete" : "Hover the message, then Delete"}</dd></div>
-					<div><dt>Fold / unfold message</dt><dd>Hover the message, then F or {isMac ? "Option" : "Alt"}-click</dd></div>
-					<div><dt>Rerun a prompt</dt><dd>Rerun button · deletes everything after · Branch keeps it</dd></div>
-					<div><dt>Reply language</dt><dd>{isMac ? "⌘1…⌘0" : "Ctrl+1…Ctrl+0"} · repeat a key to clear</dd></div>
-					<div><dt>Delete this chat</dt><dd>{isMac ? "⇧⌘Delete" : "Ctrl+Shift+Delete"}</dd></div>
-					<div><dt>Delete every chat</dt><dd>{isMac ? "⌥⇧⌘Delete" : "Ctrl+Shift+Alt+Delete"}</dd></div>
-					<div><dt>Cut / delete hovered message</dt><dd>X cuts and copies · Delete deletes</dd></div>
-					<div><dt>Edit own message</dt><dd>Hover own message, then E</dd></div>
-					<div><dt>Text size up / down</dt><dd>{mod}+ / {mod}−</dd></div>
-					<div><dt>Chat width + / −</dt><dd>⇧{mod}+ / ⇧{mod}−</dd></div>
+					{#each filteredShortcuts(desktopShortcuts()) as row (row.name)}
+						<div><dt>{row.name}</dt><dd>{row.keys}</dd></div>
+					{:else}
+						<div class="keys-empty">No matches</div>
+					{/each}
 				</dl>
 				{/if}
 			</div>
@@ -7070,13 +8074,18 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		</div>
 	{/if}
 	{#if inspectChar && inspectData}
+		{@const strokeTotal = inspectStrokes?.length ?? inspectData.strokeCount ?? 0}
+		{@const strokeShown = Math.min(inspectStroke, Math.max(strokeTotal, 1))}
+		{@const onKunInspect = onKunLine(inspectData)}
+		{@const decompInspect = inspectChar ? decomposeTree(inspectChar) : null}
 		<!-- Character Inspect overlay: same modal-veil/modal pattern as
 		the shortcuts overlay. Component splits come from the vendored
 		cjk-decomp subset; count, radical, definition, and readings
 		(Mandarin, Japanese on/kun) from the generated Unihan bundle —
-		all offline, no hand-curated entries. The stroke preview is
-		schematic (stepped by stroke count) until per-character vector
-		data lands. The JP/中文 toggle flips the predicted reading
+		all offline, no hand-curated entries. Stroke vectors load on
+		demand from KanjiVG (CC BY-SA 3.0) and step manually — never
+		autoplay; the font glyph stands in while they load. The
+		JP/中文 toggle flips the predicted reading
 		locale (kana = Japanese, else Chinese) for genuinely ambiguous
 		Han text. -->
 		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
@@ -7107,7 +8116,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 							aria-label="Show Japanese reading"
 							title="Show Japanese reading"
 							onclick={() => (inspectLang = "ja")}
-						>JP</button>
+						>日本語</button>
 						<button
 							type="button"
 							aria-pressed={inspectLang === "zh"}
@@ -7118,7 +8127,48 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 					</div>
 				{/if}
 				<div class="inspect-body">
-					<div class="inspect-char" lang={HAN_OVERLAY_LANG_TAG[inspectLang]} aria-hidden="true">{inspectData.char}</div>
+					<div class="inspect-glyph">
+						{#if inspectStrokes && inspectStrokes.length > 0}
+							<!-- KanjiVG vectors (CC BY-SA 3.0): unstepped
+							strokes stay grey, stepped ones paint light. -->
+							<svg
+								viewBox="0 0 109 109"
+								class="inspect-svg"
+								role="img"
+								aria-label={`Stroke order for ${inspectChar}`}
+							>
+								{#each inspectStrokes as d, i}
+									<path d={d} class:painted={i < strokeShown} />
+								{/each}
+							</svg>
+						{:else}
+							<div class="inspect-char" lang={HAN_OVERLAY_LANG_TAG[inspectLang]} aria-hidden="true">
+								{inspectData.char}
+							</div>
+						{/if}
+						{#if inspectStrokes && inspectStrokes.length > 0}
+							<!-- Stepper waits for the vectors: the static
+							char shows first, and the arrows must not offer
+							steps through a drawing that isn't here yet. -->
+							<div class="inspect-stepper">
+								<button
+									type="button"
+									aria-label="Previous stroke (h)"
+									title="Previous stroke (h)"
+									disabled={inspectStroke <= 1}
+									onclick={() => stepInspect(-1)}>‹</button
+								>
+								<span class="inspect-count" aria-live="polite">{strokeShown} / {strokeTotal}</span>
+								<button
+									type="button"
+									aria-label="Next stroke (l)"
+									title="Next stroke (l)"
+									disabled={inspectStroke >= strokeTotal}
+									onclick={() => stepInspect(1)}>›</button
+								>
+							</div>
+						{/if}
+					</div>
 					<div class="inspect-facts">
 						{#if inspectData.components.length > 0}
 							<p><strong>Components:</strong> {inspectData.components.join(" + ")}</p>
@@ -7138,30 +8188,49 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 						{:else}
 							<p class="note">Unihan definition unavailable offline for this character.</p>
 						{/if}
-						{#if inspectData.mandarin !== null}
-							<p><strong>Mandarin:</strong> <span lang="zh-Latn-pinyin">{inspectData.mandarin}</span></p>
-						{/if}
-						{#if inspectData.japaneseOn !== null}
-							<p><strong>Japanese on:</strong> {inspectData.japaneseOn}</p>
-						{/if}
-						{#if inspectData.japaneseKun !== null}
-							<p><strong>Japanese kun:</strong> {inspectData.japaneseKun}</p>
+						{#if inspectLang === "zh"}
+							{#if inspectData.mandarin !== null}
+								<p><strong>Mandarin:</strong> <span lang="zh-Latn-pinyin">{inspectData.mandarin}</span></p>
+							{:else}
+								<p class="note">Mandarin reading unavailable offline for this character.</p>
+							{/if}
+						{:else}
+							{#if onKunInspect !== null}
+								<p class="inspect-onkun">{onKunInspect}</p>
+							{:else}
+								<p class="note">Japanese readings unavailable offline for this character.</p>
+							{/if}
 						{/if}
 					</div>
 				</div>
-				{#if inspectData.strokeCount !== null}
-					<div class="inspect-stroke" aria-label="Schematic stroke preview">
-						<div class="inspect-step" aria-live="polite">
-							Stroke {Math.min(inspectStroke, inspectData.strokeCount)} of {inspectData.strokeCount}
-						</div>
-						<div class="inspect-bar" aria-hidden="true">
-							<div
-								class="inspect-fill"
-								style="width: {(Math.min(inspectStroke, inspectData.strokeCount) / inspectData.strokeCount) * 100}%"
-							></div>
-						</div>
-						<p class="note">Schematic preview — full stroke-order animation needs vector path data (follow-up).</p>
+				{#if decompInspect && decompInspect.children.length > 0}
+					<div class="inspect-decomp" aria-label="Character decomposition">
+						<span class="inspect-decomp-char root">{decompInspect.char}</span>
+						<span class="inspect-decomp-arrow" aria-hidden="true">→</span>
+						{#each decompInspect.children as child, ci}
+							<span class="inspect-decomp-group">
+								<span class="inspect-decomp-char">{child.char}</span>
+								{#if child.children.length > 0}
+									<span class="inspect-decomp-sub">
+										<span class="inspect-decomp-arrow" aria-hidden="true">→</span>
+										{#each child.children as grand, gi}
+											<span class="inspect-decomp-char sub">{grand.char}</span>{#if gi < child.children.length - 1}<span
+													class="inspect-decomp-plus"
+													aria-hidden="true"
+													> + </span
+												>{/if}
+										{/each}
+									</span>
+								{/if}
+							</span>{#if ci < decompInspect.children.length - 1}<span
+									class="inspect-decomp-plus"
+									aria-hidden="true"
+									> + </span
+								>{/if}
+						{/each}
 					</div>
+				{:else}
+					<p class="note">No decomposition in the vendored subset for this character.</p>
 				{/if}
 			</div>
 		</div>
@@ -7269,7 +8338,10 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		color: #1c1c1e;
 		color: var(--ink);
 		background: #fff;
-		background: var(--bg);
+		/* Whole-app opacity rides --bg-alpha (fully opaque reads
+		exactly as before; lower values need a transparent window to
+		show the wallpaper through). */
+		background: color-mix(in srgb, var(--bg) calc(var(--bg-alpha, 1) * 100%), transparent);
 		color-scheme: light dark;
 		/* Phones never pan sideways: a horizontal drift is a gesture,
 		not a scroll (it used to open settings by accident). clip, not
@@ -7296,7 +8368,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		width: 13rem;
 		z-index: 55;
 		background: #fff;
-		background: var(--bg);
+		background: color-mix(in srgb, var(--bg) calc(var(--bg-alpha, 1) * 100%), transparent);
 		box-shadow: 8px 0 24px rgba(0, 0, 0, 0.12);
 		border-right: 1px solid #e5e5ea;
 		border-right-color: var(--line-soft);
@@ -7417,6 +8489,16 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		/* Same ButtonText trap as .sel-menu: pin the color explicitly. */
 		color: #1c1c1e;
 		color: var(--ink);
+		/* Uniform row labels: monospace keeps every chat's date/count
+		columns aligned no matter the title text. */
+		font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+		/* The overlaid icon boxes (delete 1.75rem at right 0, export
+		1.75rem at right 2.1rem) sit in this reserved padding, never on
+		the title text: the pill keeps its full-width click target while
+		the text truncates clear of both icons. */
+		padding-right: 4rem;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	aside button.active {
 		background: transparent;
@@ -7590,6 +8672,29 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			background-color 0.15s ease,
 			color 0.15s ease;
 	}
+	/* Shortcuts filter: sits between the heading and ×, same field
+	chrome as the search palette input. */
+	.shortcuts-filter {
+		flex: 1;
+		min-width: 0;
+		font: inherit;
+		font-size: 0.85rem;
+		padding: 0.3rem 0.6rem;
+		border: 1px solid #c7c7cc;
+		border: 1px solid var(--line);
+		border-radius: 8px;
+		background: #fff;
+		background: var(--field);
+		color: inherit;
+	}
+	.modal-head .shortcuts-filter + button {
+		margin-left: 0;
+	}
+	.keys-empty {
+		padding: 0.6rem 0;
+		color: var(--muted);
+		font-size: 0.8rem;
+	}
 	/* Search palette (search-mobile): pinned to the top so the phone
 	keyboard never covers the input; hits read as full-width rows. */
 	.search-palette {
@@ -7678,12 +8783,32 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		gap: 0.35rem;
 		margin: 0.2rem 0 0.1rem;
 	}
+	/* Every inspect button is a control: pointer on hover. */
+	.inspect-modal button {
+		cursor: pointer;
+	}
 	.inspect-lang button {
 		font-size: 0.8rem;
 		padding: 0.15rem 0.5rem;
+		border: 1px solid #c7c7cc;
+		border-color: var(--line);
+		border-radius: 8px;
+		background: none;
+		color: inherit;
 	}
+	.inspect-lang button:hover {
+		border-color: #1c1c1e;
+		border-color: var(--strong);
+	}
+	/* Active locale reads as filled, not just bold: bold alone never
+	scanned as selected. */
 	.inspect-lang button[aria-pressed="true"] {
 		font-weight: 700;
+		background: #1c1c1e;
+		background: var(--invert);
+		color: #fff;
+		color: var(--invert-ink);
+		border-color: transparent;
 	}
 	.inspect-body {
 		display: flex;
@@ -7707,27 +8832,95 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		color: var(--muted);
 		font-size: 0.85rem;
 	}
-	.inspect-step {
+	/* Glyph column: vector (or font) glyph up top, stepper beneath. */
+	.inspect-glyph {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.4rem;
+		min-width: 5.5rem;
+	}
+	.inspect-svg {
+		width: 5.5rem;
+		height: 5.5rem;
+	}
+	.inspect-svg path {
+		fill: none;
+		stroke: #8e8e93;
+		stroke-width: 3;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+	.inspect-svg path.painted {
+		stroke: #1c1c1e;
+	}
+	:global(html[data-theme="dark"]) .inspect-svg path {
+		stroke: #48484a;
+	}
+	:global(html[data-theme="dark"]) .inspect-svg path.painted {
+		stroke: #f2f2f7;
+	}
+	.inspect-stepper {
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+	}
+	.inspect-stepper button {
+		font-size: 1.1rem;
+		line-height: 1;
+		padding: 0.1rem 0.5rem;
+		border: 1px solid #c7c7cc;
+		border-color: var(--line);
+		border-radius: 8px;
+		background: none;
+		color: inherit;
+	}
+	.inspect-stepper button:not(:disabled):hover {
+		border-color: #1c1c1e;
+		border-color: var(--strong);
+	}
+	.inspect-stepper button:disabled {
+		opacity: 0.35;
+		cursor: default;
+	}
+	.inspect-count {
 		font-variant-numeric: tabular-nums;
-		margin-bottom: 0.3rem;
+		font-size: 0.85rem;
 	}
-	.inspect-bar {
-		height: 0.45rem;
-		border-radius: 999px;
-		background: #e5e5ea;
-		background: var(--line-soft);
-		overflow: hidden;
+	.inspect-onkun {
+		overflow-wrap: anywhere;
 	}
-	.inspect-fill {
-		height: 100%;
-		background: #1c1c1e;
-		background: var(--strong);
-		transition: width 0.5s ease;
+	/* Decomposition tree (mdbg-style, two levels): root → parts,
+	nested splits inline. */
+	.inspect-decomp {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 0.3rem;
+		margin-top: 0.5rem;
+		padding: 0.5rem 0.65rem;
+		border: 1px solid #e5e5ea;
+		border-color: var(--line-soft);
+		border-radius: 8px;
+		font-size: 1.15rem;
 	}
-	@media (prefers-reduced-motion: reduce) {
-		.inspect-fill {
-			transition: none;
-		}
+	.inspect-decomp-group {
+		display: inline-flex;
+		align-items: baseline;
+		gap: 0.3rem;
+		padding: 0.15rem 0.4rem;
+		border: 1px solid #e5e5ea;
+		border-color: var(--line-soft);
+		border-radius: 6px;
+	}
+	.inspect-decomp-char.sub {
+		font-size: 0.95rem;
+	}
+	.inspect-decomp-arrow,
+	.inspect-decomp-plus {
+		color: #6e6e73;
+		color: var(--muted);
+		font-size: 0.85rem;
 	}
 	.keys {
 		margin: 0;
@@ -7770,8 +8963,6 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		display: flex;
 		flex-direction: column;
 		min-width: 0;
-		/* Anchor for the idle prompt's out-of-flow hide (see
-		.prompt-idle): the hidden composer parks against the column. */
 		position: relative;
 	}
 	/* Slim title strip: an empty drag surface, no bar. Tall enough to
@@ -7790,6 +8981,21 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		user-select: none;
 		-webkit-user-select: none;
 		cursor: default;
+		/* Invisible gesture strip: no background, blur, or border, so
+		messages bleed edge to edge underneath it. It still overlays
+		the column (position + z-index) for its only two jobs —
+		mousedown window-drag and double-click zoom — which means the
+		top strip's pixels show text but don't take clicks. Companion
+		rules: .messages keeps zero top padding (full bleed) while
+		scroll-padding-top parks programmatic scrolls below the strip
+		so jumped-to targets stay clickable. */
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		z-index: 35;
+		background: transparent;
+		border-bottom: 0;
 	}
 	/* The title strip stays a drag surface everywhere except controls
 	(see dragWindow). */
@@ -7875,11 +9081,16 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		gap: 0.35rem;
 	}
 	.find-bar {
-		/* In-flow, never an overlay: a fixed bar here would sit over
-		the top messages and cut them off — only the window bounds
-		may clip text, so opening find pushes the column down. */
-		align-self: center;
-		margin: 0.35rem 1.2rem 0;
+		/* Floating overlay, never in-flow: opening find must not push
+		the column down. Upper half of the viewport (never dead
+		center), over the messages. High z-index so hits reach it,
+		not the text underneath. */
+		position: fixed;
+		top: 25%;
+		left: 50%;
+		transform: translate(-50%, -50%);
+		z-index: 60;
+		margin: 0;
 		display: flex;
 		align-items: center;
 		gap: 0.4rem;
@@ -8013,9 +9224,40 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		native traffic lights instead of riding above them. */
 		padding-top: 1.15rem;
 	}
+	/* The shell's strip is taller by that same padding: the first
+	message stands off the full height there. */
+	.app[data-shell="tauri"] article:first-of-type {
+		margin-top: calc(1.75rem + 1.15rem);
+	}
 	.app[data-shell="tauri"] .side-head {
 		margin-left: 5.75rem;
 		margin-top: 0.35rem;
+	}
+	/* Traffic-light hover fade: Tauri Overlay chrome paints the
+	native buttons above the webview (x:20-72, y:26), so CSS cannot
+	fade the buttons themselves. Instead this app-background patch
+	covers them at rest and fades out while the pointer is over the
+	title strip, fading back in on leave. pointer-events:none, so
+	the live buttons take clicks even while covered. macOS shell
+	only — Android and plain browsers have no lights to veil. */
+	.traffic-veil {
+		display: none;
+	}
+	.app[data-shell="tauri"]:not([data-android]) .traffic-veil {
+		display: block;
+		position: absolute;
+		left: 12px;
+		top: 17px;
+		width: 68px;
+		height: 20px;
+		border-radius: 10px;
+		background: color-mix(in srgb, var(--bg) calc(var(--bg-alpha, 1) * 100%), transparent);
+		opacity: 1;
+		transition: opacity 0.25s ease;
+		pointer-events: none;
+	}
+	.app[data-shell="tauri"]:not([data-android]) header:hover .traffic-veil {
+		opacity: 0;
 	}
 	/* Android is a Tauri shell with no traffic lights and no window
 	drag: drop the desktop clearance and the empty drag strip. */
@@ -8227,8 +9469,8 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		opacity: 0;
 		visibility: hidden;
 		transition:
-			opacity 0.18s ease,
-			visibility 0s linear 0.18s;
+			opacity 0.3s ease,
+			visibility 0s linear 0.3s;
 	}
 	.wp-wrap:hover .wp-menu,
 	.wp-menu:focus-within,
@@ -8237,7 +9479,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		opacity: 1;
 		visibility: visible;
 		transition:
-			opacity 0.18s ease,
+			opacity 0.3s ease,
 			visibility 0s;
 	}
 	.wp-menu button {
@@ -8272,9 +9514,18 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		every streamed chunk. Zero lets it scroll like it should. */
 		min-height: 0;
 		overflow-y: auto;
-		/* Jumped-to rows never park flush under the top edge (jumpTo,
-		double-tap): programmatic scrolls keep this breathing room. */
-		scroll-padding-top: 1rem;
+		/* Jumped-to rows never park under the invisible drag strip
+		(jumpTo, double-tap, scroll-into-view): its pixels show text
+		but don't take clicks, so programmatic scrolls clear the
+		strip's 1.75rem plus the old breathing room. */
+		scroll-padding-top: calc(1.75rem + 1rem);
+		/* Bottom clearance for the floating card is measured, not static
+		(see the ResizeObserver below): content padding physically keeps
+		the tail above the card in every scroll position (scroll-padding
+		only steers programmatic scrolls, and clicks still land under
+		the card). */
+	}
+	.messages {
 		/* Selection starts at message text only: dragging empty space
 		between messages is a plain pointer drag (arrow, no I-beam, no
 		stray selection). .rendered re-enables both; buttons keep
@@ -8291,8 +9542,11 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		/* Classic scrollbars never shove the column when they appear. */
 		scrollbar-gutter: stable;
 		transition: scrollbar-color 0.6s ease;
-		/* Tight top: the header already separates chrome from text. */
-		padding: 0.5rem 1.2rem 1rem;
+		/* Full bleed under the invisible drag strip: content starts at
+		the window's own top edge and stays visible behind the bar.
+		The strip's pixels don't take clicks, so scroll-padding-top
+		(not this padding) keeps jumped-to targets clickable. */
+		padding: 0 1.2rem 1rem;
 		display: flex;
 		flex-direction: column;
 		/* Pairs hug: a message sits close to its reply; the wider
@@ -8551,19 +9805,11 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		justify-content: center;
 		padding: 0.55rem 1.2rem 0.6rem;
 	}
-	/* Mac desktop only: nudge the language row down toward the
-	composer and fade it until hover — quiet chrome on an empty chat.
-	A pure visual shift (layout never moves, so nothing overlaps);
-	keyboard focus brings it back like hover. Touch layouts untouched. */
-	.app[data-mac] main.empty .lang-menus {
-		transform: translateY(0.35rem);
-		opacity: 0.55;
-		transition: opacity 0.18s ease;
-	}
-	.app[data-mac] main.empty .lang-menus:hover,
-	.app[data-mac] main.empty .lang-menus:focus-within {
-		opacity: 1;
-	}
+	/* No row-level fade here: hovering open space inside the row lit
+	every button at once and the opacity shimmer read as movement.
+	Each pill answers only for itself (border-color on
+	.lang-menu > button:hover below); the row stays put on all
+	platforms. Touch layouts untouched. */
 	.lang-menu {
 		position: relative;
 	}
@@ -8717,11 +9963,11 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		/* Shrink-wrap so short prompts don't stretch into empty space.
 		Beats the centered-column rule's width:100% on specificity;
 		margin-right docks the right edge to the assistant column
-		(centered min(85%, chat-width)), so own messages never drift
+		(centered min(100%, chat-width)), so own messages never drift
 		right past AI width on narrow windows. */
 		width: fit-content;
-		max-width: min(85%, calc(var(--chat-width, 36) * 1rem));
-		margin-right: max(0rem, calc((100% - min(85%, var(--chat-width, 36) * 1rem)) / 2));
+		max-width: min(100%, calc(var(--chat-width, 36) * 1rem));
+		margin-right: max(0rem, calc((100% - min(100%, var(--chat-width, 36) * 1rem)) / 2));
 		/* No background or padding here: the bubble wraps the text only,
 		so the action row below sits outside it. */
 		padding: 0;
@@ -8729,7 +9975,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	/* Own-message bubble: shrink-wraps the text (never the wider action
 	row underneath) and docks hard right, so the side padding matches on
 	both sides. Text stays left-aligned inside the right-docked bubble;
-	long text wraps at 85% instead of going full-bleed, so a wrapped
+	long text wraps at 90% instead of going full-bleed, so a wrapped
 	message keeps a visible left gutter and still reads as right-docked.
 	Slightly tighter on top, where the text sat low. */
 	article.user .bubble {
@@ -8746,8 +9992,8 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			calc(0.55rem * min(var(--font-scale, 1), 2));
 		text-align: left;
 		width: fit-content;
-		/* 100%, not 85%: the article already caps at min(85%, chat-width),
-		and 85% here resolves against the shrink-wrapped article itself —
+		/* 100%, not 90%: the article already caps at min(100%, chat-width),
+		and 90% here resolves against the shrink-wrapped article itself —
 		squeezing short prompts into an early wrap with dead space left. */
 		max-width: 100%;
 		margin-left: auto;
@@ -8758,6 +10004,50 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	article.user :global(.rendered table),
 	article.user :global(.ccez-code) {
 		text-align: left;
+	}
+	/* In-place own-message edit: same right-docked footprint as the
+	bubble, with a visible editing frame (the bubble shade would fight
+	the code colors). The bar holds the touch path — phones have no
+	Esc and no Enter-to-save. */
+	article.user .msg-edit {
+		background: var(--bg-raised);
+		border: 1px solid var(--line);
+		border-radius: 12px;
+		padding: 0.5rem 0.75rem 0.4rem;
+		width: fit-content;
+		max-width: 100%;
+		margin-left: auto;
+		text-align: left;
+	}
+	.msg-edit-box :global(.cm-editor) {
+		background: none;
+	}
+	.msg-edit-box :global(.cm-scroller) {
+		max-height: 16rem;
+	}
+	.msg-edit-bar {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding-top: 0.35rem;
+	}
+	.msg-edit-hint {
+		flex: 1;
+		font-size: 0.75rem;
+		color: var(--muted);
+	}
+	.msg-edit-btn {
+		font: inherit;
+		font-size: 0.8rem;
+		padding: 0.25rem 0.7rem;
+		border-radius: 999px;
+		border: 1px solid var(--line);
+		background: none;
+		color: var(--ink);
+		cursor: pointer;
+	}
+	.msg-edit-btn:hover {
+		border-color: var(--line-hover);
 	}
 	article.assistant {
 		align-self: center;
@@ -8775,8 +10065,8 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	main.plain-user article.user .bubble {
 		background: none;
 		/* No bottom pad: the action row below sits as close as the
-		assistant's (its margin is the whole gap). 100%, not 85%: the
-		article already caps at min(85%, chat-width), and 85% here
+		assistant's (its margin is the whole gap). 100%, not 90%: the
+		article already caps at min(100%, chat-width), and 90% here
 		resolves against the shrink-wrapped article itself — same early
 		wrap the shaded bubble's rule calls out. */
 		padding: 0.5rem 0 0;
@@ -8800,6 +10090,23 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		outline: 2px solid #3a3a3c;
 		outline-color: var(--focus);
 		outline-offset: 2px;
+	}
+	/* Hover-only button modes keep the actions row in the layout
+	(invisible via opacity), so the article ring would box the buttons'
+	empty floor too. The article ring goes quiet there and the text body
+	carries the selected indicator instead. */
+	main.hover-user article.user.selected,
+	main.hover-user article.user.selected:focus,
+	main.hover-assistant article.assistant.selected,
+	main.hover-assistant article.assistant.selected:focus {
+		outline-color: transparent;
+	}
+	main.hover-user article.user.selected .bubble,
+	main.hover-assistant article.assistant.selected :global(.rendered) {
+		outline: 2px solid #3a3a3c;
+		outline-color: var(--focus);
+		outline-offset: 6px;
+		border-radius: 8px;
 	}
 	/* Holding Option arms message click actions (fold/unfold): the
 	pointer says clickable where the I-beam says selectable. */
@@ -9063,7 +10370,10 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		font: inherit;
 		font-size: 0.82rem;
 		padding: 0.55rem 1rem;
-		border: 0;
+		/* Outlined: on the dark theme the fill sits almost on top of
+		the app background, so the ring does the noticing. */
+		border: 1px solid #8e8e93;
+		border-color: var(--line-hover);
 		border-radius: 999px;
 		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 		cursor: pointer;
@@ -10038,7 +11348,9 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		transform: rotate(-90deg);
 	}
 	.error {
-		font-size: 0.8rem;
+		/* Same size as the status line, so error text and its retry
+		button row read as one row. */
+		font-size: calc(0.85rem * var(--font-scale, 1));
 		color: #94250a;
 	}
 	.sending {
@@ -10092,35 +11404,33 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		display: none;
 	}
 	/* Idle-hide: with no input for the configured timeout the prompt
-	slides down until hidden, giving the chat the full column. Any
-	input restores it instantly (JS drops the class on the event,
-	so the return trip runs the same ramp in reverse). Visibility
+	settles down a touch and fades in place. The card floats above
+	the column in both states, so hiding and restoring never move
+	the messages and no position flip can flash or snap. Visibility
 	flips at the end of the ramp so the slide reads, then the box
 	stops taking pointer hits. */
 	.prompt.prompt-idle {
-		transform: translateY(calc(100% + 2rem));
+		transform: translateY(0.75rem);
 		opacity: 0;
 		visibility: hidden;
 		pointer-events: none;
-		/* Out of flow while hidden: the messages column grows into the
-		freed room, so the hide uncovers the tail instead of fading in
-		place (see the idle ticker's stick-scroll). Anchored where it
-		sat, so the slide still reads from the right spot. */
+	}
+	.prompt {
+		/* Floating card, always: same geometry hidden or shown, so the
+		messages run full-bleed underneath and text is cut only by the
+		window edges. */
 		position: absolute;
 		left: 1.2rem;
 		right: 1.2rem;
 		bottom: 1.1rem;
+		z-index: 30;
 		margin: 0;
-	}
-	.prompt {
-		position: relative;
-		margin: 0.6rem 1.2rem 1.1rem;
-		/* First-line reservation for the absolute tools cluster
-		(count badge + attach/shot/mic/voice): remeasured Sep 2026 —
-		the Shot text button (~2.7rem) never fit the old 4.6rem base,
-		so draft text slid under the cluster. Combos below only widen
-		it; .wp-jump adds via --tools-extra so every combo composes. */
-		--tools-pad: 6.8rem;
+		/* First-line reservation for the absolute tools cluster:
+		measured in-page (attach+voice ≈ 3.3rem, +mic ≈ 5.1rem), so
+		the base covers the mic-less row and the mic tier below covers
+		the rest, each with margin. Combos below only widen it;
+		.wp-jump adds via --tools-extra so every combo composes. */
+		--tools-pad: 4.2rem;
 		--tools-extra: 0rem;
 		border: 1px solid #c7c7cc;
 		border-color: var(--line);
@@ -10128,7 +11438,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		padding: 0 0.8rem 2.3rem;
 		background: #fff;
 		/* Raised, not flat: dark keeps the #1c1c1e card on the #17171a page. */
-		background: var(--bg-raised);
+		background: color-mix(in srgb, var(--bg-raised) calc(var(--bg-alpha, 1) * 100%), transparent);
 		/* Fixed floor so mounting the editor never shifts layout.
 		CodeMirror itself sets no minimum — this floor is ours, at
 		about three text lines plus the tools row. */
@@ -10313,24 +11623,25 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		caret-color: #1c1c1e;
 		caret-color: var(--ink);
 	}
-	/* Emptied composer: no stray caret. Clearing the draft (paste
-	then delete-all, or a send) leaves focus in place, and both the
-	native caret and CodeMirror's drawn cursor would keep blinking
-	in the empty box — hide both until text returns (data-empty rides
-	hasText, which onDocChange maintains on every edit). */
-	.prompt[data-empty="true"] :global(.cm-content) {
+	/* Emptied composer: no stray caret while UNFOCUSED. Clearing the
+	draft (paste then delete-all, or a send) leaves focus in place —
+	but a focused empty box keeps its blink: the cursor is the only
+	focus signal, and hiding it strands the caret invisibly.
+	(data-empty rides hasText, which onDocChange maintains; .cm-focused
+	is CodeMirror's own focus mark, so no JS watches this.) */
+	.prompt[data-empty="true"] :global(.cm-editor:not(.cm-focused)) :global(.cm-content) {
 		caret-color: transparent;
 	}
-	.prompt[data-empty="true"] :global(.cm-cursor) {
+	.prompt[data-empty="true"] :global(.cm-editor:not(.cm-focused)) :global(.cm-cursor) {
 		display: none;
 	}
-	.prompt[data-empty="true"] :global(.ta-input) {
+	.prompt[data-empty="true"] :global(.ta-input:not(:focus)) {
 		caret-color: transparent;
 	}
 	/* The mic icon widens the tools cluster: hold the first line clear
 	of it, but only while it is actually mounted. */
 	.prompt.has-mic :global(.cm-content) {
-		--tools-pad: 8.6rem;
+		--tools-pad: 5.8rem;
 	}
 	/* Annotation count badge joins the tools cluster: hold the first
 	line clear of the wider row while any annotations exist. */
@@ -10338,18 +11649,18 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		--tools-pad: 9.5rem;
 	}
 	.prompt.has-mic.has-anns :global(.cm-content) {
-		--tools-pad: 11.5rem;
+		--tools-pad: 8.5rem;
 	}
 	/* Declarative mirrors of the has-mic/has-anns classes above: same
 	seats, no JS. The classes stay as fallback. */
 	.prompt:has(.mic-btn) :global(.cm-content) {
-		--tools-pad: 8.6rem;
+		--tools-pad: 5.8rem;
 	}
 	.prompt:has(.ann-wrap) :global(.cm-content) {
 		--tools-pad: 9.5rem;
 	}
 	.prompt:has(.mic-btn):has(.ann-wrap) :global(.cm-content) {
-		--tools-pad: 11.5rem;
+		--tools-pad: 8.5rem;
 	}
 	/* Jump trigger joins the cluster in long threads: reserve its seat
 	on top of whichever combo is live (var composition, not ×4 rules). */
@@ -10448,23 +11759,6 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	:global(html[data-theme="dark"]) :global(.cm-paste-marker) {
 		color: #98989f !important;
 	}
-	:global(html[data-theme="dark"]) :global(.cm-fence-bar) {
-		background: #2c2c2e !important;
-		border-color: #48484a !important;
-		color: #f2f2f7 !important;
-	}
-	:global(html[data-theme="dark"]) :global(.cm-fence-lang) {
-		color: #98989f !important;
-	}
-	:global(html[data-theme="dark"]) :global(.cm-fence-end) {
-		border-bottom-color: #48484a !important;
-	}
-	:global(html[data-theme="dark"]) :global(.cm-fence-collapsed) {
-		color: #98989f !important;
-	}
-	:global(html[data-theme="dark"]) :global(.cm-fence-btn.copied) {
-		color: #7bd3a6 !important;
-	}
 	/* Centered reading column on wide screens (DeepSeek-web rhythm).
 	The cap rides --chat-width off .app (desktop slider, 36 = the default
 	fixed width); the fallback keeps phones and older saves identical. */
@@ -10473,17 +11767,28 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	.sending {
 		align-self: center;
 		width: 100%;
-		max-width: min(85%, calc(var(--chat-width, 36) * 1rem));
+		max-width: min(100%, calc(var(--chat-width, 36) * 1rem));
 		box-sizing: border-box;
+	}
+	/* Only the very first message stands off the top: one strip-height
+	of margin clears the invisible drag strip at scroll zero, so the
+	first line is clickable as well as visible. Everything after it
+	bleeds edge to edge (see .messages padding). */
+	article:first-of-type {
+		margin-top: 1.75rem;
 	}
 	.prompt {
 		/* Pinned to the default width: the composer never grows with the
-		chat slider, but still shrinks on narrow columns. */
-		width: calc(100% - 2.4rem);
+		chat slider, but still shrinks on narrow columns. --sbw (set from
+		JS: messages' scrollbar gutter, 0 with overlay bars) keeps the
+		card centered on the article column instead of the full width,
+		so text never sticks out on the right side only. */
+		width: calc(100% - 2.4rem - var(--sbw, 0px));
 		max-width: min(calc(var(--chat-width, 36) * 1rem), 36rem);
 		margin-left: auto;
 		margin-right: auto;
 		box-sizing: border-box;
+		right: calc(1.2rem + var(--sbw, 0px));
 	}
 	.lang-menus,
 	.attachments,
