@@ -88,6 +88,7 @@
 		messageEdgeScrollTop,
 		resolveSidebarSpaceEnter,
 		scrollHoldVelocity,
+		spaceFocusesEmptyPrompt,
 		stepScrollTop,
 		unselectedScrollIntent
 	} from "$lib/scrollkeys";
@@ -4200,11 +4201,21 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			let frames = 0;
 			const land = (): void => {
 				const active = document.activeElement as HTMLElement | null;
-				if (active && active !== document.body) return;
+				// A closing sidebar's row is not a settled home: entering
+				// from the list focuses the composer only after the
+				// collapse drops that row, so keep retrying through it.
+				const settled =
+					active && active !== document.body && !(settings.sidebarCollapsed && active.closest("aside"));
+				if (settled) return;
 				const node = document.querySelector(".prompt .cm-content") as HTMLElement | null;
 				if (node && getComputedStyle(node).visibility !== "hidden") {
 					editor?.focus();
-					return;
+					// A parked-composer focus no-ops silently: only stop
+					// when the caret actually landed.
+					const landed = (document.activeElement as HTMLElement | null)?.closest(
+						".prompt .cm-content"
+					);
+					if (landed) return;
 				}
 				if (++frames < 60) requestAnimationFrame(land);
 			};
@@ -6052,6 +6063,29 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 				const typing =
 					inEditor || target?.closest("input, textarea, select, [contenteditable]") || inSidebar;
 				if (!modalOpen && !typing && !event.metaKey && !event.ctrlKey && !event.altKey) {
+					// Empty chat: bare Space has no scroll target, so it
+					// lands in the composer instead of scrolling nowhere
+					// (fields and buttons keep their native Space).
+					if (
+						!findOpen &&
+						spaceFocusesEmptyPrompt({
+							key: event.key,
+							shiftKey: event.shiftKey,
+							metaKey: event.metaKey,
+							ctrlKey: event.ctrlKey,
+							altKey: event.altKey,
+							messageCount: viewChat.messages.length,
+							inInteractive:
+								(event.target as HTMLElement | null)?.closest(
+									"input, textarea, select, [contenteditable], button, a"
+								) !== null
+						})
+					) {
+						event.preventDefault();
+						lastGAt = 0;
+						enterEditMode();
+						return;
+					}
 					const intent = unselectedScrollIntent(event.key, ggArmed(lastGAt, Date.now()));
 					if (intent) {
 						if (intent.kind === "gg-prefix") {

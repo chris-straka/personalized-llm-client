@@ -76,6 +76,32 @@ export function resolveSidebarSpaceEnter(sideIdx: number, chatCount: number): Si
 	return { kind: "enter", index: Math.min(Math.max(sideIdx, 0), chatCount - 1) };
 }
 
+/**
+ * Bare Space on an empty chat focuses the composer: with no messages
+ * there is nothing to scroll, so the key lands in the prompt instead
+ * of scrolling nowhere. Never fires with a modifier, inside a field
+ * or button (Space types and clicks there), or on a chat with history.
+ */
+export function spaceFocusesEmptyPrompt(args: {
+	key: string;
+	shiftKey: boolean;
+	metaKey: boolean;
+	ctrlKey: boolean;
+	altKey: boolean;
+	messageCount: number;
+	inInteractive: boolean;
+}): boolean {
+	return (
+		args.key === " " &&
+		!args.shiftKey &&
+		!args.metaKey &&
+		!args.ctrlKey &&
+		!args.altKey &&
+		args.messageCount === 0 &&
+		!args.inInteractive
+	);
+}
+
 /** d/u fast scroll distance: half the visible chat height. */
 export function halfPageDy(viewH: number, dir: 1 | -1): number {
 	return dir * Math.max(1, Math.floor(viewH / 2));

@@ -194,11 +194,54 @@ test("space on an empty chat focuses the prompt", async ({ page }) => {
 	await page.goto("/");
 	await expect(page.locator("article .rendered").first()).toBeVisible({ timeout: 60_000 });
 	await openSidebar(page);
-	// Focus the current row, step down to the empty chat, enter it.
-	await page.keyboard.press("Control+Shift+H");
+	// Opening lands keyboard focus on the current row (Ctrl+Shift+H
+	// would just toggle the list shut again). Step down to the empty
+	// chat, enter it.
+	await expect
+		.poll(
+			() =>
+				page.evaluate(
+					() => !!(document.activeElement as HTMLElement | null)?.closest("aside ul li button.side-chat")
+				),
+			{ timeout: 10_000 }
+		)
+		.toBe(true);
 	await page.keyboard.press("j");
 	await page.keyboard.press("Space");
 	await expect(chatsAside(page)).toHaveClass(/collapsed/);
+	await expect
+		.poll(
+			() =>
+				page.evaluate(
+					() => !!(document.activeElement as HTMLElement | null)?.closest(".prompt .cm-content")
+				),
+			{ timeout: 10_000 }
+		)
+		.toBe(true);
+});
+
+/** Bare Space on an empty chat lands in the composer: with no messages
+there is nothing to scroll, so the key focuses the prompt instead. */
+test("space on an empty chat with focus outside focuses the prompt", async ({ page }) => {
+	await page.addInitScript(() => {
+		window.localStorage.setItem("ccez-mock-provider", "1");
+		window.localStorage.setItem("ccez-studio-settings-v1", JSON.stringify({}));
+		window.localStorage.setItem(
+			"ccez-studio-chats-v1",
+			JSON.stringify([{ id: "chat-empty", createdAt: 1, replyLang: null, messages: [] }])
+		);
+	});
+	await page.goto("/");
+	await expect(page.locator(".prompt .cm-content").first()).toBeVisible({ timeout: 60_000 });
+	// Leave the composer: the empty chat has nowhere to scroll.
+	await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.());
+	await expect
+		.poll(
+			() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.tagName ?? "NONE"),
+			{ timeout: 10_000 }
+		)
+		.toBe("BODY");
+	await page.keyboard.press("Space");
 	await expect
 		.poll(
 			() =>

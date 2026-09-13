@@ -15,6 +15,7 @@ import {
 	messageEdgeScrollTop,
 	resolveSidebarSpaceEnter,
 	scrollHoldVelocity,
+	spaceFocusesEmptyPrompt,
 	stepScrollTop,
 	unselectedScrollIntent
 } from "./scrollkeys";
@@ -91,6 +92,29 @@ describe("resolveSidebarSpaceEnter", () => {
 		expect(resolveSidebarSpaceEnter(0, 3)).toEqual({ kind: "enter", index: 0 });
 		expect(resolveSidebarSpaceEnter(2, 3)).toEqual({ kind: "enter", index: 2 });
 		expect(resolveSidebarSpaceEnter(9, 3)).toEqual({ kind: "enter", index: 2 });
+	});
+});
+
+describe("spaceFocusesEmptyPrompt", () => {
+	const bare = {
+		key: " ",
+		shiftKey: false,
+		metaKey: false,
+		ctrlKey: false,
+		altKey: false,
+		messageCount: 0,
+		inInteractive: false
+	};
+	it("lands bare Space in the composer on an empty chat", () => {
+		expect(spaceFocusesEmptyPrompt(bare)).toBe(true);
+	});
+
+	it("stays native with history, modifiers, or an interactive target", () => {
+		expect(spaceFocusesEmptyPrompt({ ...bare, messageCount: 1 })).toBe(false);
+		expect(spaceFocusesEmptyPrompt({ ...bare, shiftKey: true })).toBe(false);
+		expect(spaceFocusesEmptyPrompt({ ...bare, ctrlKey: true })).toBe(false);
+		expect(spaceFocusesEmptyPrompt({ ...bare, inInteractive: true })).toBe(false);
+		expect(spaceFocusesEmptyPrompt({ ...bare, key: "Enter" })).toBe(false);
 	});
 });
 
