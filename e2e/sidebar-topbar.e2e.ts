@@ -124,9 +124,10 @@ test("double-tap on sidebar chrome closes it, on buttons does not", async ({ pag
 	await expect(chatsAside(page)).toHaveClass(/collapsed/);
 });
 
-/** The find bar floats centered instead of pushing content down,
-while the first message still bleeds to the window's top edge.
-Pressing elsewhere dismisses it without summoning the prompt. */
+/** The find bar floats near the top (25%, never dead center)
+instead of pushing content down, while the first message still
+bleeds to the window's top edge. Pressing elsewhere dismisses it
+without summoning the prompt. */
 test("open find floats centered, outside press dismisses", async ({ page }) => {
 	await page.keyboard.press("Control+f");
 	const bar = page.locator(".find-bar");
@@ -150,7 +151,7 @@ test("open find floats centered, outside press dismisses", async ({ page }) => {
 	expect(geom).not.toBeNull();
 	expect(geom!.barPos).toBe("fixed");
 	expect(Math.abs(geom!.barCX - geom!.winW / 2)).toBeLessThan(4);
-	expect(Math.abs(geom!.barCY - geom!.winH / 2)).toBeLessThan(4);
+	expect(Math.abs(geom!.barCY - geom!.winH / 4)).toBeLessThan(4);
 	expect(geom!.artTop).toBeLessThan(geom!.winH / 2);
 	const prompt = page.locator(".prompt");
 	const promptBefore = await prompt.getAttribute("class");
