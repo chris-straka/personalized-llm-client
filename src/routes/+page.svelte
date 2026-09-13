@@ -6580,23 +6580,31 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		}
 		/**
 		 * Japanese side of the overlay: furigana for just the highlight,
-		 * converted on demand (worker). Stale right-clicks never land —
-		 * a moved-on highlight drops the result instead of showing it.
+		 * converted on demand (worker). The panel lands at once with a
+		 * pending mark — the dictionary load behind a cold worker takes
+		 * seconds, and a silent wait reads as a dead click (the second
+		 * right-click only "worked" because the first fetch had landed
+		 * by then). Stale right-clicks never fill it: a moved-on
+		 * highlight drops the result instead of showing it.
 		 */
 		async function showSelectionFurigana(quoted: {
 			quote: string;
 			messageId: ChatMsgId;
 		}): Promise<void> {
+			placeSelPinyin(quoted, "…");
 			let html = "";
 			try {
 				html = await furiganaHtml(quoted.quote, "furigana");
 			} catch {
-				return;
+				html = "";
 			}
-			const readings = readingsOnly(html, "", ".frt");
-			if (!readings) return;
 			const now = currentQuote();
 			if (!now || now.messageId !== quoted.messageId || now.quote !== quoted.quote) return;
+			const readings = readingsOnly(html, "", ".frt");
+			if (!readings) {
+				if (selPinyin?.quote === quoted.quote) selPinyin = null;
+				return;
+			}
 			placeSelPinyin(quoted, readings);
 		}
 		// Desktop right-click reads aloud (the selection, else the word

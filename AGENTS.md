@@ -97,8 +97,8 @@ privileged (Keychain, updater, native TTS).
 - Agent-captured verification screenshots go in `.screenshots/` (gitignored),
   never the repo root.
 - UI copy: plain prose, no emojis. Enter sends, Shift+Enter newline.
-- Spec history: `README.md` (what), `PLAN.md` (full plan), `TODO.md` (checklist;
-  check boxes as stages land, don't delete history).
+- Spec history: `README.md` (what), `PLAN.md` (full plan), `TODO.md` (open
+  work only — finished stages move to `DONE.md`, never deleted).
 
 ## Environment (user's machine)
 

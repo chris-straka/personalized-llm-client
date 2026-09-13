@@ -199,9 +199,10 @@ test("right-clicking kanji in japanese shows furigana and speaks", async ({ page
 	expect(selected).toBe("漢字");
 	await clickOnText(page);
 	const panel = page.locator(".sel-pinyin");
-	// Conversion runs in the dictionary worker: slower than pinyin.
-	await expect(panel).toBeVisible({ timeout: 60_000 });
-	await expect(panel).toContainText("かんじ", { timeout: 10_000 });
+	// Conversion runs in the dictionary worker: the pending mark
+	// lands at once, readings follow when the load finishes.
+	await expect(panel).toBeVisible({ timeout: 10_000 });
+	await expect(panel).toContainText("かんじ", { timeout: 60_000 });
 	await expect(panel).not.toContainText("漢字");
 	await expect.poll(() => spoken(page), { timeout: 10_000 }).toContain("漢字");
 });
