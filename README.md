@@ -15,9 +15,11 @@ chats stay local.
 - **Language-learner aids.** Auto-detected Chinese pinyin, Japanese
   furigana, and Arabic tashkeel (⇧⌘A toggles, hover peeks); highlight
   anything to annotate it, and the note folds into the next query.
+  Right-clicking a highlight reads it aloud with a readings popup.
 - **Speech throughout.** Voice readback with word tracking, per-sentence
   voice matching (Latin reads Italian, Sanskrit Hindi until dedicated
-  voices exist), word-level reads, dictation, and macOS system voices
+  voices exist; highlights keep one voice across sentence fragments),
+  word-level reads, dictation, and macOS system voices
   with downloadable-voice inventory.
 - **Touch UI (Android).** Bottom-sheet chat list, edge swipes, two-finger
   swipe to step chats, long-press selection with an Annotate menu under
@@ -32,7 +34,7 @@ chats stay local.
   streaming replaces message objects instead of mutating them.
 - Every Tauri call degrades cleanly across three runtimes: Tauri shell,
   plain browser, jsdom tests.
-- 345 colocated Vitest unit tests plus a Playwright e2e suite
+- 767 colocated Vitest unit tests plus a Playwright e2e suite
   (seeded, desktop + mobile viewports); `svelte-check` strict and
   type-aware lint gate the tree.
 
