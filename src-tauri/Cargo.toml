@@ -1,6 +1,6 @@
 [package]
 name = "ccez-studio"
-version = "0.4.2"
+version = "0.4.3"
 description = "Ccez Studio — macOS desktop chatbot"
 authors = ["ccez"]
 edition = "2021"
