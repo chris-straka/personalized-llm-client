@@ -67,6 +67,15 @@ test("clicking off dismisses the panel with the highlight live", async ({ page }
 	await clickOnText(page);
 	const panel = page.locator(".sel-pinyin");
 	await expect(panel).toBeVisible({ timeout: 10_000 });
+	// The panel docks at the highlight's start, not left of it.
+	const box = await panel.boundingBox();
+	const selLeft = await page.evaluate(() => {
+		const selection = window.getSelection();
+		if (!selection || selection.rangeCount === 0) return -1;
+		return selection.getRangeAt(0).getBoundingClientRect().left;
+	});
+	expect(box).not.toBeNull();
+	expect(Math.abs((box?.x ?? -999) - selLeft)).toBeLessThan(8);
 	await page.mouse.click(5, 5);
 	await expect(panel).toHaveCount(0);
 });
@@ -78,6 +87,56 @@ test("clearing the highlight dismisses the panel", async ({ page }) => {
 	await expect(panel).toBeVisible({ timeout: 10_000 });
 	await page.evaluate(() => window.getSelection()?.removeAllRanges());
 	await expect(panel).toHaveCount(0);
+});
+
+test("a highlight ending mid-sentence keeps one voice", async ({ page }) => {
+	// Recording utterance locales, not text: a selection ending in
+	// a kana-less fragment ("ます。自然") must not flip to Chinese
+	// at the boundary.
+	await page.addInitScript(() => {
+		const synth = window.speechSynthesis;
+		if (synth) {
+			synth.speak = ((utterance: SpeechSynthesisUtterance) => {
+				const langs = ((window as unknown as { __langs?: string[] }).__langs ??= []);
+				langs.push(`${utterance.lang}::${utterance.text}`);
+			}) as typeof synth.speak;
+		}
+	});
+	await seedChat(page, [{ role: "assistant", content: "昨日は雨が降ります。自然が多かったです。" }]);
+	await page.goto("/");
+	await expect(page.locator("article.assistant .rendered p").first()).toBeVisible({
+		timeout: 60_000
+	});
+	const selected = await page.evaluate(() => {
+		const p = document.querySelector("article.assistant .rendered p");
+		const text = p?.firstChild;
+		if (!text?.textContent) return "";
+		const at = text.textContent.indexOf("ます");
+		window.getSelection()?.setBaseAndExtent(text, at, text, at + 5);
+		return window.getSelection()?.toString() ?? "";
+	});
+	expect(selected).toBe("ます。自然");
+	// Click inside the highlight: a right mousedown outside it moves
+	// the caret and collapses it (native), landing on the word path.
+	const at = await page.evaluate(() => {
+		const selection = window.getSelection();
+		if (!selection || selection.rangeCount === 0) return null;
+		const rect = selection.getRangeAt(0).getBoundingClientRect();
+		return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+	});
+	if (!at) throw new Error("no selection rect");
+	await page.mouse.click(at.x, at.y, { button: "right" });
+	// Two segments ("ます。" + the kana-less fragment "自然"): both
+	// must read Japanese — no flip to Chinese at the boundary.
+	await expect
+		.poll(
+			() =>
+				page.evaluate(
+					() => (window as unknown as { __langs?: string[] }).__langs ?? []
+				),
+			{ timeout: 10_000 }
+		)
+		.toEqual(["ja-JP::ます。", "ja-JP::自然"]);
 });
 
 test("right-clicking hanzi with no highlight still speaks", async ({ page }) => {

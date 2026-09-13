@@ -4,6 +4,7 @@ import {
 	splitSentences,
 	speechText,
 	replyLangFor,
+	sentenceSpeechLang,
 	webVoiceAvailable,
 	effectiveSpeechLang,
 	splitSpeechSegments,
@@ -47,6 +48,25 @@ describe("speechText", () => {
 	it("names pasted content instead of reading markers", () => {
 		expect(speechText("[paste 250 chars]")).toBe("pasted content");
 		expect(speechText("[Pasted content 250 chars]")).toBe("pasted content");
+	});
+});
+
+describe("sentenceSpeechLang", () => {
+	it("lets kana and other scripts decide for themselves", () => {
+		expect(sentenceSpeechLang("漢字を読む", "zh-CN")).toBe("ja-JP");
+		expect(sentenceSpeechLang("自然が好き", "zh-CN")).toBe("ja-JP");
+		expect(sentenceSpeechLang("Bonjour", "ja-JP")).toBe("ja-JP");
+	});
+
+	it("keeps complete han-only sentences chinese", () => {
+		expect(sentenceSpeechLang("我是学生。", "ja-JP")).toBe("zh-CN");
+		expect(sentenceSpeechLang("你好世界！", "ja-JP")).toBe("zh-CN");
+	});
+
+	it("hands mid-highlight fragments back to the surrounding voice", () => {
+		expect(sentenceSpeechLang("自", "ja-JP")).toBe("ja-JP");
+		expect(sentenceSpeechLang("自然", "ja-JP")).toBe("ja-JP");
+		expect(sentenceSpeechLang("自", "zh-CN")).toBe("zh-CN");
 	});
 });
 

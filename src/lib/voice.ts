@@ -88,6 +88,22 @@ export interface SpeechSegment {
 }
 
 /**
+ * Voice locale for one sentence inside a larger utterance: kana (and
+ * other unambiguous scripts) decide for themselves, Latin falls back
+ * to the surrounding voice, and Han-only sentences keep Chinese when
+ * complete — but a highlight can end mid-sentence, and that trailing
+ * fragment has no kana left to identify it. Fragments (no closing
+ * punctuation) inherit the surrounding voice instead of flipping to
+ * Chinese at the boundary.
+ */
+export function sentenceSpeechLang(sentence: string, fallbackLang: string): string {
+	const direct = ttsLangFor(sentence, "");
+	if (direct !== "" && direct !== "zh-CN") return direct;
+	if (direct === "") return fallbackLang;
+	return /[.!?…。！？；"»”’」』）)\]]$/.test(sentence.trim()) ? direct : fallbackLang;
+}
+
+/**
  * Split text into per-sentence voice runs: every sentence resolves its
  * own locale (non-Latin scripts by Unicode, Latin by the shared
  * `langForSentence` fallback), so a Japanese+Chinese+English reply reads

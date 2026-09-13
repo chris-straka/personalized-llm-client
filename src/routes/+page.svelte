@@ -188,7 +188,6 @@
 		MODEL_AID_FOR_SCRIPT,
 		extractWordAt,
 		hanOverlayLangFor,
-		ttsLangFor,
 		isHanOverlayLangUncertain,
 		HAN_OVERLAY_LANG_TAG,
 		runModelAid,
@@ -225,6 +224,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		speakMultilingual,
 		speechText,
 		replyLangFor,
+		sentenceSpeechLang,
 		webVoiceAvailable,
 		effectiveSpeechLang,
 		stopSpeaking,
@@ -3500,7 +3500,9 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			if (hit !== undefined) return hit;
 			// Stand-ins resolve per sentence too: a Latin sentence with
 			// no Latin voice reads Italian rather than failing.
-			const lang = effectiveSpeechLang(ttsLangFor(sentence, "") || latinLang, webVoices());
+			// Han-only fragments inherit the surrounding voice (see
+			// sentenceSpeechLang) instead of flipping to Chinese.
+			const lang = effectiveSpeechLang(sentenceSpeechLang(sentence, latinLang), webVoices());
 			cache.set(sentence, lang);
 			return lang;
 		};
@@ -6526,16 +6528,13 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			return ch !== "" && isHanChar(ch);
 		}
 		/** Dock the selection-pinyin overlay below the highlight,
-		near the click, clamped to the viewport. */
-		function placeSelPinyin(
-			quoted: { quote: string; messageId: ChatMsgId },
-			html: string,
-			clientX: number
-		): void {
+		aligned to its start so single characters keep it at the
+		word, clamped to the viewport. */
+		function placeSelPinyin(quoted: { quote: string; messageId: ChatMsgId }, html: string): void {
 			const live = window.getSelection();
 			const rect = live?.rangeCount ? live.getRangeAt(0).getBoundingClientRect() : null;
 			if (!rect) return;
-			const x = Math.min(Math.max(8, clientX - 40), window.innerWidth - 208);
+			const x = Math.min(Math.max(8, rect.left), window.innerWidth - 208);
 			let y = rect.bottom + 8;
 			if (y + 64 > window.innerHeight) y = Math.max(8, rect.top - 64);
 			selPinyin = { x, y, quote: quoted.quote, messageId: quoted.messageId, html };
@@ -6545,10 +6544,10 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		 * converted on demand (worker). Stale right-clicks never land —
 		 * a moved-on highlight drops the result instead of showing it.
 		 */
-		async function showSelectionFurigana(
-			quoted: { quote: string; messageId: ChatMsgId },
-			clientX: number
-		): Promise<void> {
+		async function showSelectionFurigana(quoted: {
+			quote: string;
+			messageId: ChatMsgId;
+		}): Promise<void> {
 			let html = "";
 			try {
 				html = await furiganaHtml(quoted.quote, "furigana");
@@ -6558,7 +6557,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			if (!html.includes("frt")) return;
 			const now = currentQuote();
 			if (!now || now.messageId !== quoted.messageId || now.quote !== quoted.quote) return;
-			placeSelPinyin(quoted, html, clientX);
+			placeSelPinyin(quoted, html);
 		}
 		// Desktop right-click reads aloud (the selection, else the word
 		// under the cursor, else the whole message; a playing message
@@ -6633,9 +6632,9 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 						offeredLocalAids(quoted.quote).includes("pinyin")
 					) {
 						const html = pinyinRuby(quoted.quote);
-						if (html.includes("<rt>")) placeSelPinyin(quoted, html, event.clientX);
+						if (html.includes("<rt>")) placeSelPinyin(quoted, html);
 					} else if (hanOverlayLangFor(probe) === "ja") {
-						void showSelectionFurigana(quoted, event.clientX);
+						void showSelectionFurigana(quoted);
 					}
 				}
 				void speakQuote(quoted.quote, quoted.messageId, false, quoted.context);
@@ -10720,7 +10719,10 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		margin: 0;
 	}
 	/* Furigana spans reuse the message geometry (overlay, never
-	layout) at the panel's own size. */
+	layout) at the panel's own size — but with no leftward pull:
+	measured in-browser at 13–41px bases, the panel's natural offset
+	is zero (unlike message text), so any pull overshoots left at
+	every size. Zero needs no font-size scaling by construction. */
 	.sel-pinyin :global(.frb) {
 		position: relative;
 		white-space: nowrap;
@@ -10730,7 +10732,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		bottom: 100%;
 		left: 50%;
 		transform: translateX(-50%);
-		margin-left: -0.8em;
+		margin-left: 0;
 		white-space: nowrap;
 		font-size: 0.62em;
 		line-height: 1.2;
