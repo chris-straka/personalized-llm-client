@@ -609,12 +609,14 @@
 		margin-left: -9px;
 	}
 	/* Same pull on macOS desktop: its kana also renders in Hiragino
-	with the same left bearing (Range-ink measurement: readings sit
-	~5px right of their kanji; eyeballed one further pixel left, so
-	-10px centers them like iOS). data-mac is also set on iPads in
-	desktop mode — iOS keeps its own line above. */
+	with the same left bearing. Calibrated in-browser at 16–48px
+	base: the natural offset is exactly 0.5x the base size right,
+	so the pull rides `em` (.frt is 0.62em: -0.8em ≈ -0.5x base) and
+	stays centered at any font scale — a fixed px value undershoots
+	huge type and overshoots small type. data-mac is also set on
+	iPads in desktop mode — iOS keeps its own line above. */
 	:global(.app[data-mac]:not([data-ios])) .rendered :global(.frt) {
-		margin-left: -10px;
+		margin-left: -0.8em;
 	}
 	@keyframes frt-in {
 		from {

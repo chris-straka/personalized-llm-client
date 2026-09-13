@@ -473,6 +473,11 @@ hides it, closing brings it back. */
 test("prompt hides while settings are open", async ({ page }) => {
 	const long = "lorem ipsum dolor sit amet consectetur adipiscing elit ".repeat(40);
 	await seedChat(page, [{ role: "assistant", content: `answer ${long}` }]);
+	// Timed idle: the always-hide default boots parked, which would
+	// fail the visible setup below (parking is what this tests).
+	await page.addInitScript(() => {
+		window.localStorage.setItem("ccez-studio-settings-v1", JSON.stringify({ promptIdleSec: 10 }));
+	});
 	await page.goto("/");
 	await expect(page.locator("article.assistant").first()).toBeVisible({ timeout: 60_000 });
 	const prompt = page.locator(".prompt");
@@ -488,6 +493,11 @@ test("prompt hides while settings are open", async ({ page }) => {
 test("prompt hides while the chats sidebar is open", async ({ page }) => {
 	const long = "lorem ipsum dolor sit amet consectetur adipiscing elit ".repeat(40);
 	await seedChat(page, [{ role: "assistant", content: `answer ${long}` }]);
+	// Timed idle: the always-hide default boots parked, which would
+	// fail the visible setup below (parking is what this tests).
+	await page.addInitScript(() => {
+		window.localStorage.setItem("ccez-studio-settings-v1", JSON.stringify({ promptIdleSec: 10 }));
+	});
 	await page.goto("/");
 	await expect(page.locator("article.assistant").first()).toBeVisible({ timeout: 60_000 });
 	const prompt = page.locator(".prompt");

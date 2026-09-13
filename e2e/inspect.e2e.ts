@@ -226,6 +226,27 @@ test("stepper arrows and h/l step manually, never autoplay", async ({ page }) =>
 	await expect(count).toHaveText("1 / 14");
 });
 
+test("holding an arrow repeats strokes, taps still single-step", async ({ page }) => {
+	await seedWithInspect(page, true, "語");
+	await selectWord(page);
+	await page.locator('.sel-menu button:has-text("Inspect")').click();
+	const modal = page.locator(".inspect-modal");
+	await expect(modal).toBeVisible();
+	const count = modal.locator(".inspect-count");
+	await expect(modal.locator(".inspect-svg")).toBeVisible({ timeout: 60_000 });
+	await expect(count).toHaveText("1 / 14");
+	const next = modal.locator('button[aria-label="Next stroke (l)"]');
+	await next.hover();
+	await page.mouse.down();
+	// Beat 280ms plus ~85ms ticks: well past several strokes.
+	await page.waitForTimeout(700);
+	await page.mouse.up();
+	const stepped = await count.textContent();
+	const at = Number(stepped?.split("/")[0]?.trim() ?? "1");
+	expect(at).toBeGreaterThanOrEqual(3);
+	expect(at).toBeLessThanOrEqual(14);
+});
+
 test("readings render as one comma-joined on/kun line", async ({ page }) => {
 	await seedWithInspect(page, true, "語");
 	await selectWord(page);
@@ -237,5 +258,7 @@ test("readings render as one comma-joined on/kun line", async ({ page }) => {
 	await expect(line).toBeVisible();
 	await expect(line).toContainText("On/Kun:");
 	await expect(line).not.toContainText("On:");
-	await expect(line).not.toContainText("Kun:");
+	// "Kun:" alone can't be asserted — it sits inside "On/Kun:".
+	// The single-line shape below proves there is no second row.
+	await expect(line).toHaveText(/^On\/Kun: .+ \| .+$/);
 });

@@ -143,9 +143,11 @@
 		decomposeTree,
 		getInspectData,
 		inspectLangFor,
+		isHanChar,
 		onKunLine,
 		shouldShowInspect
 	} from "$lib/inspect";
+	import { pinyinRuby } from "$lib/pinyin";
 	import { fetchStrokePaths } from "$lib/kanjivg";
 	import {
 		clampSideviewWidth,
@@ -587,6 +589,20 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		range: Range | null;
 	} | null>(null);
 	/**
+	 * Selection pinyin overlay: right-clicking a Han character with a
+	 * live highlight shows pinyin for just the highlighted text (never
+	 * pinned, never per-message). Read-only and pointer-transparent,
+	 * so it can't disturb the highlight — and the highlight clearing
+	 * dismisses it at once via selectionchange below.
+	 */
+	let selPinyin = $state<{
+		x: number;
+		y: number;
+		quote: string;
+		messageId: ChatMsgId;
+		html: string;
+	} | null>(null);
+	/**
 	 * An unanswered selection menu never lingers (clicking away still
 	 * dismisses instantly). Desktop gives a 6s idle window, and any
 	 * pointer activity inside it re-arms: an aimer steering toward
@@ -975,6 +991,44 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		const top = Math.max(total, 1);
 		inspectStroke = Math.min(Math.max(inspectStroke + delta, 1), top);
 	}
+	/**
+	 * Hold-to-repeat on the stepper arrows: a tap steps once via
+	 * click, holding past the beat keeps stepping every tick (brisk:
+	 * strokes are many, taps are for singles). The release click
+	 * after a hold is swallowed so it never double-steps; a close
+	 * mid-hold stops the chain.
+	 */
+	let strokeHoldTimer: ReturnType<typeof setTimeout> | null = null;
+	let strokeHeld = false;
+	const STROKE_HOLD_BEAT_MS = 280;
+	const STROKE_HOLD_TICK_MS = 85;
+	function startStrokeHold(delta: 1 | -1): void {
+		strokeHeld = false;
+		stopStrokeHold();
+		const tick = (): void => {
+			if (!inspectChar || !inspectStrokes?.length) {
+				strokeHoldTimer = null;
+				return;
+			}
+			strokeHeld = true;
+			stepInspect(delta);
+			strokeHoldTimer = setTimeout(tick, STROKE_HOLD_TICK_MS);
+		};
+		strokeHoldTimer = setTimeout(tick, STROKE_HOLD_BEAT_MS);
+	}
+	function stopStrokeHold(): void {
+		if (strokeHoldTimer) {
+			clearTimeout(strokeHoldTimer);
+			strokeHoldTimer = null;
+		}
+	}
+	function strokeStep(delta: 1 | -1): void {
+		if (strokeHeld) {
+			strokeHeld = false;
+			return;
+		}
+		stepInspect(delta);
+	}
 	/** Open the Inspect overlay for the live selection (single Han char only). */
 	function openInspect(): void {
 		if (!selMenu) return;
@@ -1353,6 +1407,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	 * (instant cut elsewhere) — identical end state either way. */
 	function transitionToChat(id: Parameters<typeof selectChat>[1]): void {
 		const from = chatState.activeChatId;
+		selPinyin = null;
 		void switchChatWithTransition(() => {
 			// Draft annotations belong to one chat: file the leaving
 			// chat's away, then restore the entering chat's. Doing both
@@ -2210,6 +2265,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	function doNewChat(): void {
 		previewChatId = null;
 		stopVoice();
+		selPinyin = null;
 		// File the leaving chat's drafts away before resetDraftExtras
 		// empties them — otherwise the autosave effect files the empty
 		// list under the old chat's id and return-restore comes back
@@ -5519,6 +5575,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 				event.stopPropagation();
 				editor?.blur();
 				selMenu = null;
+				selPinyin = null;
 				translate = null;
 				openLangMenu = null;
 				return;
@@ -5530,6 +5587,7 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 				event.preventDefault();
 				event.stopPropagation();
 				selMenu = null;
+				selPinyin = null;
 				inspectChar = null;
 				translate = null;
 				openLangMenu = null;
@@ -6316,6 +6374,14 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 				return;
 			}
 			clampOffChatDrag();
+			// The pinyin overlay belongs to one highlight: a changed or
+			// cleared selection dismisses it (mid-drag leaves it until
+			// release, like the menu's own paths).
+			if (selPinyin) {
+				const now = currentQuote();
+				if (!now || now.messageId !== selPinyin.messageId || now.quote !== selPinyin.quote)
+					selPinyin = null;
+			}
 		};
 		const clampOffChatDrag = (): void => {
 			if (!offChatDragArmed) return;
@@ -6430,6 +6496,43 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 			if (!node || node.nodeType !== Node.TEXT_NODE || !body.contains(node)) return "";
 			return extractWordAt(node.textContent ?? "", range?.startOffset ?? 0);
 		}
+		/** True when the right-click point lands on a Han character
+		inside the message body (same hit test as the word reader). */
+		function hanCharUnderCursor(event: MouseEvent, body: Element): boolean {
+			let range: Range | null = null;
+			try {
+				if (typeof document.caretRangeFromPoint === "function") {
+					range = document.caretRangeFromPoint(event.clientX, event.clientY);
+				}
+			} catch {
+				range = null;
+			}
+			const node = range?.startContainer;
+			if (!node || !body.contains(node)) return false;
+			let ch = "";
+			if (node.nodeType === Node.TEXT_NODE) {
+				ch = (node.textContent ?? "")[range?.startOffset ?? 0] ?? "";
+			} else {
+				const kid = node.childNodes[range?.startOffset ?? 0];
+				ch = kid?.textContent?.[0] ?? "";
+			}
+			return ch !== "" && isHanChar(ch);
+		}
+		/** Dock the selection-pinyin overlay below the highlight,
+		near the click, clamped to the viewport. */
+		function placeSelPinyin(
+			quoted: { quote: string; messageId: ChatMsgId },
+			html: string,
+			clientX: number
+		): void {
+			const live = window.getSelection();
+			const rect = live?.rangeCount ? live.getRangeAt(0).getBoundingClientRect() : null;
+			if (!rect) return;
+			const x = Math.min(Math.max(8, clientX - 40), window.innerWidth - 208);
+			let y = rect.bottom + 8;
+			if (y + 64 > window.innerHeight) y = Math.max(8, rect.top - 64);
+			selPinyin = { x, y, quote: quoted.quote, messageId: quoted.messageId, html };
+		}
 		// Desktop right-click reads aloud (the selection, else the word
 		// under the cursor, else the whole message; a playing message
 		// stops) AND opens the native menu: no preventDefault here, so
@@ -6486,12 +6589,25 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 				}
 				return false;
 			};
-			// Highlighted text wins: a right-click with a live message
-			// selection reads the whole selection (same per-quote language
-			// as the sel-menu button).
+			// Highlighted text wins: a right-click on a Han character
+			// shows pinyin for just the highlight (same offers as the
+			// A key — Japanese quotes keep speaking instead of reading
+			// Chinese). Any other right-click with a live message
+			// selection reads the whole selection (same per-quote
+			// language as the sel-menu button).
 			const quoted = currentQuote();
 			if (quoted) {
 				if (stopIfPlaying(quoted.messageId)) return;
+				if (
+					hanCharUnderCursor(event, body) &&
+					offeredLocalAids(quoted.quote).includes("pinyin")
+				) {
+					const html = pinyinRuby(quoted.quote);
+					if (html.includes("<rt>")) {
+						placeSelPinyin(quoted, html, event.clientX);
+						return;
+					}
+				}
 				void speakQuote(quoted.quote, quoted.messageId, false, quoted.context);
 				return;
 			}
@@ -7848,6 +7964,18 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 		</div>
 	{/if}
 
+	{#if selPinyin && !previewing}
+		<!-- Selection pinyin: readings for just the highlight, docked
+		below it. Pointer-transparent so it never disturbs the
+		selection or blocks the native menu; the highlight clearing
+		dismisses it (see trimMessageDrag). -->
+		<div
+			class="sel-pinyin"
+			style="left: {selPinyin.x}px; top: {selPinyin.y}px"
+			aria-live="polite"
+		>{@html selPinyin.html}</div>
+	{/if}
+
 	{#if annPop}
 		<!-- Mousedown on the buttons keeps textarea focus: without it the
 		blur-save fires first and Cancel/Delete can never win the race. -->
@@ -8190,7 +8318,11 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 									aria-label="Previous stroke (h)"
 									title="Previous stroke (h)"
 									disabled={inspectStroke <= 1}
-									onclick={() => stepInspect(-1)}>‹</button
+									onpointerdown={() => startStrokeHold(-1)}
+									onpointerup={stopStrokeHold}
+									onpointerleave={stopStrokeHold}
+									onpointercancel={stopStrokeHold}
+									onclick={() => strokeStep(-1)}>‹</button
 								>
 								<span class="inspect-count" aria-live="polite">{strokeShown} / {strokeTotal}</span>
 								<button
@@ -8198,7 +8330,11 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 									aria-label="Next stroke (l)"
 									title="Next stroke (l)"
 									disabled={inspectStroke >= strokeTotal}
-									onclick={() => stepInspect(1)}>›</button
+									onpointerdown={() => startStrokeHold(1)}
+									onpointerup={stopStrokeHold}
+									onpointerleave={stopStrokeHold}
+									onpointercancel={stopStrokeHold}
+									onclick={() => strokeStep(1)}>›</button
 								>
 							</div>
 						{/if}
@@ -10521,6 +10657,34 @@ import { contentFitsViewport, isPromptIdle } from "$lib/chrome";
 	}
 	.sel-menu button:active {
 		opacity: 0.55;
+	}
+	/* Selection pinyin: readings for just the highlight. Same glass
+	as the selection menu, but pointer-transparent (read-only — it
+	must never disturb the highlight or block the native menu) and
+	docked below the highlight while the menu takes above. */
+	.sel-pinyin {
+		position: fixed;
+		z-index: 50;
+		pointer-events: none;
+		max-width: 20rem;
+		padding: 0.3rem 0.55rem;
+		border-radius: 8px;
+		font-size: 0.85rem;
+		background: rgba(255, 255, 255, 0.88);
+		-webkit-backdrop-filter: blur(18px) saturate(1.6);
+		backdrop-filter: blur(18px) saturate(1.6);
+		box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+		color: #1c1c1e;
+		color: var(--ink);
+	}
+	:global(html[data-theme="dark"]) .sel-pinyin {
+		background: rgba(30, 30, 32, 0.88);
+	}
+	/* :global — readings arrive via {@html}, invisible to the compiler. */
+	.sel-pinyin :global(rt) {
+		font-size: 0.72em;
+		color: #6e6e73;
+		color: var(--muted);
 	}
 	/* Cursor-anchored annotation pill (ChatGPT-style): a rounded bar that
 	starts as a single-line prompt and grows as you type. Enter saves,
